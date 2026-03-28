@@ -1,0 +1,41 @@
+services:
+  api:
+    build:
+      context: ../../apps/api
+      dockerfile: ../../infra/docker/api.Dockerfile
+    environment:
+      API_PORT: ${API_PORT:-8000}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/proxmox_backup_orchestrator}
+      NTFY_BASE_URL: ${NTFY_BASE_URL:-https://ntfy.sh}
+      NTFY_TOPIC: ${NTFY_TOPIC:-proxmox-backup-orchestrator}
+      PVE_API_URL: ${PVE_API_URL:-https://proxmox.example.local:8006/api2/json}
+      PBS_API_URL: ${PBS_API_URL:-https://pbs.example.local:8007/api2/json}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      - db
+
+  web:
+    build:
+      context: ../../apps/web
+      dockerfile: ../../infra/docker/web.Dockerfile
+    environment:
+      WEB_PORT: ${WEB_PORT:-5173}
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    depends_on:
+      - api
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-proxmox_backup_orchestrator}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

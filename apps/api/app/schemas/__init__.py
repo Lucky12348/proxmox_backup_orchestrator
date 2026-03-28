@@ -1,0 +1,1 @@
+"""Application schemas placeholder package."""
