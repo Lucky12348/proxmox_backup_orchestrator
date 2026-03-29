@@ -3,14 +3,23 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 
+def normalize_database_url(database_url: str) -> str:
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    return database_url
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = "Proxmox Backup Orchestrator API"
     app_env: str = os.getenv("APP_ENV", "development")
     api_port: int = int(os.getenv("API_PORT", "8000"))
-    database_url: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql://postgres:postgres@db:5432/proxmox_backup_orchestrator",
+    database_url: str = normalize_database_url(
+        os.getenv(
+            "DATABASE_URL",
+            "postgresql+psycopg://postgres:postgres@db:5432/proxmox_backup_orchestrator",
+        )
     )
     frontend_origin: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
     frontend_origin_alt: str = os.getenv("FRONTEND_ORIGIN_ALT", "http://127.0.0.1:5173")

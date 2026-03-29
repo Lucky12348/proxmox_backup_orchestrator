@@ -15,6 +15,9 @@
 5. Open the web dashboard and API docs in the browser
 6. Install local app dependencies only if you want to run API or web outside Docker
 
+Use `postgresql+psycopg://...` for `DATABASE_URL`. The backend also rewrites plain
+`postgresql://...` URLs to psycopg3 automatically for local compatibility.
+
 For POSIX shells, a matching helper is available at `infra/scripts/bootstrap.sh`.
 
 ## Local URLs
