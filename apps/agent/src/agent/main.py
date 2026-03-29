@@ -85,9 +85,9 @@ def discover_real_disks() -> list[dict[str, Any]]:
         if not serial_number:
             continue
 
-        exclusion_reason = exclusion_reason(device, udev_props)
-        if exclusion_reason is not None:
-            logger.debug("Skipping %s: %s", device_name(device), exclusion_reason)
+        reason = get_exclusion_reason(device, udev_props)
+        if reason is not None:
+            logger.debug("Skipping %s: %s", device_name(device), reason)
             continue
 
         candidate_type, detection_reason = classify_candidate(device, udev_props)
@@ -112,7 +112,7 @@ def is_candidate_disk(device: dict[str, Any]) -> bool:
     return not any(name.startswith(prefix) for prefix in EXCLUDED_DEVICE_PREFIXES)
 
 
-def exclusion_reason(device: dict[str, Any], udev_props: dict[str, str]) -> str | None:
+def get_exclusion_reason(device: dict[str, Any], udev_props: dict[str, str]) -> str | None:
     partitions = flatten_partitions(device.get("children", []))
     filesystem_markers = {
         part.get("fstype")
