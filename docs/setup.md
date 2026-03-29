@@ -49,6 +49,7 @@ For the local host-agent scaffold, these variables are useful when running `apps
 - `AGENT_HOSTNAME`
 - `AGENT_VERSION`
 - `AGENT_TIMEOUT_SECONDS`
+- `AGENT_INCLUDE_NON_USB_CANDIDATES`
 - `AGENT_STALE_AFTER_MINUTES`
 
 For POSIX shells, a matching helper is available at `infra/scripts/bootstrap.sh`.
@@ -135,14 +136,21 @@ python -m agent.main report-mock-disks
 
 Run the agent on the Proxmox host itself so `lsblk -J` reflects the real attached storage.
 
-The current real disk report uses pragmatic backup-candidate heuristics:
+The current real disk report now defaults to strict external-only detection:
 
 - only `TYPE=disk`
 - excludes `loop`, `dm-*`, `zd*`, and `sr*`
 - excludes disks backing `/` or `/boot/efi`
 - excludes obvious system storage members such as `LVM2_member` and `zfs_member`
-- still allows clearly external USB disks
-- also allows standalone SATA/ATA disks when they are not obviously part of the Proxmox system or storage stack
+- reports only disks that are clearly external or removable
+- examples include `TRAN=usb`, `RM=1`, `HOTPLUG=1`, `ID_BUS=usb`, or USB-related udev properties
+- internal SATA or ATA disks are excluded by default, even if they look unused
+
+If you explicitly want the older advanced behavior, set:
+
+- `AGENT_INCLUDE_NON_USB_CANDIDATES=true`
+
+That advanced mode may include standalone non-system physical disks again, but the safe default is `false`.
 
 Once a real disk report has been sent, the dashboard prefers agent-reported disks over seeded demo disks.
 

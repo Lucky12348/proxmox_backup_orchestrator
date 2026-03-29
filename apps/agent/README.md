@@ -20,6 +20,7 @@ This phase does not implement hotplug watching yet. It provides:
 - `AGENT_HOSTNAME`
 - `AGENT_VERSION`
 - `AGENT_TIMEOUT_SECONDS`
+- `AGENT_INCLUDE_NON_USB_CANDIDATES`
 
 ## Run locally
 
@@ -54,7 +55,14 @@ Current filtering is intentionally pragmatic:
 - only `TYPE=disk`
 - exclude `loop`, `dm-*`, `zd*`, and `sr*`
 - exclude disks backing the host system and obvious Proxmox storage members
-- allow clearly external USB disks
-- also allow standalone physical disks with a usable serial number
+- report only disks that are clearly external or removable by default
+- examples include `TRAN=usb`, `RM=1`, `HOTPLUG=1`, `ID_BUS=usb`, and USB-related udev properties
+- exclude internal SATA or ATA disks by default, even if they look unused
+
+If you really need the older advanced behavior, set:
+
+- `AGENT_INCLUDE_NON_USB_CANDIDATES=true`
+
+That allows standalone non-system physical disks again, but the default remains strict and safe.
 
 If a filesystem or mount point exists on a partition, the agent derives it from child partitions instead of requiring it on the parent disk node.

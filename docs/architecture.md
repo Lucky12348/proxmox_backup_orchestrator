@@ -103,13 +103,16 @@ In this phase, the agent contract is intentionally small:
 - backup-candidate disk report ingestion based on host inspection
 - periodic `sync-state` execution combining heartbeat and disk report
 
-Some valid backup disks may appear as SATA or ATA devices rather than USB on the Proxmox host.
-Because of that, the agent now uses a backup-candidate model instead of a USB-only model:
+By default, the agent now follows a strict external-only policy:
 
 - exclude obvious virtual devices
 - exclude disks backing the host system and main storage stack where possible
-- allow standalone physical disks with a usable serial number
-- let the operator mark candidate disks as trusted in the UI
+- report only disks that are clearly external or removable
+- internal SATA or ATA disks are excluded by default, even if they look unused
+
+An explicit advanced mode is available through `AGENT_INCLUDE_NON_USB_CANDIDATES=true`
+for environments that truly need standalone non-USB candidates, but the default remains
+strict because false-positive internal disks are dangerous in a backup workflow.
 
 Real hotplug detection and orchestration are intentionally deferred.
 

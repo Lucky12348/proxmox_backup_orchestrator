@@ -24,12 +24,23 @@ SYSTEM_MOUNTPOINTS = {"/", "/boot", "/boot/efi"}
 SYSTEM_FS_MARKERS = {"LVM2_member", "zfs_member"}
 
 
+def parse_bool(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class AgentSettings:
     api_base_url: str = os.getenv("AGENT_API_BASE_URL", "http://localhost:8000/api/v1")
     hostname: str = os.getenv("AGENT_HOSTNAME", socket.gethostname())
     agent_version: str = os.getenv("AGENT_VERSION", "0.1.0")
     timeout_seconds: float = float(os.getenv("AGENT_TIMEOUT_SECONDS", "10"))
+    include_non_usb_candidates: bool = parse_bool(
+        os.getenv("AGENT_INCLUDE_NON_USB_CANDIDATES"),
+        default=False,
+    )
 
 
 def post_heartbeat(settings: AgentSettings) -> None:
@@ -43,7 +54,7 @@ def post_heartbeat(settings: AgentSettings) -> None:
 
 
 def post_real_disk_report(settings: AgentSettings) -> None:
-    disks = discover_real_disks()
+    disks = discover_real_disks(settings)
     payload = {
         "hostname": settings.hostname,
         "observed_at": current_timestamp(),
@@ -107,7 +118,7 @@ def run_external_export(target_path: str, datastore_name: str) -> None:
     )
 
 
-def discover_real_disks() -> list[dict[str, Any]]:
+def discover_real_disks(settings: AgentSettings) -> list[dict[str, Any]]:
     lsblk_output = run_command(
         [
             "lsblk",
@@ -135,7 +146,12 @@ def discover_real_disks() -> list[dict[str, Any]]:
             logger.debug("Skipping %s: %s", device_name(device), reason)
             continue
 
-        candidate_type, detection_reason = classify_candidate(device, udev_props)
+        candidate = classify_candidate(device, udev_props, settings)
+        if candidate is None:
+            logger.debug("Skipping %s: not clearly external/removable", device_name(device))
+            continue
+
+        candidate_type, detection_reason = candidate
         disk_report = build_disk_report(
             device=device,
             udev_props=udev_props,
@@ -146,7 +162,7 @@ def discover_real_disks() -> list[dict[str, Any]]:
         if disk_report:
             discovered.append(disk_report)
 
-    return discovered
+    return deduplicate_disk_reports(discovered)
 
 
 def is_candidate_disk(device: dict[str, Any]) -> bool:
@@ -189,26 +205,59 @@ def get_exclusion_reason(device: dict[str, Any], udev_props: dict[str, str]) -> 
     return None
 
 
-def classify_candidate(device: dict[str, Any], udev_props: dict[str, str]) -> tuple[str, str]:
+def classify_candidate(
+    device: dict[str, Any],
+    udev_props: dict[str, str],
+    settings: AgentSettings,
+) -> tuple[str, str] | None:
     transport = (device.get("tran") or "").lower()
     removable = str(device.get("rm", "0")) == "1"
     hotplug = str(device.get("hotplug", "0")) == "1"
     udev_bus = udev_props.get("ID_BUS", "").lower()
     devpath = udev_props.get("DEVPATH", "").lower()
-
-    if any(
+    usb_indicators = any(
         [
             transport == "usb",
-            removable,
-            hotplug,
             udev_bus == "usb",
             "usb" in devpath,
             "ID_USB_DRIVER" in udev_props,
+            "ID_USB_MODEL" in udev_props,
         ]
-    ):
-        return ("usb", "reported as removable or USB-connected candidate")
+    )
 
-    return ("standalone", "standalone non-system physical disk candidate")
+    if usb_indicators:
+        return ("usb", "usb-connected disk")
+
+    if removable or hotplug:
+        return ("removable", "removable disk")
+
+    if settings.include_non_usb_candidates:
+        return ("standalone", "standalone non-system disk (advanced mode)")
+
+    return None
+
+
+def deduplicate_disk_reports(disks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduplicated: dict[str, dict[str, Any]] = {}
+    for disk in disks:
+        key = str(disk.get("serial_number") or disk.get("display_name"))
+        existing = deduplicated.get(key)
+        if existing is None or disk_priority(disk) > disk_priority(existing):
+            deduplicated[key] = disk
+
+    return list(deduplicated.values())
+
+
+def disk_priority(disk: dict[str, Any]) -> int:
+    candidate_type = str(disk.get("candidate_type") or "unknown")
+    type_priority = {
+        "usb": 4,
+        "removable": 3,
+        "standalone": 2,
+        "unknown": 1,
+    }.get(candidate_type, 0)
+    mount_bonus = 1 if disk.get("mount_path") else 0
+    return type_priority * 10 + mount_bonus
 
 
 def build_disk_report(
