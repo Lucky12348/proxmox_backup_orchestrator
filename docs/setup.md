@@ -10,9 +10,12 @@
 
 1. Copy `.env.example` to `.env`
 2. Review and adjust environment variables
-3. Install API dependencies in `apps/api`
-4. Install web dependencies in `apps/web`
-5. Install agent dependencies in `apps/agent`
+3. Run `make bootstrap` to verify the local URLs and environment file
+4. Install API dependencies in `apps/api`
+5. Install web dependencies in `apps/web`
+6. Install agent dependencies in `apps/agent`
+
+For POSIX shells, a matching helper is available at `infra/scripts/bootstrap.sh`.
 
 ## Example Commands
 
@@ -48,5 +51,6 @@ python -m agent.main
 
 ```bash
 cp .env.example .env
+make bootstrap
 docker compose -f infra/docker/docker-compose.yml up --build
 ```

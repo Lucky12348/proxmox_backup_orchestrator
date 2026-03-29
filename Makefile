@@ -1,4 +1,7 @@
-.PHONY: install dev lint test up down
+.PHONY: bootstrap install dev lint test up down
+
+bootstrap:
+	powershell -NoProfile -ExecutionPolicy Bypass -File infra/scripts/bootstrap.ps1
 
 install:
 	@echo "Install dependencies for each app (placeholder)"

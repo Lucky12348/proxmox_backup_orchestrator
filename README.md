@@ -6,17 +6,17 @@ Production-oriented monorepo scaffold for a personal Proxmox / Proxmox Backup Se
 
 ```text
 proxmox_backup_orchestrator/
-├── apps/
-│   ├── agent/    # Host-side Python agent placeholder
-│   ├── api/      # FastAPI backend
-│   └── web/      # React + Vite frontend
-├── docs/         # Architecture and setup documentation
-├── infra/
-│   ├── docker/   # Docker Compose and container files
-│   └── scripts/  # Helper scripts
-└── packages/
-    ├── types/    # Shared schemas / contracts
-    └── utils/    # Shared utilities
+|- apps/
+|  |- agent/    # Host-side Python agent placeholder
+|  |- api/      # FastAPI backend
+|  `- web/      # React + Vite frontend
+|- docs/        # Architecture and setup documentation
+|- infra/
+|  |- docker/   # Docker Compose and container files
+|  `- scripts/  # Helper scripts
+`- packages/
+   |- types/    # Shared schemas / contracts
+   `- utils/    # Shared utilities
 ```
 
 ## Purpose
@@ -32,8 +32,8 @@ This repository is intended to orchestrate backups around a small Proxmox enviro
 
 ## Quick Start
 
-1. Copy `.env.example` to `.env` and adjust values.
+1. Copy `.env.example` to `.env` and adjust values, or run `make bootstrap`.
 2. Start local services with `make up`.
 3. Run development commands from each app directory as needed.
 
-See [docs/setup.md](/c:/Users/lucky_FAST/Desktop/projet_dev/server_perso/proxmox_backup_orchestrator/docs/setup.md) for details.
+See [docs/setup.md](docs/setup.md) for details.
