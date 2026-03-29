@@ -3,6 +3,13 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 
+def parse_bool(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def normalize_database_url(database_url: str) -> str:
     if database_url.startswith("postgresql://"):
         return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
@@ -29,6 +36,10 @@ class Settings:
         "PVE_API_URL",
         "https://proxmox.example.local:8006/api2/json",
     )
+    pve_api_token_id: str = os.getenv("PVE_API_TOKEN_ID", "")
+    pve_api_token_secret: str = os.getenv("PVE_API_TOKEN_SECRET", "")
+    pve_verify_ssl: bool = parse_bool(os.getenv("PVE_VERIFY_SSL"), default=False)
+    pve_node_name: str = os.getenv("PVE_NODE_NAME", "proxmox")
     pbs_api_url: str = os.getenv(
         "PBS_API_URL",
         "https://pbs.example.local:8007/api2/json",

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
 from app.models import BackupRun, ExternalDisk, VirtualMachine
@@ -17,12 +17,24 @@ class OverviewMetrics:
 
 
 def get_overview_metrics(db: Session) -> OverviewMetrics:
-    total_vms = db.scalar(select(func.count(VirtualMachine.id))) or 0
+    use_proxmox_inventory = bool(
+        db.scalar(select(exists().where(VirtualMachine.source == "proxmox")))
+    )
+
+    vm_scope = []
+    if use_proxmox_inventory:
+        vm_scope.append(VirtualMachine.source == "proxmox")
+
+    total_vms = db.scalar(select(func.count(VirtualMachine.id)).where(*vm_scope)) or 0
     enabled_vms = db.scalar(
-        select(func.count(VirtualMachine.id)).where(VirtualMachine.enabled.is_(True))
+        select(func.count(VirtualMachine.id)).where(
+            *vm_scope,
+            VirtualMachine.enabled.is_(True),
+        )
     ) or 0
     protected_vms = db.scalar(
         select(func.count(VirtualMachine.id)).where(
+            *vm_scope,
             VirtualMachine.enabled.is_(True),
             VirtualMachine.last_backup_at.is_not(None),
         )

@@ -18,6 +18,14 @@
 Use `postgresql+psycopg://...` for `DATABASE_URL`. The backend also rewrites plain
 `postgresql://...` URLs to psycopg3 automatically for local compatibility.
 
+For read-only Proxmox inventory sync, configure these variables in `.env`:
+
+- `PVE_API_URL`
+- `PVE_API_TOKEN_ID`
+- `PVE_API_TOKEN_SECRET`
+- `PVE_VERIFY_SSL`
+- `PVE_NODE_NAME`
+
 For POSIX shells, a matching helper is available at `infra/scripts/bootstrap.sh`.
 
 ## Local URLs
@@ -26,6 +34,7 @@ For POSIX shells, a matching helper is available at `infra/scripts/bootstrap.sh`
 - API docs: `http://localhost:8000/docs`
 - API health: `http://localhost:8000/health`
 - API overview: `http://localhost:8000/api/v1/overview`
+- Proxmox status: `http://localhost:8000/api/v1/integrations/proxmox/status`
 
 ## Seed Data
 
@@ -39,6 +48,22 @@ The seeded data currently includes:
 - 2 backup run history entries
 
 The seed routine is idempotent for an empty database and will not duplicate rows on restart.
+
+## Proxmox API Token
+
+The current integration is read-only and syncs inventory from one Proxmox node on demand.
+
+Create an API token in Proxmox VE:
+
+1. Open `Datacenter -> Permissions -> API Tokens`
+2. Create a token for a user such as `root@pam`
+3. Grant the token read access to VM and container inventory on the target node
+4. Copy the token identifier into `PVE_API_TOKEN_ID`
+5. Copy the generated secret into `PVE_API_TOKEN_SECRET`
+
+For a local self-signed Proxmox setup, keep `PVE_VERIFY_SSL=false`. For a trusted certificate, set it to `true`.
+
+After the stack starts, use the dashboard's Proxmox section to test the connection status and trigger a manual inventory sync.
 
 ## Example Commands
 

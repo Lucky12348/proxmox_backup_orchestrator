@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select, text
 
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
@@ -9,6 +9,33 @@ from app.models import BackupRun, BackupRunStatus, DiskAssignment, ExternalDisk,
 
 def create_tables() -> None:
     Base.metadata.create_all(bind=engine)
+    ensure_virtual_machine_schema()
+
+
+def ensure_virtual_machine_schema() -> None:
+    inspector = inspect(engine)
+    existing_columns = {column["name"] for column in inspector.get_columns("virtual_machines")}
+    column_statements = {
+        "source": "ALTER TABLE virtual_machines ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'seed'",
+        "external_id": "ALTER TABLE virtual_machines ADD COLUMN external_id VARCHAR(64)",
+        "node_name": "ALTER TABLE virtual_machines ADD COLUMN node_name VARCHAR(255)",
+        "runtime_status": "ALTER TABLE virtual_machines ADD COLUMN runtime_status VARCHAR(64)",
+        "last_seen_at": "ALTER TABLE virtual_machines ADD COLUMN last_seen_at TIMESTAMP",
+    }
+
+    with engine.begin() as connection:
+        for column_name, statement in column_statements.items():
+            if column_name not in existing_columns:
+                connection.execute(text(statement))
+
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "ix_virtual_machines_source_external_id "
+                "ON virtual_machines (source, external_id) "
+                "WHERE external_id IS NOT NULL"
+            )
+        )
 
 
 def seed_database() -> None:
@@ -22,6 +49,7 @@ def seed_database() -> None:
             critical=True,
             size_gb=120,
             enabled=True,
+            source="seed",
             last_backup_at=datetime.fromisoformat("2026-03-28T22:10:00"),
         )
         vm_beta = VirtualMachine(
@@ -30,6 +58,7 @@ def seed_database() -> None:
             critical=True,
             size_gb=240,
             enabled=True,
+            source="seed",
             last_backup_at=datetime.fromisoformat("2026-03-28T22:15:00"),
         )
         ct_logs = VirtualMachine(
@@ -38,6 +67,7 @@ def seed_database() -> None:
             critical=False,
             size_gb=40,
             enabled=True,
+            source="seed",
             last_backup_at=None,
         )
         ct_lab = VirtualMachine(
@@ -46,6 +76,7 @@ def seed_database() -> None:
             critical=False,
             size_gb=25,
             enabled=False,
+            source="seed",
             last_backup_at=None,
         )
 

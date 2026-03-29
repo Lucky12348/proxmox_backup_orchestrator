@@ -1,4 +1,11 @@
-import type { BackupRun, ExternalDisk, Overview, VirtualMachine } from "./types";
+import type {
+  BackupRun,
+  ExternalDisk,
+  Overview,
+  ProxmoxStatus,
+  ProxmoxSyncSummary,
+  VirtualMachine,
+} from "./types";
 
 const API_BASE_PATH = "/api/v1";
 
@@ -12,8 +19,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Request failed with status ${response.status}`);
+    const body = await response.text();
+    let parsedDetail: string | undefined;
+
+    try {
+      const parsed = JSON.parse(body) as { detail?: string };
+      parsedDetail = parsed.detail;
+    } catch {
+      parsedDetail = undefined;
+    }
+
+    throw new Error(parsedDetail || body || `Request failed with status ${response.status}`);
   }
 
   return (await response.json()) as T;
@@ -55,4 +71,18 @@ export function updateDisk(
 
 export function getBackupRuns() {
   return request<BackupRun[]>("/backup-runs");
+}
+
+export function getProxmoxStatus() {
+  return request<ProxmoxStatus>("/integrations/proxmox/status");
+}
+
+export function syncProxmoxInventory() {
+  return request<ProxmoxSyncSummary>("/integrations/proxmox/sync", {
+    method: "POST",
+  });
+}
+
+export function getProxmoxInventory() {
+  return request<VirtualMachine[]>("/integrations/proxmox/inventory");
 }

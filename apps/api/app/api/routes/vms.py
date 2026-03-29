@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
 from app.api.dependencies import DbSession
 from app.models import VirtualMachine
@@ -11,7 +11,14 @@ router = APIRouter(prefix="/vms", tags=["virtual-machines"])
 
 @router.get("", response_model=list[VirtualMachineRead])
 def list_vms(db: DbSession) -> list[VirtualMachine]:
-    return list(db.scalars(select(VirtualMachine).order_by(VirtualMachine.name.asc())))
+    proxmox_exists = bool(
+        db.scalar(select(exists().where(VirtualMachine.source == "proxmox")))
+    )
+    statement = select(VirtualMachine)
+    if proxmox_exists:
+        statement = statement.where(VirtualMachine.source == "proxmox")
+
+    return list(db.scalars(statement.order_by(VirtualMachine.name.asc())))
 
 
 @router.patch("/{vm_id}", response_model=VirtualMachineRead)

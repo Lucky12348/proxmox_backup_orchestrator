@@ -1,5 +1,6 @@
 export type VmType = "vm" | "ct";
 export type BackupRunStatus = "pending" | "running" | "success" | "failed";
+export type VmSource = "seed" | "proxmox";
 
 export interface VirtualMachine {
   id: number;
@@ -8,6 +9,11 @@ export interface VirtualMachine {
   critical: boolean;
   size_gb: number;
   enabled: boolean;
+  source: VmSource;
+  external_id: string | null;
+  node_name: string | null;
+  runtime_status: string | null;
+  last_seen_at: string | null;
   last_backup_at: string | null;
 }
 
@@ -39,4 +45,17 @@ export interface Overview {
   connected_disks: number;
   latest_backup_status: BackupRunStatus | null;
   recent_backup_runs: BackupRun[];
+}
+
+export interface ProxmoxStatus {
+  connected: boolean;
+  node_name: string;
+  verify_ssl: boolean;
+  message: string;
+}
+
+export interface ProxmoxSyncSummary {
+  synced_vms_count: number;
+  synced_cts_count: number;
+  total_seen: number;
 }

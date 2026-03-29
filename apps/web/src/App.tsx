@@ -1,14 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { getBackupRuns, getDisks, getOverview, getVMs, updateDisk, updateVM } from "./api";
+import {
+  getBackupRuns,
+  getDisks,
+  getOverview,
+  getProxmoxInventory,
+  getProxmoxStatus,
+  getVMs,
+  syncProxmoxInventory,
+  updateDisk,
+  updateVM,
+} from "./api";
 import { translations, type Language } from "./i18n";
-import type { BackupRun, BackupRunStatus, ExternalDisk, Overview, VirtualMachine } from "./types";
+import type {
+  BackupRun,
+  BackupRunStatus,
+  ExternalDisk,
+  Overview,
+  ProxmoxStatus,
+  VirtualMachine,
+} from "./types";
 
 interface DashboardState {
   overview: Overview;
   vms: VirtualMachine[];
   disks: ExternalDisk[];
   backupRuns: BackupRun[];
+  proxmoxStatus: ProxmoxStatus;
 }
 
 const LOCALE_BY_LANGUAGE: Record<Language, string> = {
@@ -35,12 +53,19 @@ function statusClassName(status: BackupRunStatus | null) {
   return `status-badge status-${status}`;
 }
 
+function sourceClassName(source: string) {
+  return source === "proxmox" ? "source-badge source-proxmox" : "source-badge source-seed";
+}
+
 export default function App() {
   const [language, setLanguage] = useState<Language>("en");
   const [dashboard, setDashboard] = useState<DashboardState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [bannerError, setBannerError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const t = translations[language];
 
@@ -49,14 +74,23 @@ export default function App() {
     setError(null);
 
     try {
-      const [overview, vms, disks, backupRuns] = await Promise.all([
-        getOverview(),
-        getVMs(),
-        getDisks(),
-        getBackupRuns(),
-      ]);
+      const [overview, vms, disks, backupRuns, proxmoxStatus, proxmoxInventory] =
+        await Promise.all([
+          getOverview(),
+          getVMs(),
+          getDisks(),
+          getBackupRuns(),
+          getProxmoxStatus(),
+          getProxmoxInventory(),
+        ]);
 
-      setDashboard({ overview, vms, disks, backupRuns });
+      setDashboard({
+        overview,
+        vms: proxmoxInventory.length > 0 ? proxmoxInventory : vms,
+        disks,
+        backupRuns,
+        proxmoxStatus,
+      });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unknown error");
     } finally {
@@ -68,9 +102,30 @@ export default function App() {
     void loadDashboard();
   }, []);
 
+  async function refreshVmInventory() {
+    const [overview, vms, proxmoxInventory, proxmoxStatus] = await Promise.all([
+      getOverview(),
+      getVMs(),
+      getProxmoxInventory(),
+      getProxmoxStatus(),
+    ]);
+
+    setDashboard((current) =>
+      current
+        ? {
+            ...current,
+            overview,
+            vms: proxmoxInventory.length > 0 ? proxmoxInventory : vms,
+            proxmoxStatus,
+          }
+        : current,
+    );
+  }
+
   async function handleVmCriticalChange(vm: VirtualMachine, critical: boolean) {
     const key = `vm-${vm.id}`;
     setSavingKey(key);
+    setBannerError(null);
 
     try {
       const updated = await updateVM(vm.id, { critical });
@@ -83,7 +138,7 @@ export default function App() {
           : current,
       );
     } catch (mutationError) {
-      setError(mutationError instanceof Error ? mutationError.message : "Unknown error");
+      setBannerError(mutationError instanceof Error ? mutationError.message : "Unknown error");
     } finally {
       setSavingKey(null);
     }
@@ -92,6 +147,7 @@ export default function App() {
   async function handleDiskDedicatedChange(disk: ExternalDisk, dedicated_backup_disk: boolean) {
     const key = `disk-${disk.id}`;
     setSavingKey(key);
+    setBannerError(null);
 
     try {
       const updated = await updateDisk(disk.id, { dedicated_backup_disk });
@@ -104,9 +160,27 @@ export default function App() {
           : current,
       );
     } catch (mutationError) {
-      setError(mutationError instanceof Error ? mutationError.message : "Unknown error");
+      setBannerError(mutationError instanceof Error ? mutationError.message : "Unknown error");
     } finally {
       setSavingKey(null);
+    }
+  }
+
+  async function handleSyncInventory() {
+    setSyncing(true);
+    setBannerError(null);
+    setSyncMessage(null);
+
+    try {
+      const summary = await syncProxmoxInventory();
+      await refreshVmInventory();
+      setSyncMessage(
+        `${t.proxmoxSyncSummary}: ${summary.total_seen} (${summary.synced_vms_count} VM, ${summary.synced_cts_count} CT)`,
+      );
+    } catch (syncError) {
+      setBannerError(syncError instanceof Error ? syncError.message : "Unknown error");
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -165,6 +239,18 @@ export default function App() {
         </label>
       </section>
 
+      {bannerError ? (
+        <section className="banner banner-error">
+          <p>{bannerError}</p>
+        </section>
+      ) : null}
+
+      {syncMessage ? (
+        <section className="banner banner-info">
+          <p>{syncMessage}</p>
+        </section>
+      ) : null}
+
       <section className="card-grid">
         <article className="card kpi-card">
           <p className="card-label">{t.coveragePercent}</p>
@@ -197,6 +283,41 @@ export default function App() {
 
       <section className="panel">
         <div className="section-heading">
+          <h2>{t.proxmoxConnection}</h2>
+          <button
+            className="action-button"
+            disabled={syncing}
+            onClick={() => void handleSyncInventory()}
+            type="button"
+          >
+            {syncing ? t.proxmoxSyncing : t.proxmoxSync}
+          </button>
+        </div>
+
+        <div className="proxmox-grid">
+          <div>
+            <p className="card-label">{t.proxmoxStatus}</p>
+            <p className={statusClassName(dashboard.proxmoxStatus.connected ? "success" : "failed")}>
+              {dashboard.proxmoxStatus.connected ? t.connected : t.disconnected}
+            </p>
+          </div>
+          <div>
+            <p className="card-label">{t.proxmoxNode}</p>
+            <p>{dashboard.proxmoxStatus.node_name}</p>
+          </div>
+          <div>
+            <p className="card-label">{t.proxmoxSsl}</p>
+            <p>{dashboard.proxmoxStatus.verify_ssl ? t.yes : t.no}</p>
+          </div>
+          <div>
+            <p className="card-label">{t.proxmoxMessage}</p>
+            <p>{dashboard.proxmoxStatus.message}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
           <h2>{t.virtualMachines}</h2>
           {savingKey?.startsWith("vm-") ? <span className="saving-indicator">{t.saving}</span> : null}
         </div>
@@ -210,6 +331,9 @@ export default function App() {
                 <tr>
                   <th>{t.vmName}</th>
                   <th>{t.vmType}</th>
+                  <th>{t.vmSource}</th>
+                  <th>{t.vmNode}</th>
+                  <th>{t.vmRuntimeStatus}</th>
                   <th>{t.vmCritical}</th>
                   <th>{t.vmSize}</th>
                   <th>{t.vmEnabled}</th>
@@ -221,6 +345,11 @@ export default function App() {
                   <tr key={vm.id}>
                     <td>{vm.name}</td>
                     <td>{vm.vm_type.toUpperCase()}</td>
+                    <td>
+                      <span className={sourceClassName(vm.source)}>{t.source[vm.source]}</span>
+                    </td>
+                    <td>{vm.node_name ?? t.notAvailable}</td>
+                    <td>{vm.runtime_status ?? t.notAvailable}</td>
                     <td>
                       <label className="checkbox-cell">
                         <input
@@ -321,7 +450,10 @@ export default function App() {
                     </td>
                     <td>{formatDateTime(run.started_at, language, t.notAvailable)}</td>
                     <td>{formatDateTime(run.finished_at, language, t.notAvailable)}</td>
-                    <td>{t.triggeredBy[run.triggered_by as "manual" | "system" | "schedule"] ?? t.triggeredBy.unknown}</td>
+                    <td>
+                      {t.triggeredBy[run.triggered_by as "manual" | "system" | "schedule"] ??
+                        t.triggeredBy.unknown}
+                    </td>
                     <td>{run.summary ?? t.notAvailable}</td>
                   </tr>
                 ))}

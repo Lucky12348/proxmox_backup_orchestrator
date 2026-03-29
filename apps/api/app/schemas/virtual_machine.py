@@ -14,6 +14,11 @@ class VirtualMachineRead(BaseModel):
     critical: bool
     size_gb: int
     enabled: bool
+    source: str
+    external_id: str | None
+    node_name: str | None
+    runtime_status: str | None
+    last_seen_at: datetime | None
     last_backup_at: datetime | None
 
 

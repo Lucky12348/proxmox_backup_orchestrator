@@ -11,6 +11,10 @@ services:
       NTFY_BASE_URL: ${NTFY_BASE_URL:-https://ntfy.sh}
       NTFY_TOPIC: ${NTFY_TOPIC:-proxmox-backup-orchestrator}
       PVE_API_URL: ${PVE_API_URL:-https://proxmox.example.local:8006/api2/json}
+      PVE_API_TOKEN_ID: ${PVE_API_TOKEN_ID:-}
+      PVE_API_TOKEN_SECRET: ${PVE_API_TOKEN_SECRET:-}
+      PVE_VERIFY_SSL: ${PVE_VERIFY_SSL:-false}
+      PVE_NODE_NAME: ${PVE_NODE_NAME:-proxmox}
       PBS_API_URL: ${PBS_API_URL:-https://pbs.example.local:8007/api2/json}
     ports:
       - "${API_PORT:-8000}:8000"

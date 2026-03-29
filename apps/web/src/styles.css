@@ -133,6 +133,29 @@ h1 {
   box-shadow: 0 10px 30px rgba(16, 32, 48, 0.06);
 }
 
+.banner {
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+}
+
+.banner p {
+  margin: 0;
+}
+
+.banner-error {
+  color: #902d2d;
+  background: #fde7e7;
+  border-color: #f3c1c1;
+}
+
+.banner-info {
+  color: #18577d;
+  background: #e6f2fb;
+  border-color: #c8dff3;
+}
+
 .section-heading {
   display: flex;
   justify-content: space-between;
@@ -144,6 +167,12 @@ h1 {
 .panel h2 {
   margin: 0;
   font-size: 1.2rem;
+}
+
+.proxmox-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
 }
 
 .table-wrap {
@@ -197,6 +226,27 @@ tbody tr:hover {
   font-weight: 700;
 }
 
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 86px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.source-proxmox {
+  color: #1557a0;
+  background: #dcecff;
+}
+
+.source-seed {
+  color: #685415;
+  background: #f8efce;
+}
+
 .status-pending {
   color: #7b5600;
   background: #fff1c2;
@@ -232,6 +282,7 @@ tbody tr:hover {
   color: #8f2d2d;
 }
 
+.action-button,
 .retry-button {
   margin-top: 12px;
   border: 0;
@@ -241,6 +292,16 @@ tbody tr:hover {
   color: #ffffff;
   font: inherit;
   cursor: pointer;
+}
+
+.action-button {
+  margin-top: 0;
+}
+
+.action-button:disabled,
+.retry-button:disabled {
+  opacity: 0.65;
+  cursor: wait;
 }
 
 .retry-button:hover {
@@ -259,6 +320,10 @@ tbody tr:hover {
   .card-grid {
     grid-template-columns: 1fr 1fr;
   }
+
+  .proxmox-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 @media (max-width: 560px) {
@@ -269,5 +334,9 @@ tbody tr:hover {
   th,
   td {
     min-width: 120px;
+  }
+
+  .proxmox-grid {
+    grid-template-columns: 1fr;
   }
 }
