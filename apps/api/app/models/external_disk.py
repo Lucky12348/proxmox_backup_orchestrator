@@ -29,6 +29,7 @@ class ExternalDisk(Base):
     reserved_capacity_gb: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     planning_notes: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="seed")
+    reported_by_hostname: Mapped[str | None] = mapped_column(String(255))
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     assignments = relationship("DiskAssignment", back_populates="disk", cascade="all, delete-orphan")

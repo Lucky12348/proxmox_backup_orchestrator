@@ -153,6 +153,7 @@ If you explicitly want the older advanced behavior, set:
 That advanced mode may include standalone non-system physical disks again, but the safe default is `false`.
 
 Once a real disk report has been sent, the dashboard prefers agent-reported disks over seeded demo disks.
+When a new report arrives from the same host, previously agent-reported disks that are no longer present are marked inactive and disappear from the preferred disk view.
 
 This matters because valid backup disks on a Proxmox host may appear as SATA/ATA disks rather than USB devices.
 The dashboard now distinguishes:

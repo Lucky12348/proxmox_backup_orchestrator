@@ -64,6 +64,7 @@ def ensure_external_disk_schema() -> None:
         "reserved_capacity_gb": "ALTER TABLE external_disks ADD COLUMN reserved_capacity_gb INTEGER NOT NULL DEFAULT 0",
         "planning_notes": "ALTER TABLE external_disks ADD COLUMN planning_notes TEXT",
         "source": "ALTER TABLE external_disks ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'seed'",
+        "reported_by_hostname": "ALTER TABLE external_disks ADD COLUMN reported_by_hostname VARCHAR(255)",
         "active": "ALTER TABLE external_disks ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE",
     }
 

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -49,6 +49,7 @@ def record_agent_heartbeat(db: Session, payload: AgentHeartbeatCreate) -> AgentH
 def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> list[ExternalDisk]:
     observed_at = payload.observed_at.replace(tzinfo=None)
     upserted: list[ExternalDisk] = []
+    reported_serials = {item.serial_number for item in payload.disks}
 
     report_marker = db.scalar(
         select(ExternalDisk)
@@ -69,7 +70,22 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
         )
     report_marker.last_seen_at = observed_at
     report_marker.connected = False
+    report_marker.reported_by_hostname = payload.hostname
     db.add(report_marker)
+
+    stale_disks = list(
+        db.scalars(
+            select(ExternalDisk).where(
+                ExternalDisk.source == "agent",
+                ExternalDisk.active.is_(True),
+                ExternalDisk.serial_number != f"agent-report::{payload.hostname}",
+                or_(
+                    ExternalDisk.reported_by_hostname == payload.hostname,
+                    ExternalDisk.reported_by_hostname.is_(None),
+                ),
+            )
+        )
+    )
 
     for item in payload.disks:
         disk = db.scalar(
@@ -96,10 +112,20 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
         disk.connected = item.connected
         disk.last_seen_at = observed_at
         disk.source = "agent"
+        disk.reported_by_hostname = payload.hostname
         disk.active = True
 
         db.add(disk)
         upserted.append(disk)
+
+    for disk in stale_disks:
+        if disk.serial_number in reported_serials:
+            continue
+
+        disk.connected = False
+        disk.active = False
+        disk.reported_by_hostname = payload.hostname
+        db.add(disk)
 
     db.commit()
 
