@@ -10,6 +10,7 @@ This phase does not implement hotplug watching yet. It provides:
 - real disk report submission using Linux host inspection
 - one-shot state sync combining heartbeat and real disk report
 - target-directory preparation for an external PBS export flow
+- disk inspection and application-managed preparation commands
 - a stubbed external export command boundary for future PBS-native execution
 - optional mock disk report submission for development
 - a simple CLI contract for future host-side integration
@@ -32,6 +33,8 @@ This phase does not implement hotplug watching yet. It provides:
 6. Optionally send a mock disk report with `python -m agent.main report-mock-disks`
 7. Prepare an external datastore target with `python -m agent.main prepare-external-datastore --mount-path /mnt/backup --target-path /mnt/backup/pbs-datastore`
 8. Exercise the export boundary with `python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore --datastore-name backup`
+9. Inspect a disk with `python -m agent.main inspect-disk --disk <serial-or-path>`
+10. Prepare a disk with `python -m agent.main prepare-disk --disk <serial-or-path> --mode preserve_existing_data`
 
 ## Systemd deployment
 

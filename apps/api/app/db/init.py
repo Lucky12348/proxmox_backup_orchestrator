@@ -8,6 +8,8 @@ from app.models import (
     BackupRun,
     BackupRunStatus,
     DiskAssignment,
+    DiskPreparationMode,
+    DiskPreparationRun,
     ExternalBackupMode,
     ExternalBackupRun,
     ExternalDisk,
@@ -21,6 +23,7 @@ def create_tables() -> None:
     ensure_virtual_machine_schema()
     ensure_external_disk_schema()
     ensure_external_backup_run_schema()
+    ensure_disk_preparation_run_schema()
 
 
 def ensure_virtual_machine_schema() -> None:
@@ -83,6 +86,25 @@ def ensure_external_backup_run_schema() -> None:
     column_statements = {
         "created_at": (
             "ALTER TABLE external_backup_runs "
+            "ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        ),
+    }
+
+    with engine.begin() as connection:
+        for column_name, statement in column_statements.items():
+            if column_name not in existing_columns:
+                connection.execute(text(statement))
+
+
+def ensure_disk_preparation_run_schema() -> None:
+    inspector = inspect(engine)
+    if "disk_preparation_runs" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("disk_preparation_runs")}
+    column_statements = {
+        "created_at": (
+            "ALTER TABLE disk_preparation_runs "
             "ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
         ),
     }
@@ -244,6 +266,17 @@ def seed_database() -> None:
                     message="Seeded external export completed to dedicated target.",
                     mode=ExternalBackupMode.DEDICATED,
                     created_at=datetime.fromisoformat("2026-03-28T23:00:00"),
+                ),
+                DiskPreparationRun(
+                    disk_id=disk_primary.id,
+                    mode=DiskPreparationMode.DEDICATED_BACKUP,
+                    status=BackupRunStatus.SUCCESS,
+                    started_at=datetime.fromisoformat("2026-03-28T19:45:00"),
+                    finished_at=datetime.fromisoformat("2026-03-28T19:50:00"),
+                    message="Seeded preparation mounted the dedicated disk at /mnt/pbs-alpha.",
+                    mount_path="/mnt/pbs-alpha",
+                    filesystem_type="ext4",
+                    created_at=datetime.fromisoformat("2026-03-28T19:45:00"),
                 ),
             ]
         )

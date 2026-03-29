@@ -6,6 +6,7 @@ import { AppShell } from "./components/AppShell";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { ErrorBanner } from "./components/ErrorBanner";
 import { LoadingBlock } from "./components/LoadingBlock";
+import { PrepareDiskModal } from "./components/PrepareDiskModal";
 import { useAppData } from "./hooks/useAppData";
 import { translations, type Language } from "./i18n";
 import { ActivityPage } from "./pages/ActivityPage";
@@ -15,7 +16,7 @@ import { DisksPage } from "./pages/DisksPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { PlanningPage } from "./pages/PlanningPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import type { DiskActionRequest } from "./pages/shared";
+import type { DiskActionRequest, DiskPreparationSubmitPayload } from "./pages/shared";
 import type { ExternalDisk } from "./types";
 import { getLatestStatusLabel } from "./utils";
 
@@ -31,6 +32,7 @@ interface ConfirmState {
 export default function App() {
   const [language, setLanguage] = useState<Language>("en");
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const [preparationDisk, setPreparationDisk] = useState<ExternalDisk | null>(null);
 
   const {
     data,
@@ -50,6 +52,7 @@ export default function App() {
     runProxmoxSync,
     runPBSSync,
     startExternalBackup,
+    startDiskPreparation,
   } = useAppData();
 
   const t = translations[language];
@@ -64,6 +67,10 @@ export default function App() {
 
   function closeConfirm() {
     setConfirmState(null);
+  }
+
+  function closePreparationModal() {
+    setPreparationDisk(null);
   }
 
   function handleDiskToggleRequest(request: DiskActionRequest) {
@@ -207,6 +214,41 @@ export default function App() {
     }
   }
 
+  function handleDiskPreparationRequest(disk: ExternalDisk) {
+    if (!disk.connected) {
+      openConfirm({
+        title: t.prepareDiskTitle,
+        description: t.prepareDiskBlockedDisconnected,
+        confirmLabel: t.dismiss,
+        cancelLabel: t.cancel,
+        tone: "warning",
+        onConfirm: closeConfirm,
+      });
+      return;
+    }
+
+    setPreparationDisk(disk);
+  }
+
+  async function handleDiskPreparationSubmit(payload: DiskPreparationSubmitPayload) {
+    if (preparationDisk === null) {
+      return;
+    }
+
+    const run = await startDiskPreparation(
+      preparationDisk.id,
+      {
+        mode: payload.mode,
+        mount_base_path: payload.mountBasePath,
+        confirm_destructive: payload.confirmDestructive,
+      },
+      t.prepareDiskSummary,
+    );
+    if (run) {
+      closePreparationModal();
+    }
+  }
+
   if (loading) {
     return (
       <div className="centered-shell">
@@ -274,6 +316,7 @@ export default function App() {
                 language={language}
                 onDiskFieldChange={(diskId, payload) => void mutateDisk(diskId, payload)}
                 onExternalBackupRequest={(disk) => void handleExternalBackupRequest(disk)}
+                onDiskPreparationRequest={handleDiskPreparationRequest}
                 onDiskToggleRequest={handleDiskToggleRequest}
                 savingKey={savingKey}
                 t={t}
@@ -320,6 +363,14 @@ export default function App() {
         open={confirmState !== null}
         title={confirmState?.title ?? ""}
         tone={confirmState?.tone ?? "warning"}
+      />
+      <PrepareDiskModal
+        disk={preparationDisk}
+        onCancel={closePreparationModal}
+        onSubmit={handleDiskPreparationSubmit}
+        open={preparationDisk !== null}
+        submitting={Boolean(preparationDisk && savingKey === `disk-prep-${preparationDisk.id}`)}
+        t={t}
       />
     </>
   );

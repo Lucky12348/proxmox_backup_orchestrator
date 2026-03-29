@@ -3,7 +3,8 @@ from sqlalchemy import select
 
 from app.api.dependencies import DbSession
 from app.models import ExternalDisk
-from app.schemas import ExternalDiskRead, ExternalDiskUpdate
+from app.schemas import DiskPreparationRequest, DiskPreparationRunRead, ExternalDiskRead, ExternalDiskUpdate
+from app.services.disk_preparations import get_disk_preparation_run, list_disk_preparation_runs, prepare_disk
 from app.services.disks import list_preferred_disks
 
 
@@ -37,3 +38,37 @@ def update_disk(
     db.commit()
     db.refresh(disk)
     return disk
+
+
+@router.post("/{disk_id}/prepare", response_model=DiskPreparationRunRead)
+def prepare_disk_route(
+    disk_id: int,
+    payload: DiskPreparationRequest,
+    db: DbSession,
+) -> DiskPreparationRunRead:
+    run = prepare_disk(
+        db,
+        disk_id=disk_id,
+        mode=payload.mode,
+        mount_base_path=payload.mount_base_path,
+        confirm_destructive=payload.confirm_destructive,
+    )
+    return DiskPreparationRunRead.model_validate(run)
+
+
+@router.get("/{disk_id}/preparation-runs", response_model=list[DiskPreparationRunRead])
+def get_preparation_runs(disk_id: int, db: DbSession) -> list[DiskPreparationRunRead]:
+    get_disk = db.get(ExternalDisk, disk_id)
+    if get_disk is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Disk not found")
+
+    return [
+        DiskPreparationRunRead.model_validate(run)
+        for run in list_disk_preparation_runs(db, disk_id)
+    ]
+
+
+@router.get("/preparation-runs/{run_id}", response_model=DiskPreparationRunRead)
+def get_preparation_run(run_id: int, db: DbSession) -> DiskPreparationRunRead:
+    run = get_disk_preparation_run(db, run_id)
+    return DiskPreparationRunRead.model_validate(run)

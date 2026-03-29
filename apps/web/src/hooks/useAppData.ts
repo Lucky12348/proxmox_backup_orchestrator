@@ -14,6 +14,7 @@ import {
   getUnplannedAssets,
   getVMs,
   getOverview,
+  prepareDisk,
   syncPBSInventory,
   syncProxmoxInventory,
   runExternalBackup,
@@ -240,6 +241,33 @@ export function useAppData() {
     return null;
   }
 
+  async function startDiskPreparation(
+    diskId: number,
+    payload: {
+      mode: "preserve_existing_data" | "dedicated_backup";
+      mount_base_path?: string | null;
+      confirm_destructive: boolean;
+    },
+    successMessage: string,
+  ) {
+    setSavingKey(`disk-prep-${diskId}`);
+    setBannerError(null);
+    setSyncMessage(null);
+
+    try {
+      const run = await prepareDisk(diskId, payload);
+      await refresh();
+      setSyncMessage(`${successMessage}: ${run.mount_path ?? `disk ${diskId}`}`);
+      return run;
+    } catch (runError) {
+      setBannerError(runError instanceof Error ? runError.message : "Unknown error");
+    } finally {
+      setSavingKey(null);
+    }
+
+    return null;
+  }
+
   const pbsInventoryByVmId = useMemo(
     () => new Map(data?.pbsInventory.map((item) => [item.vm_id, item]) ?? []),
     [data?.pbsInventory],
@@ -264,5 +292,6 @@ export function useAppData() {
     runProxmoxSync,
     runPBSSync,
     startExternalBackup,
+    startDiskPreparation,
   };
 }

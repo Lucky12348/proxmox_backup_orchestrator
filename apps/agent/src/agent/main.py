@@ -118,6 +118,87 @@ def run_external_export(target_path: str, datastore_name: str) -> None:
     )
 
 
+def inspect_disk(identifier: str, mount_base_path: str | None = None) -> None:
+    disk, _ = resolve_disk(identifier)
+    serial = disk_serial_number(disk, load_udev_properties(device_name(disk))) or device_name(disk)
+    filesystem_node = find_filesystem_node(disk)
+    blkid_info = get_blkid_info(filesystem_node["path"]) if filesystem_node else {}
+    filesystem_type = None
+    if filesystem_node is not None:
+        filesystem_type = blkid_info.get("TYPE") or filesystem_node.get("fstype")
+    candidate_mount_path = str(default_mount_base_path(mount_base_path) / serial)
+    payload = {
+        "success": True,
+        "disk": summarize_node(disk),
+        "filesystem_info": {
+            "device_path": filesystem_node["path"] if filesystem_node else None,
+            "filesystem_type": filesystem_type,
+            "uuid": blkid_info.get("UUID"),
+            "mount_path": filesystem_node["mountpoint"] if filesystem_node else None,
+        },
+        "partition_info": [summarize_node(node) for node in list_partition_nodes(disk)],
+        "candidate_mount_path": candidate_mount_path,
+        "message": "Disk inspection completed.",
+    }
+    print(json.dumps(payload))
+    logger.info("Inspected disk %s", identifier)
+
+
+def prepare_disk(
+    identifier: str,
+    mode: str,
+    mount_base_path: str | None,
+    confirm_destructive: bool,
+) -> None:
+    disk, _ = resolve_disk(identifier)
+    serial = disk_serial_number(disk, load_udev_properties(device_name(disk))) or device_name(disk)
+    mount_path = default_mount_base_path(mount_base_path) / serial
+
+    if mode == "preserve_existing_data":
+        filesystem_node = find_filesystem_node(disk)
+        if filesystem_node is None:
+            raise RuntimeError("Preserve mode requires an existing filesystem.")
+
+        filesystem_type = get_blkid_info(filesystem_node["path"]).get("TYPE") or filesystem_node["fstype"]
+        if not filesystem_type:
+            raise RuntimeError("Unable to determine filesystem type for preserve mode.")
+
+        ensure_mountpoint(mount_path)
+        ensure_fstab_entry(filesystem_node["path"], str(mount_path), filesystem_type)
+        mount_target(filesystem_node["path"], str(mount_path))
+        payload = {
+            "success": True,
+            "mount_path": str(mount_path),
+            "filesystem_type": filesystem_type,
+            "message": "Existing filesystem mounted under an application-managed path.",
+        }
+        print(json.dumps(payload))
+        logger.info("Prepared disk %s in preserve mode at %s", identifier, mount_path)
+        return
+
+    if mode == "dedicated_backup":
+        if not confirm_destructive:
+            raise RuntimeError("Dedicated backup mode requires destructive confirmation.")
+
+        target_node = find_format_target(disk)
+        run_command(["mkfs.ext4", "-F", target_node["path"]])
+        filesystem_type = "ext4"
+        ensure_mountpoint(mount_path)
+        ensure_fstab_entry(target_node["path"], str(mount_path), filesystem_type)
+        mount_target(target_node["path"], str(mount_path))
+        payload = {
+            "success": True,
+            "mount_path": str(mount_path),
+            "filesystem_type": filesystem_type,
+            "message": "Disk formatted as ext4 and mounted under an application-managed path.",
+        }
+        print(json.dumps(payload))
+        logger.info("Prepared disk %s in dedicated mode at %s", identifier, mount_path)
+        return
+
+    raise RuntimeError(f"Unsupported preparation mode: {mode}")
+
+
 def discover_real_disks(settings: AgentSettings) -> list[dict[str, Any]]:
     lsblk_output = run_command(
         [
@@ -258,6 +339,147 @@ def disk_priority(disk: dict[str, Any]) -> int:
     }.get(candidate_type, 0)
     mount_bonus = 1 if disk.get("mount_path") else 0
     return type_priority * 10 + mount_bonus
+
+
+def resolve_disk(identifier: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    all_nodes = list_all_block_nodes()
+    normalized = identifier.strip()
+    for node in all_nodes:
+        if node["type"] != "disk":
+            continue
+
+        if any(
+            [
+                node["path"] == normalized,
+                node["name"] == normalized,
+                node["kname"] == normalized,
+                node["serial"] == normalized,
+            ]
+        ):
+            return node, all_nodes
+
+    raise FileNotFoundError(f"Unable to resolve disk from identifier: {identifier}")
+
+
+def list_all_block_nodes() -> list[dict[str, Any]]:
+    output = run_command(
+        [
+            "lsblk",
+            "-J",
+            "-o",
+            "NAME,KNAME,PATH,TYPE,MODEL,SERIAL,SIZE,RM,TRAN,MOUNTPOINT,FSTYPE,PKNAME",
+        ]
+    )
+    payload = json.loads(output)
+    nodes: list[dict[str, Any]] = []
+    for device in payload.get("blockdevices", []):
+        normalized = normalize_lsblk_node(device)
+        nodes.append(normalized)
+        nodes.extend(list_partition_nodes(normalized))
+    return nodes
+
+
+def normalize_lsblk_node(device: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": str(device.get("name") or ""),
+        "kname": str(device.get("kname") or device.get("name") or ""),
+        "path": str(device.get("path") or f"/dev/{device.get('kname') or device.get('name') or ''}"),
+        "type": str(device.get("type") or ""),
+        "model": first_value(device.get("model")),
+        "serial": first_value(device.get("serial")),
+        "size": device.get("size"),
+        "rm": device.get("rm"),
+        "tran": device.get("tran"),
+        "mountpoint": device.get("mountpoint"),
+        "fstype": device.get("fstype"),
+        "pkname": device.get("pkname"),
+        "children": [normalize_lsblk_node(child) for child in device.get("children", [])],
+    }
+
+
+def list_partition_nodes(disk: dict[str, Any]) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+    for child in disk.get("children", []):
+        nodes.append(child)
+        nodes.extend(list_partition_nodes(child))
+    return nodes
+
+
+def summarize_node(node: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "path": node["path"],
+        "name": node["name"],
+        "type": node["type"],
+        "serial": node.get("serial"),
+        "model": node.get("model"),
+        "filesystem_type": node.get("fstype"),
+        "mount_path": node.get("mountpoint"),
+    }
+
+
+def find_filesystem_node(disk: dict[str, Any]) -> dict[str, Any] | None:
+    for node in list_partition_nodes(disk):
+        if node.get("fstype"):
+            return node
+
+    if disk.get("fstype"):
+        return disk
+
+    return None
+
+
+def find_format_target(disk: dict[str, Any]) -> dict[str, Any]:
+    partitions = list_partition_nodes(disk)
+    if partitions:
+        return partitions[0]
+
+    return disk
+
+
+def get_blkid_info(path: str) -> dict[str, str]:
+    try:
+        output = run_command(["blkid", "-o", "export", path])
+    except subprocess.CalledProcessError:
+        return {}
+
+    properties: dict[str, str] = {}
+    for line in output.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        properties[key] = value
+    return properties
+
+
+def default_mount_base_path(mount_base_path: str | None) -> Path:
+    return Path(mount_base_path or "/mnt/pbo")
+
+
+def ensure_mountpoint(path: Path) -> None:
+    run_command(["mkdir", "-p", str(path)])
+
+
+def ensure_fstab_entry(device_path: str, mount_path: str, filesystem_type: str) -> None:
+    blkid_info = get_blkid_info(device_path)
+    source = f"UUID={blkid_info['UUID']}" if "UUID" in blkid_info else device_path
+    entry = f"{source} {mount_path} {filesystem_type} defaults,nofail 0 2"
+    fstab_path = Path("/etc/fstab")
+    current = fstab_path.read_text(encoding="utf-8") if fstab_path.exists() else ""
+    if entry in current:
+        return
+
+    with fstab_path.open("a", encoding="utf-8") as handle:
+        handle.write(entry + "\n")
+
+
+def mount_target(device_path: str, mount_path: str) -> None:
+    try:
+        run_command(["mountpoint", "-q", mount_path])
+        return
+    except subprocess.CalledProcessError:
+        pass
+
+    run_command(["mount", device_path, mount_path])
 
 
 def build_disk_report(
@@ -421,6 +643,24 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("sync-state", help="Send heartbeat, then send a real disk report")
     subparsers.add_parser("report-disks", help="Discover backup candidate disks and send a disk report")
     subparsers.add_parser("report-mock-disks", help="Send a mock disk report for development")
+    inspect_parser = subparsers.add_parser(
+        "inspect-disk",
+        help="Inspect a disk by serial or path and suggest an application mount path",
+    )
+    inspect_parser.add_argument("--disk", required=True)
+    inspect_parser.add_argument("--mount-base-path")
+    prepare_disk_parser = subparsers.add_parser(
+        "prepare-disk",
+        help="Prepare and mount a disk in preserve or dedicated mode",
+    )
+    prepare_disk_parser.add_argument("--disk", required=True)
+    prepare_disk_parser.add_argument(
+        "--mode",
+        required=True,
+        choices=["preserve_existing_data", "dedicated_backup"],
+    )
+    prepare_disk_parser.add_argument("--mount-base-path")
+    prepare_disk_parser.add_argument("--confirm-destructive", action="store_true")
     prepare_parser = subparsers.add_parser(
         "prepare-external-datastore",
         help="Validate mount path and create the target export directory",
@@ -456,6 +696,14 @@ def main() -> None:
 
     if args.command == "report-mock-disks":
         post_mock_disk_report(settings)
+        return
+
+    if args.command == "inspect-disk":
+        inspect_disk(args.disk, args.mount_base_path)
+        return
+
+    if args.command == "prepare-disk":
+        prepare_disk(args.disk, args.mode, args.mount_base_path, args.confirm_destructive)
         return
 
     if args.command == "prepare-external-datastore":

@@ -65,6 +65,12 @@ The first external export flow also uses those trusted disks:
 - the current execution path is PBS-native-like by design, with a controlled command boundary
   ready for later host-side PBS export wiring
 
+Before export, disks can now be prepared through the application itself:
+
+- preserve mode keeps the existing filesystem and mounts it under an application-managed path
+- dedicated mode formats the disk as `ext4` and mounts it as backup-only media
+- both flows are executed by the host-agent boundary rather than requiring manual shell commands
+
 ## Proxmox Integration
 
 The first infrastructure integration is intentionally narrow:

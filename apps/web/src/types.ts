@@ -2,6 +2,7 @@ export type VmType = "vm" | "ct";
 export type BackupRunStatus = "pending" | "running" | "success" | "failed";
 export type VmSource = "seed" | "proxmox";
 export type ExternalBackupMode = "dedicated" | "coexistence";
+export type DiskPreparationMode = "preserve_existing_data" | "dedicated_backup";
 
 export interface VirtualMachine {
   id: number;
@@ -155,5 +156,18 @@ export interface ExternalBackupRun {
   datastore_name: string;
   message: string | null;
   mode: ExternalBackupMode;
+  created_at: string;
+}
+
+export interface DiskPreparationRun {
+  id: number;
+  disk_id: number;
+  mode: DiskPreparationMode;
+  status: BackupRunStatus;
+  started_at: string;
+  finished_at: string | null;
+  message: string | null;
+  mount_path: string | null;
+  filesystem_type: string | null;
   created_at: string;
 }

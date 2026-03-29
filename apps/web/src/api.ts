@@ -1,6 +1,7 @@
 import type {
   AgentStatus,
   BackupRun,
+  DiskPreparationRun,
   DiskPlanningSummary,
   ExternalBackupPreview,
   ExternalBackupRun,
@@ -154,4 +155,26 @@ export function runExternalBackup(diskId: number) {
 
 export function getExternalBackupRuns() {
   return request<ExternalBackupRun[]>("/external-backups/runs");
+}
+
+export function prepareDisk(
+  diskId: number,
+  payload: {
+    mode: "preserve_existing_data" | "dedicated_backup";
+    mount_base_path?: string | null;
+    confirm_destructive: boolean;
+  },
+) {
+  return request<DiskPreparationRun>(`/disks/${diskId}/prepare`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getDiskPreparationRuns(diskId: number) {
+  return request<DiskPreparationRun[]>(`/disks/${diskId}/preparation-runs`);
+}
+
+export function getDiskPreparationRun(runId: number) {
+  return request<DiskPreparationRun>(`/disks/preparation-runs/${runId}`);
 }

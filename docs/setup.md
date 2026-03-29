@@ -178,6 +178,12 @@ The first external PBS export MVP builds on that disk model:
 - this is a PBS-native-like export flow intended to prepare for disaster recovery later
 - full restore workflow comes later
 
+Disk preparation can now be triggered directly from the app through the host agent:
+
+- preserve-existing-data mode mounts the existing filesystem under an application-managed path such as `/mnt/pbo/<serial>`
+- dedicated mode formats the selected disk as `ext4`, mounts it under an application-managed path, and is destructive
+- the goal is to remove manual shell preparation before later external PBS exports
+
 The backend considers the agent:
 
 - `connected` when the last heartbeat is newer than `AGENT_STALE_AFTER_MINUTES`

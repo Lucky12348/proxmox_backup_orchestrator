@@ -13,6 +13,7 @@ export function DisksPage({
   onDiskToggleRequest,
   onDiskFieldChange,
   onExternalBackupRequest,
+  onDiskPreparationRequest,
 }: DisksPageProps) {
   return (
     <div className="page-stack">
@@ -40,6 +41,7 @@ export function DisksPage({
                 <th>{t.diskUsableCapacity}</th>
                 <th>{t.diskReservedCapacity}</th>
                 <th>{t.diskPlanningNotes}</th>
+                <th>{t.prepareDiskAction}</th>
                 <th>{t.externalBackupAction}</th>
                 <th>{t.diskLastSeen}</th>
               </tr>
@@ -152,6 +154,16 @@ export function DisksPage({
                       }
                       type="text"
                     />
+                  </td>
+                  <td>
+                    <button
+                      className="ghost-button"
+                      disabled={savingKey === `disk-prep-${disk.id}`}
+                      onClick={() => onDiskPreparationRequest(disk)}
+                      type="button"
+                    >
+                      {savingKey === `disk-prep-${disk.id}` ? t.preparingDisk : t.prepareDiskAction}
+                    </button>
                   </td>
                   <td>
                     <button
