@@ -47,6 +47,9 @@ def ensure_external_disk_schema() -> None:
         "model_name": "ALTER TABLE external_disks ADD COLUMN model_name VARCHAR(255)",
         "mount_path": "ALTER TABLE external_disks ADD COLUMN mount_path VARCHAR(255)",
         "last_seen_at": "ALTER TABLE external_disks ADD COLUMN last_seen_at TIMESTAMP",
+        "detection_reason": "ALTER TABLE external_disks ADD COLUMN detection_reason VARCHAR(255)",
+        "candidate_type": "ALTER TABLE external_disks ADD COLUMN candidate_type VARCHAR(64)",
+        "trusted": "ALTER TABLE external_disks ADD COLUMN trusted BOOLEAN NOT NULL DEFAULT FALSE",
         "source": "ALTER TABLE external_disks ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'seed'",
         "active": "ALTER TABLE external_disks ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE",
     }
@@ -112,6 +115,9 @@ def seed_database() -> None:
             model_name="Seeded Backup Disk Alpha",
             mount_path="/mnt/pbs-alpha",
             last_seen_at=datetime.fromisoformat("2026-03-28T20:00:00"),
+            detection_reason="seeded development disk",
+            candidate_type="seed",
+            trusted=False,
             source="seed",
             active=True,
         )
@@ -128,6 +134,9 @@ def seed_database() -> None:
             model_name="Seeded Backup Disk Beta",
             mount_path=None,
             last_seen_at=datetime.fromisoformat("2026-03-27T18:00:00"),
+            detection_reason="seeded development disk",
+            candidate_type="seed",
+            trusted=False,
             source="seed",
             active=True,
         )
@@ -144,6 +153,9 @@ def seed_database() -> None:
             model_name="Seeded Utility Disk",
             mount_path="/mnt/shared-utility",
             last_seen_at=datetime.fromisoformat("2026-03-28T19:30:00"),
+            detection_reason="seeded development disk",
+            candidate_type="seed",
+            trusted=False,
             source="seed",
             active=True,
         )

@@ -19,6 +19,8 @@ logging.basicConfig(
 logger = logging.getLogger("agent")
 
 EXCLUDED_DEVICE_PREFIXES = ("loop", "dm-", "zd", "sr")
+SYSTEM_MOUNTPOINTS = {"/", "/boot", "/boot/efi"}
+SYSTEM_FS_MARKERS = {"LVM2_member", "zfs_member"}
 
 
 @dataclass(frozen=True)
@@ -79,10 +81,23 @@ def discover_real_disks() -> list[dict[str, Any]]:
             continue
 
         udev_props = load_udev_properties(device_name(device))
-        if not appears_external(device, udev_props):
+        serial_number = disk_serial_number(device, udev_props)
+        if not serial_number:
             continue
 
-        disk_report = build_disk_report(device, udev_props)
+        exclusion_reason = exclusion_reason(device, udev_props)
+        if exclusion_reason is not None:
+            logger.debug("Skipping %s: %s", device_name(device), exclusion_reason)
+            continue
+
+        candidate_type, detection_reason = classify_candidate(device, udev_props)
+        disk_report = build_disk_report(
+            device=device,
+            udev_props=udev_props,
+            serial_number=serial_number,
+            candidate_type=candidate_type,
+            detection_reason=detection_reason,
+        )
         if disk_report:
             discovered.append(disk_report)
 
@@ -97,15 +112,46 @@ def is_candidate_disk(device: dict[str, Any]) -> bool:
     return not any(name.startswith(prefix) for prefix in EXCLUDED_DEVICE_PREFIXES)
 
 
-def appears_external(device: dict[str, Any], udev_props: dict[str, str]) -> bool:
-    # Keep the first filter pragmatic: only report devices that look removable/external.
+def exclusion_reason(device: dict[str, Any], udev_props: dict[str, str]) -> str | None:
+    partitions = flatten_partitions(device.get("children", []))
+    filesystem_markers = {
+        part.get("fstype")
+        for part in [device, *partitions]
+        if isinstance(part.get("fstype"), str)
+    }
+    mountpoints = {
+        part.get("mountpoint")
+        for part in [device, *partitions]
+        if isinstance(part.get("mountpoint"), str) and part.get("mountpoint")
+    }
+    all_device_names = {device_name(device), *(device_name(part) for part in partitions)}
+
+    if mountpoints & SYSTEM_MOUNTPOINTS:
+        return "backs system mount"
+
+    if filesystem_markers & SYSTEM_FS_MARKERS:
+        return "belongs to lvm/zfs system storage"
+
+    if any("rpool" in (udev_props.get(key, "").lower()) for key in udev_props):
+        return "belongs to zfs root pool"
+
+    if any("pve" in (mount or "").lower() for mount in mountpoints):
+        return "used by proxmox storage mount"
+
+    if any(name.startswith("zd") or name.startswith("dm-") for name in all_device_names):
+        return "backs virtual or mapped storage"
+
+    return None
+
+
+def classify_candidate(device: dict[str, Any], udev_props: dict[str, str]) -> tuple[str, str]:
     transport = (device.get("tran") or "").lower()
     removable = str(device.get("rm", "0")) == "1"
     hotplug = str(device.get("hotplug", "0")) == "1"
     udev_bus = udev_props.get("ID_BUS", "").lower()
     devpath = udev_props.get("DEVPATH", "").lower()
 
-    return any(
+    if any(
         [
             transport == "usb",
             removable,
@@ -114,18 +160,19 @@ def appears_external(device: dict[str, Any], udev_props: dict[str, str]) -> bool
             "usb" in devpath,
             "ID_USB_DRIVER" in udev_props,
         ]
-    )
+    ):
+        return ("usb", "reported as removable or USB-connected candidate")
+
+    return ("standalone", "standalone non-system physical disk candidate")
 
 
-def build_disk_report(device: dict[str, Any], udev_props: dict[str, str]) -> dict[str, Any] | None:
-    serial_number = first_value(
-        device.get("serial"),
-        udev_props.get("ID_SERIAL_SHORT"),
-        udev_props.get("ID_SERIAL"),
-    )
-    if not serial_number:
-        return None
-
+def build_disk_report(
+    device: dict[str, Any],
+    udev_props: dict[str, str],
+    serial_number: str,
+    candidate_type: str,
+    detection_reason: str,
+) -> dict[str, Any] | None:
     partition_info = derive_partition_info(device)
     model_name = first_value(device.get("model"), udev_props.get("ID_MODEL"))
     display_name = first_value(model_name, serial_number, device_name(device))
@@ -138,6 +185,9 @@ def build_disk_report(device: dict[str, Any], udev_props: dict[str, str]) -> dic
         "capacity_gb": capacity_gb,
         "filesystem_type": partition_info["filesystem_type"],
         "mount_path": partition_info["mount_path"],
+        "detection_reason": detection_reason,
+        "candidate_type": candidate_type,
+        "trusted": False,
         "connected": True,
     }
 
@@ -205,16 +255,22 @@ def mock_disks() -> list[dict[str, Any]]:
             "capacity_gb": 2000,
             "filesystem_type": "ext4",
             "mount_path": "/mnt/usb-backup-alpha",
+            "detection_reason": "mock development candidate",
+            "candidate_type": "usb",
+            "trusted": False,
             "connected": True,
         },
         {
             "serial_number": "AGENT-DISK-002",
-            "display_name": "USB Backup Beta",
-            "model_name": "WD Elements",
+            "display_name": "Standalone Backup Beta",
+            "model_name": "WD Red Plus",
             "capacity_gb": 4000,
-            "filesystem_type": "exfat",
-            "mount_path": None,
-            "connected": False,
+            "filesystem_type": "xfs",
+            "mount_path": "/mnt/backup-beta",
+            "detection_reason": "mock standalone candidate",
+            "candidate_type": "standalone",
+            "trusted": False,
+            "connected": True,
         },
     ]
 
@@ -232,6 +288,14 @@ def current_timestamp() -> str:
 
 def device_name(device: dict[str, Any]) -> str:
     return str(device.get("kname") or device.get("name") or "")
+
+
+def disk_serial_number(device: dict[str, Any], udev_props: dict[str, str]) -> str | None:
+    return first_value(
+        device.get("serial"),
+        udev_props.get("ID_SERIAL_SHORT"),
+        udev_props.get("ID_SERIAL"),
+    )
 
 
 def first_value(*values: Any) -> str | None:
@@ -260,7 +324,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("heartbeat", help="Send a heartbeat to the backend")
-    subparsers.add_parser("report-disks", help="Discover real disks and send a disk report")
+    subparsers.add_parser("report-disks", help="Discover backup candidate disks and send a disk report")
     subparsers.add_parser("report-mock-disks", help="Send a mock disk report for development")
 
     return parser

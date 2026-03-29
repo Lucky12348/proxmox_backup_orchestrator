@@ -16,6 +16,9 @@ class AgentDiskReportItem(BaseModel):
     capacity_gb: int = Field(ge=0)
     filesystem_type: str | None = Field(default=None, max_length=64)
     mount_path: str | None = Field(default=None, max_length=255)
+    detection_reason: str | None = Field(default=None, max_length=255)
+    candidate_type: str | None = Field(default=None, max_length=64)
+    trusted: bool = False
     connected: bool
 
 

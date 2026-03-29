@@ -22,6 +22,9 @@ class ExternalDisk(Base):
     model_name: Mapped[str | None] = mapped_column(String(255))
     mount_path: Mapped[str | None] = mapped_column(String(255))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    detection_reason: Mapped[str | None] = mapped_column(String(255))
+    candidate_type: Mapped[str | None] = mapped_column(String(64))
+    trusted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="seed")
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 

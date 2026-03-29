@@ -192,7 +192,12 @@ export default function App() {
     payload: Partial<
       Pick<
         ExternalDisk,
-        "dedicated_backup_disk" | "allow_existing_data" | "display_name" | "preferred_root_path" | "notes"
+        | "dedicated_backup_disk"
+        | "allow_existing_data"
+        | "display_name"
+        | "preferred_root_path"
+        | "notes"
+        | "trusted"
       >
     >,
   ) {
@@ -559,8 +564,11 @@ export default function App() {
                   <th>{t.diskFilesystem}</th>
                   <th>{t.diskMountPath}</th>
                   <th>{t.diskConnected}</th>
+                  <th>{t.diskCandidateType}</th>
+                  <th>{t.diskDetectionReason}</th>
                   <th>{t.diskDedicated}</th>
                   <th>{t.diskAllowExistingData}</th>
+                  <th>{t.diskTrusted}</th>
                   <th>{t.diskLastSeen}</th>
                 </tr>
               </thead>
@@ -574,6 +582,8 @@ export default function App() {
                     <td>{disk.filesystem_type ?? t.notAvailable}</td>
                     <td>{disk.mount_path ?? t.notAvailable}</td>
                     <td>{disk.connected ? t.yes : t.no}</td>
+                    <td>{disk.candidate_type ?? t.notAvailable}</td>
+                    <td>{disk.detection_reason ?? t.notAvailable}</td>
                     <td>
                       <label className="checkbox-cell">
                         <input
@@ -602,6 +612,21 @@ export default function App() {
                           }
                         />
                         <span>{disk.allow_existing_data ? t.yes : t.no}</span>
+                      </label>
+                    </td>
+                    <td>
+                      <label className="checkbox-cell">
+                        <input
+                          checked={disk.trusted}
+                          disabled={savingKey === `disk-${disk.id}`}
+                          type="checkbox"
+                          onChange={(event) =>
+                            void handleDiskFieldUpdate(disk, {
+                              trusted: event.target.checked,
+                            })
+                          }
+                        />
+                        <span>{disk.trusted ? t.yes : t.no}</span>
                       </label>
                     </td>
                     <td>{formatDateTime(disk.last_seen_at, language, t.notAvailable)}</td>

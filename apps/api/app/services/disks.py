@@ -22,7 +22,15 @@ def list_preferred_disks(db: Session) -> list[ExternalDisk]:
     if has_agent_disks(db):
         statement = statement.where(ExternalDisk.source == "agent")
 
-    return list(db.scalars(statement.order_by(ExternalDisk.display_name.asc())))
+    return list(
+        db.scalars(
+            statement.order_by(
+                ExternalDisk.trusted.desc(),
+                ExternalDisk.connected.desc(),
+                ExternalDisk.display_name.asc(),
+            )
+        )
+    )
 
 
 def record_agent_heartbeat(db: Session, payload: AgentHeartbeatCreate) -> AgentHeartbeat:
@@ -41,6 +49,27 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
     observed_at = payload.observed_at.replace(tzinfo=None)
     upserted: list[ExternalDisk] = []
 
+    report_marker = db.scalar(
+        select(ExternalDisk)
+        .where(
+            ExternalDisk.source == "agent",
+            ExternalDisk.serial_number == f"agent-report::{payload.hostname}",
+        )
+    )
+    if report_marker is None:
+        report_marker = ExternalDisk(
+            serial_number=f"agent-report::{payload.hostname}",
+            display_name=f"Agent report marker {payload.hostname}",
+            dedicated_backup_disk=False,
+            allow_existing_data=False,
+            source="agent",
+            active=False,
+            trusted=False,
+        )
+    report_marker.last_seen_at = observed_at
+    report_marker.connected = False
+    db.add(report_marker)
+
     for item in payload.disks:
         disk = db.scalar(
             select(ExternalDisk).where(ExternalDisk.serial_number == item.serial_number)
@@ -53,6 +82,7 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
                 allow_existing_data=False,
                 source="agent",
                 active=True,
+                trusted=item.trusted,
             )
 
         disk.display_name = item.display_name
@@ -60,6 +90,8 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
         disk.capacity_gb = item.capacity_gb
         disk.filesystem_type = item.filesystem_type
         disk.mount_path = item.mount_path
+        disk.detection_reason = item.detection_reason
+        disk.candidate_type = item.candidate_type
         disk.connected = item.connected
         disk.last_seen_at = observed_at
         disk.source = "agent"

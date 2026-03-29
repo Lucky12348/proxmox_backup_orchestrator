@@ -42,9 +42,12 @@ External disks are now first-class persisted entities. The system can store:
 - model and filesystem metadata
 - mount path and connection state
 - last seen timestamps
+- detection reason and candidate type
+- trusted/not-trusted operator state
 - user-managed backup flags and notes
 
 Seeded disks still exist for development, but the UI prefers agent-reported disks when available.
+Trusted agent disks are surfaced first.
 
 ## Proxmox Integration
 
@@ -81,7 +84,15 @@ The agent is expected to run close to the hardware and will later provide:
 In this phase, the agent contract is intentionally small:
 
 - heartbeat reporting
-- mock disk report ingestion
+- backup-candidate disk report ingestion based on host inspection
+
+Some valid backup disks may appear as SATA or ATA devices rather than USB on the Proxmox host.
+Because of that, the agent now uses a backup-candidate model instead of a USB-only model:
+
+- exclude obvious virtual devices
+- exclude disks backing the host system and main storage stack where possible
+- allow standalone physical disks with a usable serial number
+- let the operator mark candidate disks as trusted in the UI
 
 Real hotplug detection and orchestration are intentionally deferred.
 

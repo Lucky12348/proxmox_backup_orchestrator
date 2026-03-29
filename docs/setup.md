@@ -128,13 +128,22 @@ python -m agent.main report-mock-disks
 
 Run the agent on the Proxmox host itself so `lsblk -J` reflects the real attached storage.
 
-The current real disk report uses pragmatic heuristics:
+The current real disk report uses pragmatic backup-candidate heuristics:
 
 - only `TYPE=disk`
 - excludes `loop`, `dm-*`, `zd*`, and `sr*`
-- prefers removable/external devices detected through `TRAN=usb`, `RM=1`, `HOTPLUG=1`, or USB-related udev properties
+- excludes disks backing `/` or `/boot/efi`
+- excludes obvious system storage members such as `LVM2_member` and `zfs_member`
+- still allows clearly external USB disks
+- also allows standalone SATA/ATA disks when they are not obviously part of the Proxmox system or storage stack
 
 Once a real disk report has been sent, the dashboard prefers agent-reported disks over seeded demo disks.
+
+This matters because valid backup disks on a Proxmox host may appear as SATA/ATA disks rather than USB devices.
+The dashboard now distinguishes:
+
+- candidate disks detected by the agent
+- trusted disks explicitly approved in the UI
 
 If PBS returns `401 Unauthorized`, verify:
 

@@ -19,6 +19,9 @@ class ExternalDiskRead(BaseModel):
     model_name: str | None
     mount_path: str | None
     last_seen_at: datetime | None
+    detection_reason: str | None
+    candidate_type: str | None
+    trusted: bool
     source: str
     active: bool
 
@@ -27,5 +30,6 @@ class ExternalDiskUpdate(BaseModel):
     display_name: str | None = Field(default=None, max_length=255)
     dedicated_backup_disk: bool | None = None
     allow_existing_data: bool | None = None
+    trusted: bool | None = None
     preferred_root_path: str | None = Field(default=None, max_length=255)
     notes: str | None = None

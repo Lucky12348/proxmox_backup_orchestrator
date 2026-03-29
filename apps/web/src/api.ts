@@ -67,7 +67,12 @@ export function updateDisk(
   payload: Partial<
     Pick<
       ExternalDisk,
-      "dedicated_backup_disk" | "allow_existing_data" | "preferred_root_path" | "notes" | "display_name"
+      | "dedicated_backup_disk"
+      | "allow_existing_data"
+      | "preferred_root_path"
+      | "notes"
+      | "display_name"
+      | "trusted"
     >
   >,
 ) {

@@ -31,6 +31,9 @@ export interface ExternalDisk {
   model_name: string | null;
   mount_path: string | null;
   last_seen_at: string | null;
+  detection_reason: string | null;
+  candidate_type: string | null;
+  trusted: boolean;
   source: "seed" | "agent";
   active: boolean;
 }
