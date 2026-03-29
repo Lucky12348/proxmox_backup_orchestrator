@@ -18,6 +18,15 @@
 Use `postgresql+psycopg://...` for `DATABASE_URL`. The backend also rewrites plain
 `postgresql://...` URLs to psycopg3 automatically for local compatibility.
 
+The `.env` file must live at the repository root:
+
+- `proxmox_backup_orchestrator/.env`
+
+When you run `docker-compose -f infra/docker/docker-compose.yml up ...` or
+`docker compose -f infra/docker/docker-compose.yml up ...`, the API and web
+services explicitly load that root `.env` file into their container runtime
+environment.
+
 For read-only Proxmox inventory sync, configure these variables in `.env`:
 
 - `PVE_API_URL`
