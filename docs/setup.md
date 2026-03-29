@@ -106,12 +106,13 @@ After the stack starts, use the dashboard's PBS section to check connectivity an
 
 ## Host Agent Scaffold
 
-The host agent is still a minimal scaffold in this phase. It does not perform real USB detection yet.
+The host agent is still intentionally simple in this phase. It does not run as a daemon and does not watch hotplug events yet.
 
 It currently supports:
 
 - sending a heartbeat to the backend
-- sending a mock external-disk report
+- sending a real disk report based on Linux host inspection
+- sending a mock external-disk report for fallback testing
 
 Example local commands:
 
@@ -122,9 +123,18 @@ source .venv/bin/activate
 pip install -e .
 python -m agent.main heartbeat
 python -m agent.main report-disks
+python -m agent.main report-mock-disks
 ```
 
-Once a disk report has been sent, the dashboard prefers agent-reported disks over seeded demo disks.
+Run the agent on the Proxmox host itself so `lsblk -J` reflects the real attached storage.
+
+The current real disk report uses pragmatic heuristics:
+
+- only `TYPE=disk`
+- excludes `loop`, `dm-*`, `zd*`, and `sr*`
+- prefers removable/external devices detected through `TRAN=usb`, `RM=1`, `HOTPLUG=1`, or USB-related udev properties
+
+Once a real disk report has been sent, the dashboard prefers agent-reported disks over seeded demo disks.
 
 If PBS returns `401 Unauthorized`, verify:
 
