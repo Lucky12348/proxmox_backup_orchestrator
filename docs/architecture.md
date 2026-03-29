@@ -53,6 +53,8 @@ The PBS integration is also intentionally narrow:
 - it infers the most recent backup time per VM or CT
 - it updates `VirtualMachine.last_backup_at` for matching Proxmox inventory rows
 
+Authentication is done with a PBS API token, not user-password basic auth. Token ACLs and datastore permissions are managed on PBS.
+
 This phase is read-only. It does not orchestrate disks, trigger exports, or manage retention.
 
 ### Agent on Proxmox Host

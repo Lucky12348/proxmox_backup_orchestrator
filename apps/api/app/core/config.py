@@ -44,8 +44,8 @@ class Settings:
         "PBS_API_URL",
         "https://pbs.example.local:8007/api2/json",
     )
-    pbs_username: str = os.getenv("PBS_USERNAME", "")
-    pbs_password: str = os.getenv("PBS_PASSWORD", "")
+    pbs_token_id: str = os.getenv("PBS_TOKEN_ID", "")
+    pbs_token_secret: str = os.getenv("PBS_TOKEN_SECRET", "")
     pbs_verify_ssl: bool = parse_bool(os.getenv("PBS_VERIFY_SSL"), default=False)
     pbs_datastore: str = os.getenv("PBS_DATASTORE", "backup")
 

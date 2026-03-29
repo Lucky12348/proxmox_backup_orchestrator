@@ -18,8 +18,8 @@ services:
       PVE_VERIFY_SSL: ${PVE_VERIFY_SSL:-false}
       PVE_NODE_NAME: ${PVE_NODE_NAME:-proxmox}
       PBS_API_URL: ${PBS_API_URL:-https://pbs.example.local:8007/api2/json}
-      PBS_USERNAME: ${PBS_USERNAME:-}
-      PBS_PASSWORD: ${PBS_PASSWORD:-}
+      PBS_TOKEN_ID: ${PBS_TOKEN_ID:-}
+      PBS_TOKEN_SECRET: ${PBS_TOKEN_SECRET:-}
       PBS_VERIFY_SSL: ${PBS_VERIFY_SSL:-false}
       PBS_DATASTORE: ${PBS_DATASTORE:-backup}
     ports:

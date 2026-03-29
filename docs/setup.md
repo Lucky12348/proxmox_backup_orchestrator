@@ -38,8 +38,8 @@ For read-only Proxmox inventory sync, configure these variables in `.env`:
 For read-only PBS backup sync, configure these variables in `.env`:
 
 - `PBS_API_URL`
-- `PBS_USERNAME`
-- `PBS_PASSWORD`
+- `PBS_TOKEN_ID`
+- `PBS_TOKEN_SECRET`
 - `PBS_VERIFY_SSL`
 - `PBS_DATASTORE`
 
@@ -90,12 +90,18 @@ The PBS integration is also read-only at this stage. It fetches snapshots from o
 Configure:
 
 1. `PBS_API_URL` with your PBS API base URL ending in `/api2/json`
-2. `PBS_USERNAME` with a PBS user that can read datastore contents
-3. `PBS_PASSWORD` for that user
+2. `PBS_TOKEN_ID` with a PBS API token id such as `root@pam!pbo-pbs`
+3. `PBS_TOKEN_SECRET` with the generated token secret
 4. `PBS_DATASTORE` with the datastore name to inspect
 5. `PBS_VERIFY_SSL=false` for self-signed local setups, or `true` for trusted certificates
 
 After the stack starts, use the dashboard's PBS section to check connectivity and trigger a manual backup sync.
+
+If PBS returns `401 Unauthorized`, verify:
+
+- the token id and secret are correct
+- the token has ACLs allowing API access
+- the token can read the configured datastore
 
 ## Example Commands
 
