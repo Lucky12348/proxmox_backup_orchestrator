@@ -25,6 +25,7 @@ services:
       dockerfile: ../../infra/docker/web.Dockerfile
     restart: unless-stopped
     environment:
+      API_PROXY_TARGET: http://api:8000
       WEB_PORT: ${WEB_PORT:-5173}
     ports:
       - "${WEB_PORT:-5173}:5173"

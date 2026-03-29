@@ -2,7 +2,7 @@
 
 ## High-Level Design
 
-The initial target architecture is intentionally simple:
+The current MVP stage is intentionally simple:
 
 - a dedicated VM runs the API, web application, and PostgreSQL database
 - a lightweight Python agent runs directly on a Proxmox host
@@ -16,9 +16,20 @@ The initial target architecture is intentionally simple:
 
 The application VM hosts the main control plane:
 
-- FastAPI backend for orchestration and persistence
-- React frontend for monitoring and operator actions
-- PostgreSQL for application state
+- FastAPI backend with PostgreSQL-backed domain models and REST endpoints
+- React frontend for monitoring and simple operator edits
+- PostgreSQL for persisted application state
+
+## Current Domain Scope
+
+This stage introduces database-backed MVP entities for:
+
+- virtual machines and containers
+- external removable disks
+- disk-to-workload assignments
+- backup run history
+
+The dashboard currently reads from the API and exposes a small amount of inline editing for MVP flags.
 
 ### Agent on Proxmox Host
 
@@ -30,7 +41,9 @@ The agent is expected to run close to the hardware and later provide:
 
 ### PBS as Backup Engine
 
-PBS remains responsible for performing and storing backups. The orchestrator will focus on coordination, visibility, and workflow state rather than replacing PBS.
+PBS remains responsible for performing and storing backups. The orchestrator focuses on coordination, visibility, and workflow state rather than replacing PBS.
+
+Real Proxmox VE and PBS integration is intentionally deferred. It will be introduced later through the host agent and dedicated connector/service layers.
 
 ### External Removable Disks
 

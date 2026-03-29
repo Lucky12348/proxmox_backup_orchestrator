@@ -1,1 +1,1 @@
-"""Application services placeholder package."""
+"""Application services package."""
