@@ -242,6 +242,11 @@ tbody tr:hover {
   background: #dcecff;
 }
 
+.source-agent {
+  color: #1f6a56;
+  background: #ddf5ee;
+}
+
 .source-seed {
   color: #685415;
   background: #f8efce;

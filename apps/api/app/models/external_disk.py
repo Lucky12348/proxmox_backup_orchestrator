@@ -1,4 +1,6 @@
-from sqlalchemy import Boolean, Integer, String, Text
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -16,5 +18,11 @@ class ExternalDisk(Base):
     allow_existing_data: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     preferred_root_path: Mapped[str | None] = mapped_column(String(255))
     notes: Mapped[str | None] = mapped_column(Text)
+    filesystem_type: Mapped[str | None] = mapped_column(String(64))
+    model_name: Mapped[str | None] = mapped_column(String(255))
+    mount_path: Mapped[str | None] = mapped_column(String(255))
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="seed")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     assignments = relationship("DiskAssignment", back_populates="disk", cascade="all, delete-orphan")

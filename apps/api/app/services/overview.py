@@ -4,6 +4,7 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
 from app.models import BackupRun, ExternalDisk, VirtualMachine
+from app.services.disks import has_agent_disks
 from app.services.pbs_sync import derive_latest_backup_status
 
 
@@ -40,9 +41,11 @@ def get_overview_metrics(db: Session) -> OverviewMetrics:
             VirtualMachine.last_backup_at.is_not(None),
         )
     ) or 0
-    connected_disks = db.scalar(
-        select(func.count(ExternalDisk.id)).where(ExternalDisk.connected.is_(True))
-    ) or 0
+    disk_scope = [ExternalDisk.active.is_(True), ExternalDisk.connected.is_(True)]
+    if has_agent_disks(db):
+        disk_scope.append(ExternalDisk.source == "agent")
+
+    connected_disks = db.scalar(select(func.count(ExternalDisk.id)).where(*disk_scope)) or 0
     latest_backup = db.scalar(select(BackupRun).order_by(BackupRun.started_at.desc()).limit(1))
     recent_backup_runs = list(
         db.scalars(select(BackupRun).order_by(BackupRun.started_at.desc()).limit(5))

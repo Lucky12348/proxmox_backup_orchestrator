@@ -30,8 +30,21 @@ This stage introduces database-backed MVP entities for:
 - external removable disks
 - disk-to-workload assignments
 - backup run history
+- host agent heartbeat and disk report ingestion
 
 The dashboard currently reads from the API, can trigger a read-only Proxmox inventory sync, and exposes a small amount of inline editing for MVP flags.
+
+## External Disk Foundation
+
+External disks are now first-class persisted entities. The system can store:
+
+- serial number and display name
+- model and filesystem metadata
+- mount path and connection state
+- last seen timestamps
+- user-managed backup flags and notes
+
+Seeded disks still exist for development, but the UI prefers agent-reported disks when available.
 
 ## Proxmox Integration
 
@@ -59,17 +72,24 @@ This phase is read-only. It does not orchestrate disks, trigger exports, or mana
 
 ### Agent on Proxmox Host
 
-The agent is expected to run close to the hardware and later provide:
+The agent is expected to run close to the hardware and will later provide:
 
 - USB disk detection
 - mount / presence reporting
 - host-local signals useful for removable-media workflows
 
+In this phase, the agent contract is intentionally small:
+
+- heartbeat reporting
+- mock disk report ingestion
+
+Real hotplug detection and orchestration are intentionally deferred.
+
 ### PBS as Backup Engine
 
 PBS remains responsible for performing and storing backups. The orchestrator focuses on coordination, visibility, and workflow state rather than replacing PBS.
 
-Disk orchestration, removable-media exports, and USB agent coordination are still deferred. This phase only establishes read-only inventory and backup visibility.
+Disk orchestration, removable-media exports, and real USB hotplug coordination are still deferred. This phase only establishes visibility, persisted disk metadata, and the first host-agent contract.
 
 ### External Removable Disks
 

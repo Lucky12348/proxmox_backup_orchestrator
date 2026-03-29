@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -13,9 +15,16 @@ class ExternalDiskRead(BaseModel):
     allow_existing_data: bool
     preferred_root_path: str | None
     notes: str | None
+    filesystem_type: str | None
+    model_name: str | None
+    mount_path: str | None
+    last_seen_at: datetime | None
+    source: str
+    active: bool
 
 
 class ExternalDiskUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=255)
     dedicated_backup_disk: bool | None = None
     allow_existing_data: bool | None = None
     preferred_root_path: str | None = Field(default=None, max_length=255)

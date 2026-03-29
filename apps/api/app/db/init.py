@@ -10,6 +10,7 @@ from app.models import BackupRun, BackupRunStatus, DiskAssignment, ExternalDisk,
 def create_tables() -> None:
     Base.metadata.create_all(bind=engine)
     ensure_virtual_machine_schema()
+    ensure_external_disk_schema()
 
 
 def ensure_virtual_machine_schema() -> None:
@@ -36,6 +37,24 @@ def ensure_virtual_machine_schema() -> None:
                 "WHERE external_id IS NOT NULL"
             )
         )
+
+
+def ensure_external_disk_schema() -> None:
+    inspector = inspect(engine)
+    existing_columns = {column["name"] for column in inspector.get_columns("external_disks")}
+    column_statements = {
+        "filesystem_type": "ALTER TABLE external_disks ADD COLUMN filesystem_type VARCHAR(64)",
+        "model_name": "ALTER TABLE external_disks ADD COLUMN model_name VARCHAR(255)",
+        "mount_path": "ALTER TABLE external_disks ADD COLUMN mount_path VARCHAR(255)",
+        "last_seen_at": "ALTER TABLE external_disks ADD COLUMN last_seen_at TIMESTAMP",
+        "source": "ALTER TABLE external_disks ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'seed'",
+        "active": "ALTER TABLE external_disks ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE",
+    }
+
+    with engine.begin() as connection:
+        for column_name, statement in column_statements.items():
+            if column_name not in existing_columns:
+                connection.execute(text(statement))
 
 
 def seed_database() -> None:
@@ -89,6 +108,12 @@ def seed_database() -> None:
             allow_existing_data=False,
             preferred_root_path="/mnt/pbs-alpha",
             notes="Primary rotating backup disk.",
+            filesystem_type="ext4",
+            model_name="Seeded Backup Disk Alpha",
+            mount_path="/mnt/pbs-alpha",
+            last_seen_at=datetime.fromisoformat("2026-03-28T20:00:00"),
+            source="seed",
+            active=True,
         )
         disk_secondary = ExternalDisk(
             serial_number="PBO-DISK-002",
@@ -99,6 +124,12 @@ def seed_database() -> None:
             allow_existing_data=True,
             preferred_root_path="/mnt/pbs-beta",
             notes="Off-site disk currently disconnected.",
+            filesystem_type="ext4",
+            model_name="Seeded Backup Disk Beta",
+            mount_path=None,
+            last_seen_at=datetime.fromisoformat("2026-03-27T18:00:00"),
+            source="seed",
+            active=True,
         )
         disk_shared = ExternalDisk(
             serial_number="PBO-DISK-003",
@@ -109,6 +140,12 @@ def seed_database() -> None:
             allow_existing_data=True,
             preferred_root_path=None,
             notes="General-purpose external storage.",
+            filesystem_type="exfat",
+            model_name="Seeded Utility Disk",
+            mount_path="/mnt/shared-utility",
+            last_seen_at=datetime.fromisoformat("2026-03-28T19:30:00"),
+            source="seed",
+            active=True,
         )
 
         db.add_all(

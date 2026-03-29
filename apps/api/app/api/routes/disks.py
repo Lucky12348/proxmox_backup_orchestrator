@@ -4,6 +4,7 @@ from sqlalchemy import select
 from app.api.dependencies import DbSession
 from app.models import ExternalDisk
 from app.schemas import ExternalDiskRead, ExternalDiskUpdate
+from app.services.disks import list_preferred_disks
 
 
 router = APIRouter(prefix="/disks", tags=["external-disks"])
@@ -12,6 +13,11 @@ router = APIRouter(prefix="/disks", tags=["external-disks"])
 @router.get("", response_model=list[ExternalDiskRead])
 def list_disks(db: DbSession) -> list[ExternalDisk]:
     return list(db.scalars(select(ExternalDisk).order_by(ExternalDisk.display_name.asc())))
+
+
+@router.get("/preferred", response_model=list[ExternalDiskRead])
+def get_preferred_disks(db: DbSession) -> list[ExternalDisk]:
+    return list_preferred_disks(db)
 
 
 @router.patch("/{disk_id}", response_model=ExternalDiskRead)

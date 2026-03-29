@@ -27,6 +27,12 @@ export interface ExternalDisk {
   allow_existing_data: boolean;
   preferred_root_path: string | null;
   notes: string | null;
+  filesystem_type: string | null;
+  model_name: string | null;
+  mount_path: string | null;
+  last_seen_at: string | null;
+  source: "seed" | "agent";
+  active: boolean;
 }
 
 export interface BackupRun {
@@ -79,4 +85,19 @@ export interface PBSInventoryItem {
   vm_type: VmType;
   last_backup_at: string | null;
   protected: boolean;
+}
+
+export interface AgentHeartbeat {
+  id: number;
+  hostname: string;
+  agent_version: string;
+  observed_at: string;
+}
+
+export interface AgentStatus {
+  connected: boolean;
+  hostname: string | null;
+  last_heartbeat_at: string | null;
+  last_report_at: string | null;
+  status: "connected" | "degraded";
 }

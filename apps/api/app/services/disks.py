@@ -1,0 +1,100 @@
+from datetime import datetime, timedelta
+
+from sqlalchemy import exists, select
+from sqlalchemy.orm import Session
+
+from app.models import AgentHeartbeat, ExternalDisk
+from app.schemas.agent import AgentDiskReportCreate, AgentHeartbeatCreate
+
+
+def has_agent_disks(db: Session) -> bool:
+    statement = select(
+        exists().where(
+            ExternalDisk.source == "agent",
+            ExternalDisk.active.is_(True),
+        )
+    )
+    return bool(db.scalar(statement))
+
+
+def list_preferred_disks(db: Session) -> list[ExternalDisk]:
+    statement = select(ExternalDisk).where(ExternalDisk.active.is_(True))
+    if has_agent_disks(db):
+        statement = statement.where(ExternalDisk.source == "agent")
+
+    return list(db.scalars(statement.order_by(ExternalDisk.display_name.asc())))
+
+
+def record_agent_heartbeat(db: Session, payload: AgentHeartbeatCreate) -> AgentHeartbeat:
+    heartbeat = AgentHeartbeat(
+        hostname=payload.hostname,
+        agent_version=payload.agent_version,
+        observed_at=payload.observed_at.replace(tzinfo=None),
+    )
+    db.add(heartbeat)
+    db.commit()
+    db.refresh(heartbeat)
+    return heartbeat
+
+
+def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> list[ExternalDisk]:
+    observed_at = payload.observed_at.replace(tzinfo=None)
+    upserted: list[ExternalDisk] = []
+
+    for item in payload.disks:
+        disk = db.scalar(
+            select(ExternalDisk).where(ExternalDisk.serial_number == item.serial_number)
+        )
+
+        if disk is None:
+            disk = ExternalDisk(
+                serial_number=item.serial_number,
+                dedicated_backup_disk=False,
+                allow_existing_data=False,
+                source="agent",
+                active=True,
+            )
+
+        disk.display_name = item.display_name
+        disk.model_name = item.model_name
+        disk.capacity_gb = item.capacity_gb
+        disk.filesystem_type = item.filesystem_type
+        disk.mount_path = item.mount_path
+        disk.connected = item.connected
+        disk.last_seen_at = observed_at
+        disk.source = "agent"
+        disk.active = True
+
+        db.add(disk)
+        upserted.append(disk)
+
+    db.commit()
+
+    for disk in upserted:
+        db.refresh(disk)
+
+    return upserted
+
+
+def get_agent_status(db: Session) -> dict[str, datetime | str | bool | None]:
+    latest_heartbeat = db.scalar(
+        select(AgentHeartbeat).order_by(AgentHeartbeat.observed_at.desc()).limit(1)
+    )
+    last_report_at = db.scalar(
+        select(ExternalDisk.last_seen_at)
+        .where(ExternalDisk.source == "agent")
+        .order_by(ExternalDisk.last_seen_at.desc())
+        .limit(1)
+    )
+
+    now = datetime.utcnow()
+    latest_seen = latest_heartbeat.observed_at if latest_heartbeat else None
+    connected = bool(latest_seen and latest_seen >= now - timedelta(minutes=10))
+
+    return {
+        "connected": connected,
+        "hostname": latest_heartbeat.hostname if latest_heartbeat else None,
+        "last_heartbeat_at": latest_seen,
+        "last_report_at": last_report_at,
+        "status": "connected" if connected else "degraded",
+    }

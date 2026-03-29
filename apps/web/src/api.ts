@@ -1,4 +1,5 @@
 import type {
+  AgentStatus,
   BackupRun,
   ExternalDisk,
   Overview,
@@ -57,12 +58,16 @@ export function getDisks() {
   return request<ExternalDisk[]>("/disks");
 }
 
+export function getPreferredDisks() {
+  return request<ExternalDisk[]>("/disks/preferred");
+}
+
 export function updateDisk(
   id: number,
   payload: Partial<
     Pick<
       ExternalDisk,
-      "dedicated_backup_disk" | "allow_existing_data" | "preferred_root_path" | "notes"
+      "dedicated_backup_disk" | "allow_existing_data" | "preferred_root_path" | "notes" | "display_name"
     >
   >,
 ) {
@@ -102,4 +107,8 @@ export function syncPBSInventory() {
 
 export function getPBSInventory() {
   return request<PBSInventoryItem[]>("/integrations/pbs/inventory");
+}
+
+export function getAgentStatus() {
+  return request<AgentStatus>("/agent/status");
 }

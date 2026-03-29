@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  getAgentStatus,
   getBackupRuns,
-  getDisks,
-  getOverview,
   getPBSInventory,
   getPBSStatus,
+  getPreferredDisks,
   getProxmoxInventory,
   getProxmoxStatus,
   getVMs,
+  getOverview,
   syncPBSInventory,
   syncProxmoxInventory,
   updateDisk,
@@ -16,6 +17,7 @@ import {
 } from "./api";
 import { translations, type Language } from "./i18n";
 import type {
+  AgentStatus,
   BackupRun,
   BackupRunStatus,
   ExternalDisk,
@@ -27,6 +29,7 @@ import type {
 } from "./types";
 
 interface DashboardState {
+  agentStatus: AgentStatus;
   overview: Overview;
   vms: VirtualMachine[];
   disks: ExternalDisk[];
@@ -61,7 +64,15 @@ function statusClassName(status: BackupRunStatus | null) {
 }
 
 function sourceClassName(source: string) {
-  return source === "proxmox" ? "source-badge source-proxmox" : "source-badge source-seed";
+  if (source === "proxmox") {
+    return "source-badge source-proxmox";
+  }
+
+  if (source === "agent") {
+    return "source-badge source-agent";
+  }
+
+  return "source-badge source-seed";
 }
 
 export default function App() {
@@ -72,7 +83,7 @@ export default function App() {
   const [bannerError, setBannerError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [pbsSyncing, setPbsSyncing] = useState(false);
-  const [syncing, setSyncing] = useState(false);
+  const [proxmoxSyncing, setProxmoxSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const t = translations[language];
@@ -83,30 +94,32 @@ export default function App() {
 
     try {
       const [
+        agentStatus,
         overview,
         vms,
-        disks,
+        preferredDisks,
         backupRuns,
         proxmoxStatus,
         proxmoxInventory,
         pbsStatus,
         pbsInventory,
-      ] =
-        await Promise.all([
-          getOverview(),
-          getVMs(),
-          getDisks(),
-          getBackupRuns(),
-          getProxmoxStatus(),
-          getProxmoxInventory(),
-          getPBSStatus(),
-          getPBSInventory(),
-        ]);
+      ] = await Promise.all([
+        getAgentStatus(),
+        getOverview(),
+        getVMs(),
+        getPreferredDisks(),
+        getBackupRuns(),
+        getProxmoxStatus(),
+        getProxmoxInventory(),
+        getPBSStatus(),
+        getPBSInventory(),
+      ]);
 
       setDashboard({
+        agentStatus,
         overview,
         vms: proxmoxInventory.length > 0 ? proxmoxInventory : vms,
-        disks,
+        disks: preferredDisks,
         backupRuns,
         pbsInventory,
         pbsStatus,
@@ -123,22 +136,27 @@ export default function App() {
     void loadDashboard();
   }, []);
 
-  async function refreshVmInventory() {
-    const [overview, vms, proxmoxInventory, proxmoxStatus, pbsStatus, pbsInventory] = await Promise.all([
-      getOverview(),
-      getVMs(),
-      getProxmoxInventory(),
-      getProxmoxStatus(),
-      getPBSStatus(),
-      getPBSInventory(),
-    ]);
+  async function refreshDashboardData() {
+    const [agentStatus, overview, vms, preferredDisks, proxmoxInventory, proxmoxStatus, pbsStatus, pbsInventory] =
+      await Promise.all([
+        getAgentStatus(),
+        getOverview(),
+        getVMs(),
+        getPreferredDisks(),
+        getProxmoxInventory(),
+        getProxmoxStatus(),
+        getPBSStatus(),
+        getPBSInventory(),
+      ]);
 
     setDashboard((current) =>
       current
         ? {
             ...current,
+            agentStatus,
             overview,
             vms: proxmoxInventory.length > 0 ? proxmoxInventory : vms,
+            disks: preferredDisks,
             pbsInventory,
             pbsStatus,
             proxmoxStatus,
@@ -169,13 +187,21 @@ export default function App() {
     }
   }
 
-  async function handleDiskDedicatedChange(disk: ExternalDisk, dedicated_backup_disk: boolean) {
+  async function handleDiskFieldUpdate(
+    disk: ExternalDisk,
+    payload: Partial<
+      Pick<
+        ExternalDisk,
+        "dedicated_backup_disk" | "allow_existing_data" | "display_name" | "preferred_root_path" | "notes"
+      >
+    >,
+  ) {
     const key = `disk-${disk.id}`;
     setSavingKey(key);
     setBannerError(null);
 
     try {
-      const updated = await updateDisk(disk.id, { dedicated_backup_disk });
+      const updated = await updateDisk(disk.id, payload);
       setDashboard((current) =>
         current
           ? {
@@ -191,21 +217,21 @@ export default function App() {
     }
   }
 
-  async function handleSyncInventory() {
-    setSyncing(true);
+  async function handleProxmoxSync() {
+    setProxmoxSyncing(true);
     setBannerError(null);
     setSyncMessage(null);
 
     try {
       const summary = await syncProxmoxInventory();
-      await refreshVmInventory();
+      await refreshDashboardData();
       setSyncMessage(
         `${t.proxmoxSyncSummary}: ${summary.total_seen} (${summary.synced_vms_count} VM, ${summary.synced_cts_count} CT)`,
       );
     } catch (syncError) {
       setBannerError(syncError instanceof Error ? syncError.message : "Unknown error");
     } finally {
-      setSyncing(false);
+      setProxmoxSyncing(false);
     }
   }
 
@@ -216,7 +242,7 @@ export default function App() {
 
     try {
       const summary = await syncPBSInventory();
-      await refreshVmInventory();
+      await refreshDashboardData();
       setSyncMessage(
         `${t.pbsSyncSummary}: ${summary.total_snapshots_seen} (${summary.matched_vms} VM, ${summary.matched_cts} CT)`,
       );
@@ -331,14 +357,58 @@ export default function App() {
 
       <section className="panel">
         <div className="section-heading">
+          <h2>{t.agentStatus}</h2>
+          <span
+            className={statusClassName(
+              dashboard.agentStatus.connected ? "success" : "failed",
+            )}
+          >
+            {dashboard.agentStatus.connected ? t.connected : t.degraded}
+          </span>
+        </div>
+
+        <div className="proxmox-grid">
+          <div>
+            <p className="card-label">{t.agentHostname}</p>
+            <p>{dashboard.agentStatus.hostname ?? t.notAvailable}</p>
+          </div>
+          <div>
+            <p className="card-label">{t.agentHeartbeat}</p>
+            <p>
+              {formatDateTime(
+                dashboard.agentStatus.last_heartbeat_at,
+                language,
+                t.notAvailable,
+              )}
+            </p>
+          </div>
+          <div>
+            <p className="card-label">{t.agentReport}</p>
+            <p>
+              {formatDateTime(
+                dashboard.agentStatus.last_report_at,
+                language,
+                t.notAvailable,
+              )}
+            </p>
+          </div>
+          <div>
+            <p className="card-label">{t.agentHealth}</p>
+            <p>{dashboard.agentStatus.connected ? t.connected : t.degraded}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
           <h2>{t.proxmoxConnection}</h2>
           <button
             className="action-button"
-            disabled={syncing}
-            onClick={() => void handleSyncInventory()}
+            disabled={proxmoxSyncing}
+            onClick={() => void handleProxmoxSync()}
             type="button"
           >
-            {syncing ? t.proxmoxSyncing : t.proxmoxSync}
+            {proxmoxSyncing ? t.proxmoxSyncing : t.proxmoxSync}
           </button>
         </div>
 
@@ -430,35 +500,37 @@ export default function App() {
 
                   return (
                     <tr key={vm.id}>
-                    <td>{vm.name}</td>
-                    <td>{vm.vm_type.toUpperCase()}</td>
-                    <td>
-                      <span className={sourceClassName(vm.source)}>{t.source[vm.source]}</span>
-                    </td>
-                    <td>{vm.node_name ?? t.notAvailable}</td>
-                    <td>{vm.runtime_status ?? t.notAvailable}</td>
-                    <td>{backupState?.protected ? t.yes : t.no}</td>
-                    <td>
-                      <label className="checkbox-cell">
-                        <input
-                          checked={vm.critical}
-                          disabled={savingKey === `vm-${vm.id}`}
-                          type="checkbox"
-                          onChange={(event) => void handleVmCriticalChange(vm, event.target.checked)}
-                        />
-                        <span>{vm.critical ? t.yes : t.no}</span>
-                      </label>
-                    </td>
-                    <td>{vm.size_gb}</td>
-                    <td>{vm.enabled ? t.yes : t.no}</td>
-                    <td>
-                      {formatDateTime(
-                        backupState?.last_backup_at ?? vm.last_backup_at,
-                        language,
-                        t.notAvailable,
-                      )}
-                    </td>
-                  </tr>
+                      <td>{vm.name}</td>
+                      <td>{vm.vm_type.toUpperCase()}</td>
+                      <td>
+                        <span className={sourceClassName(vm.source)}>{t.source[vm.source]}</span>
+                      </td>
+                      <td>{vm.node_name ?? t.notAvailable}</td>
+                      <td>{vm.runtime_status ?? t.notAvailable}</td>
+                      <td>{backupState?.protected ? t.yes : t.no}</td>
+                      <td>
+                        <label className="checkbox-cell">
+                          <input
+                            checked={vm.critical}
+                            disabled={savingKey === `vm-${vm.id}`}
+                            type="checkbox"
+                            onChange={(event) =>
+                              void handleVmCriticalChange(vm, event.target.checked)
+                            }
+                          />
+                          <span>{vm.critical ? t.yes : t.no}</span>
+                        </label>
+                      </td>
+                      <td>{vm.size_gb}</td>
+                      <td>{vm.enabled ? t.yes : t.no}</td>
+                      <td>
+                        {formatDateTime(
+                          backupState?.last_backup_at ?? vm.last_backup_at,
+                          language,
+                          t.notAvailable,
+                        )}
+                      </td>
+                    </tr>
                   );
                 })}
               </tbody>
@@ -480,22 +552,27 @@ export default function App() {
             <table>
               <thead>
                 <tr>
-                  <th>{t.diskName}</th>
                   <th>{t.diskSerial}</th>
+                  <th>{t.diskName}</th>
+                  <th>{t.diskModel}</th>
                   <th>{t.diskCapacity}</th>
+                  <th>{t.diskFilesystem}</th>
+                  <th>{t.diskMountPath}</th>
                   <th>{t.diskConnected}</th>
                   <th>{t.diskDedicated}</th>
                   <th>{t.diskAllowExistingData}</th>
-                  <th>{t.diskPreferredRootPath}</th>
-                  <th>{t.diskNotes}</th>
+                  <th>{t.diskLastSeen}</th>
                 </tr>
               </thead>
               <tbody>
                 {dashboard.disks.map((disk) => (
                   <tr key={disk.id}>
-                    <td>{disk.display_name}</td>
                     <td>{disk.serial_number}</td>
+                    <td>{disk.display_name}</td>
+                    <td>{disk.model_name ?? t.notAvailable}</td>
                     <td>{disk.capacity_gb}</td>
+                    <td>{disk.filesystem_type ?? t.notAvailable}</td>
+                    <td>{disk.mount_path ?? t.notAvailable}</td>
                     <td>{disk.connected ? t.yes : t.no}</td>
                     <td>
                       <label className="checkbox-cell">
@@ -504,15 +581,30 @@ export default function App() {
                           disabled={savingKey === `disk-${disk.id}`}
                           type="checkbox"
                           onChange={(event) =>
-                            void handleDiskDedicatedChange(disk, event.target.checked)
+                            void handleDiskFieldUpdate(disk, {
+                              dedicated_backup_disk: event.target.checked,
+                            })
                           }
                         />
                         <span>{disk.dedicated_backup_disk ? t.yes : t.no}</span>
                       </label>
                     </td>
-                    <td>{disk.allow_existing_data ? t.yes : t.no}</td>
-                    <td>{disk.preferred_root_path ?? t.notAvailable}</td>
-                    <td>{disk.notes ?? t.notAvailable}</td>
+                    <td>
+                      <label className="checkbox-cell">
+                        <input
+                          checked={disk.allow_existing_data}
+                          disabled={savingKey === `disk-${disk.id}`}
+                          type="checkbox"
+                          onChange={(event) =>
+                            void handleDiskFieldUpdate(disk, {
+                              allow_existing_data: event.target.checked,
+                            })
+                          }
+                        />
+                        <span>{disk.allow_existing_data ? t.yes : t.no}</span>
+                      </label>
+                    </td>
+                    <td>{formatDateTime(disk.last_seen_at, language, t.notAvailable)}</td>
                   </tr>
                 ))}
               </tbody>

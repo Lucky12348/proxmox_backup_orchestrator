@@ -43,6 +43,13 @@ For read-only PBS backup sync, configure these variables in `.env`:
 - `PBS_VERIFY_SSL`
 - `PBS_DATASTORE`
 
+For the local host-agent scaffold, these variables are useful when running `apps/agent` manually:
+
+- `AGENT_API_BASE_URL`
+- `AGENT_HOSTNAME`
+- `AGENT_VERSION`
+- `AGENT_TIMEOUT_SECONDS`
+
 For POSIX shells, a matching helper is available at `infra/scripts/bootstrap.sh`.
 
 ## Local URLs
@@ -96,6 +103,28 @@ Configure:
 5. `PBS_VERIFY_SSL=false` for self-signed local setups, or `true` for trusted certificates
 
 After the stack starts, use the dashboard's PBS section to check connectivity and trigger a manual backup sync.
+
+## Host Agent Scaffold
+
+The host agent is still a minimal scaffold in this phase. It does not perform real USB detection yet.
+
+It currently supports:
+
+- sending a heartbeat to the backend
+- sending a mock external-disk report
+
+Example local commands:
+
+```bash
+cd apps/agent
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+python -m agent.main heartbeat
+python -m agent.main report-disks
+```
+
+Once a disk report has been sent, the dashboard prefers agent-reported disks over seeded demo disks.
 
 If PBS returns `401 Unauthorized`, verify:
 
