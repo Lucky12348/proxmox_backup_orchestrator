@@ -48,6 +48,7 @@ class Settings:
     pbs_token_secret: str = os.getenv("PBS_TOKEN_SECRET", "")
     pbs_verify_ssl: bool = parse_bool(os.getenv("PBS_VERIFY_SSL"), default=False)
     pbs_datastore: str = os.getenv("PBS_DATASTORE", "backup")
+    agent_stale_after_minutes: int = int(os.getenv("AGENT_STALE_AFTER_MINUTES", "10"))
 
     @property
     def cors_origins(self) -> list[str]:

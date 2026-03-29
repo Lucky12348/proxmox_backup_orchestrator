@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Proxmox Backup Orchestrator host agent every 2 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Unit=proxmox-backup-orchestrator-agent.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

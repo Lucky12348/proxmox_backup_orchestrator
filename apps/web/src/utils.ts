@@ -60,6 +60,18 @@ export function getSourceTone(source: string) {
   return "warning";
 }
 
+export function getAgentStatusTone(status: "connected" | "degraded" | "disconnected") {
+  if (status === "connected") {
+    return "success";
+  }
+
+  if (status === "degraded") {
+    return "warning";
+  }
+
+  return "danger";
+}
+
 export function getLatestStatusLabel(
   status: BackupRunStatus | null,
   t: TranslationDictionary,

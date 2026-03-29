@@ -43,3 +43,5 @@ class AgentStatusRead(BaseModel):
     last_heartbeat_at: datetime | None
     last_report_at: datetime | None
     status: str
+    stale_after_minutes: int
+    last_seen_age_seconds: int | None

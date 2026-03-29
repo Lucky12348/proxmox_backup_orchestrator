@@ -62,6 +62,11 @@ def post_mock_disk_report(settings: AgentSettings) -> None:
     logger.info("Mock disk report sent for host %s", settings.hostname)
 
 
+def sync_state(settings: AgentSettings) -> None:
+    post_heartbeat(settings)
+    post_real_disk_report(settings)
+
+
 def discover_real_disks() -> list[dict[str, Any]]:
     lsblk_output = run_command(
         [
@@ -324,6 +329,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("heartbeat", help="Send a heartbeat to the backend")
+    subparsers.add_parser("sync-state", help="Send heartbeat, then send a real disk report")
     subparsers.add_parser("report-disks", help="Discover backup candidate disks and send a disk report")
     subparsers.add_parser("report-mock-disks", help="Send a mock disk report for development")
 
@@ -337,6 +343,10 @@ def main() -> None:
 
     if args.command == "heartbeat":
         post_heartbeat(settings)
+        return
+
+    if args.command == "sync-state":
+        sync_state(settings)
         return
 
     if args.command == "report-disks":

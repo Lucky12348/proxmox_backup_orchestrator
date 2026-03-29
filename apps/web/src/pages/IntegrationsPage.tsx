@@ -1,7 +1,19 @@
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
-import { formatDateTime } from "../utils";
+import { formatDateTime, getAgentStatusTone } from "../utils";
 import type { IntegrationsPageProps } from "./shared";
+
+function formatHeartbeatAge(value: number | null, t: IntegrationsPageProps["t"]) {
+  if (value === null) {
+    return t.notAvailable;
+  }
+
+  if (value >= 60) {
+    return `${Math.floor(value / 60)} ${t.minutesShort}`;
+  }
+
+  return `${value} ${t.secondsShort}`;
+}
 
 export function IntegrationsPage({
   data,
@@ -72,8 +84,8 @@ export function IntegrationsPage({
         <article className="panel-card">
           <div className="panel-card-header">
             <h2>{t.agentStatus}</h2>
-            <StatusBadge tone={data.agentStatus.connected ? "success" : "warning"}>
-              {data.agentStatus.connected ? t.connected : t.degraded}
+            <StatusBadge tone={getAgentStatusTone(data.agentStatus.status)}>
+              {t[data.agentStatus.status]}
             </StatusBadge>
           </div>
           <div className="integration-details">
@@ -88,6 +100,14 @@ export function IntegrationsPage({
             <div className="summary-row">
               <span>{t.agentReport}</span>
               <strong>{formatDateTime(data.agentStatus.last_report_at, language, t.notAvailable)}</strong>
+            </div>
+            <div className="summary-row">
+              <span>{t.agentStaleThreshold}</span>
+              <strong>{data.agentStatus.stale_after_minutes} {t.minutesShort}</strong>
+            </div>
+            <div className="summary-row">
+              <span>{t.agentLastSeenAge}</span>
+              <strong>{formatHeartbeatAge(data.agentStatus.last_seen_age_seconds, t)}</strong>
             </div>
             <p className="integration-message">{t.agentDescription}</p>
           </div>

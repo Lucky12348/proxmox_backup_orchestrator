@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models import AgentHeartbeat, ExternalDisk
 from app.schemas.agent import AgentDiskReportCreate, AgentHeartbeatCreate
 
@@ -108,7 +109,8 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
     return upserted
 
 
-def get_agent_status(db: Session) -> dict[str, datetime | str | bool | None]:
+def get_agent_status(db: Session) -> dict[str, datetime | str | bool | int | None]:
+    settings = get_settings()
     latest_heartbeat = db.scalar(
         select(AgentHeartbeat).order_by(AgentHeartbeat.observed_at.desc()).limit(1)
     )
@@ -121,12 +123,28 @@ def get_agent_status(db: Session) -> dict[str, datetime | str | bool | None]:
 
     now = datetime.utcnow()
     latest_seen = latest_heartbeat.observed_at if latest_heartbeat else None
-    connected = bool(latest_seen and latest_seen >= now - timedelta(minutes=10))
+    stale_after = settings.agent_stale_after_minutes
+    threshold = now - timedelta(minutes=stale_after)
+    last_seen_age_seconds = None
+    if latest_seen is not None:
+        last_seen_age_seconds = max(0, int((now - latest_seen).total_seconds()))
+
+    if latest_seen is None:
+        status = "disconnected"
+        connected = False
+    elif latest_seen >= threshold:
+        status = "connected"
+        connected = True
+    else:
+        status = "degraded"
+        connected = False
 
     return {
         "connected": connected,
         "hostname": latest_heartbeat.hostname if latest_heartbeat else None,
         "last_heartbeat_at": latest_seen,
         "last_report_at": last_report_at,
-        "status": "connected" if connected else "degraded",
+        "status": status,
+        "stale_after_minutes": stale_after,
+        "last_seen_age_seconds": last_seen_age_seconds,
     }

@@ -4,7 +4,7 @@ import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
 import { StatusBadge } from "../components/StatusBadge";
-import { getBackupStatusTone } from "../utils";
+import { getAgentStatusTone, getBackupStatusTone } from "../utils";
 import type { DashboardPageProps } from "./shared";
 
 export function DashboardPage({ data, t, latestBackupLabel }: DashboardPageProps) {
@@ -55,8 +55,8 @@ export function DashboardPage({ data, t, latestBackupLabel }: DashboardPageProps
             </div>
             <div className="summary-row">
               <span>{t.agentStatus}</span>
-              <StatusBadge tone={data.agentStatus.connected ? "success" : "warning"}>
-                {data.agentStatus.connected ? t.connected : t.degraded}
+              <StatusBadge tone={getAgentStatusTone(data.agentStatus.status)}>
+                {t[data.agentStatus.status]}
               </StatusBadge>
             </div>
           </div>

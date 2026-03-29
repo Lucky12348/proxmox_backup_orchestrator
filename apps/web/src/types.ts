@@ -105,7 +105,9 @@ export interface AgentStatus {
   hostname: string | null;
   last_heartbeat_at: string | null;
   last_report_at: string | null;
-  status: "connected" | "degraded";
+  status: "connected" | "degraded" | "disconnected";
+  stale_after_minutes: number;
+  last_seen_age_seconds: number | null;
 }
 
 export interface DiskPlanningSummary {

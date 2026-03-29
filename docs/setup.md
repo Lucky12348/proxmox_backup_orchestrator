@@ -49,6 +49,7 @@ For the local host-agent scaffold, these variables are useful when running `apps
 - `AGENT_HOSTNAME`
 - `AGENT_VERSION`
 - `AGENT_TIMEOUT_SECONDS`
+- `AGENT_STALE_AFTER_MINUTES`
 
 For POSIX shells, a matching helper is available at `infra/scripts/bootstrap.sh`.
 
@@ -112,6 +113,7 @@ It currently supports:
 
 - sending a heartbeat to the backend
 - sending a real disk report based on Linux host inspection
+- sending a combined heartbeat + real disk report with `sync-state`
 - sending a mock external-disk report for fallback testing
 
 Example local commands:
@@ -123,6 +125,7 @@ source .venv/bin/activate
 pip install -e .
 python -m agent.main heartbeat
 python -m agent.main report-disks
+python -m agent.main sync-state
 python -m agent.main report-mock-disks
 ```
 
@@ -152,6 +155,12 @@ Planning in this MVP is intentionally simple:
 - use either `usable_capacity_gb` or the full disk capacity
 - subtract `reserved_capacity_gb`
 - ignore real PBS dedup/chunk behavior for now
+
+The backend considers the agent:
+
+- `connected` when the last heartbeat is newer than `AGENT_STALE_AFTER_MINUTES`
+- `degraded` when a heartbeat exists but is older than that threshold
+- `disconnected` when no heartbeat has been recorded yet
 
 If PBS returns `401 Unauthorized`, verify:
 
@@ -187,6 +196,44 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e .
 python -m agent.main
+```
+
+## Proxmox Host Agent Deployment
+
+To run the agent persistently on the Proxmox host:
+
+1. Copy `apps/agent` to a host path such as `/opt/proxmox-backup-orchestrator-agent`
+2. Create a virtual environment there
+3. Install the package into that venv
+4. Create `/opt/proxmox-backup-orchestrator-agent/.env` with:
+   - `AGENT_API_BASE_URL`
+   - `AGENT_HOSTNAME`
+   - `AGENT_VERSION`
+   - `AGENT_TIMEOUT_SECONDS`
+5. Copy:
+   - `apps/agent/deploy/systemd/proxmox-backup-orchestrator-agent.service`
+   - `apps/agent/deploy/systemd/proxmox-backup-orchestrator-agent.timer`
+   into `/etc/systemd/system/`
+6. Run:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now proxmox-backup-orchestrator-agent.timer
+```
+
+For debugging on the Proxmox host:
+
+```bash
+cd /opt/proxmox-backup-orchestrator-agent
+source .venv/bin/activate
+python -m agent.main sync-state
+```
+
+To inspect logs:
+
+```bash
+sudo journalctl -u proxmox-backup-orchestrator-agent.service -f
+sudo systemctl list-timers proxmox-backup-orchestrator-agent.timer
 ```
 
 ### Docker

@@ -92,6 +92,7 @@ In this phase, the agent contract is intentionally small:
 
 - heartbeat reporting
 - backup-candidate disk report ingestion based on host inspection
+- periodic `sync-state` execution combining heartbeat and disk report
 
 Some valid backup disks may appear as SATA or ATA devices rather than USB on the Proxmox host.
 Because of that, the agent now uses a backup-candidate model instead of a USB-only model:
@@ -102,6 +103,11 @@ Because of that, the agent now uses a backup-candidate model instead of a USB-on
 - let the operator mark candidate disks as trusted in the UI
 
 Real hotplug detection and orchestration are intentionally deferred.
+
+For operational persistence, the intended host-side deployment is a small systemd service
+and timer on the Proxmox host. The timer runs the agent every 2 minutes and the backend
+interprets agent health using a configurable stale threshold rather than assuming continuous
+connectivity.
 
 ### PBS as Backup Engine
 
