@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   getAgentStatus,
   getBackupRuns,
+  getExternalBackupRuns,
   getPBSInventory,
   getPBSStatus,
   getPlanningDisks,
@@ -15,12 +16,14 @@ import {
   getOverview,
   syncPBSInventory,
   syncProxmoxInventory,
+  runExternalBackup,
   updateDisk,
   updateVM,
 } from "../api";
 import type {
   AgentStatus,
   BackupRun,
+  ExternalBackupRun,
   ExternalDisk,
   Overview,
   PBSInventoryItem,
@@ -38,6 +41,7 @@ export interface AppDataState {
   vms: VirtualMachine[];
   disks: ExternalDisk[];
   backupRuns: BackupRun[];
+  externalBackupRuns: ExternalBackupRun[];
   planningDisks: DiskPlanningSummary[];
   planningOverview: PlanningOverview;
   unplannedAssets: UnplannedAsset[];
@@ -53,6 +57,7 @@ async function fetchAppData(): Promise<AppDataState> {
     vms,
     preferredDisks,
     backupRuns,
+    externalBackupRuns,
     planningDisks,
     planningOverview,
     unplannedAssets,
@@ -66,6 +71,7 @@ async function fetchAppData(): Promise<AppDataState> {
     getVMs(),
     getPreferredDisks(),
     getBackupRuns(),
+    getExternalBackupRuns(),
     getPlanningDisks(),
     getPlanningOverview(),
     getUnplannedAssets(),
@@ -81,6 +87,7 @@ async function fetchAppData(): Promise<AppDataState> {
     vms: proxmoxInventory.length > 0 ? proxmoxInventory : vms,
     disks: preferredDisks,
     backupRuns,
+    externalBackupRuns,
     planningDisks,
     planningOverview,
     unplannedAssets,
@@ -214,6 +221,25 @@ export function useAppData() {
     }
   }
 
+  async function startExternalBackup(diskId: number, successMessage: string) {
+    setSavingKey(`external-backup-${diskId}`);
+    setBannerError(null);
+    setSyncMessage(null);
+
+    try {
+      const run = await runExternalBackup(diskId);
+      await refresh();
+      setSyncMessage(`${successMessage}: ${run.disk_name}`);
+      return run;
+    } catch (runError) {
+      setBannerError(runError instanceof Error ? runError.message : "Unknown error");
+    } finally {
+      setSavingKey(null);
+    }
+
+    return null;
+  }
+
   const pbsInventoryByVmId = useMemo(
     () => new Map(data?.pbsInventory.map((item) => [item.vm_id, item]) ?? []),
     [data?.pbsInventory],
@@ -237,5 +263,6 @@ export function useAppData() {
     mutateDisk,
     runProxmoxSync,
     runPBSSync,
+    startExternalBackup,
   };
 }

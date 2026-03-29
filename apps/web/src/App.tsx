@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Route, Routes } from "react-router-dom";
 
+import { getExternalBackupPreview } from "./api";
 import { AppShell } from "./components/AppShell";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { ErrorBanner } from "./components/ErrorBanner";
@@ -15,6 +16,7 @@ import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { PlanningPage } from "./pages/PlanningPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import type { DiskActionRequest } from "./pages/shared";
+import type { ExternalDisk } from "./types";
 import { getLatestStatusLabel } from "./utils";
 
 interface ConfirmState {
@@ -47,6 +49,7 @@ export default function App() {
     mutateDisk,
     runProxmoxSync,
     runPBSSync,
+    startExternalBackup,
   } = useAppData();
 
   const t = translations[language];
@@ -128,6 +131,82 @@ export default function App() {
     });
   }
 
+  async function handleExternalBackupRequest(disk: ExternalDisk) {
+    if (!disk.trusted) {
+      openConfirm({
+        title: t.confirmExternalBackupTitle,
+        description: t.externalBackupBlockedUntrusted,
+        confirmLabel: t.dismiss,
+        cancelLabel: t.cancel,
+        tone: "warning",
+        onConfirm: closeConfirm,
+      });
+      return;
+    }
+
+    if (!disk.connected) {
+      openConfirm({
+        title: t.confirmExternalBackupTitle,
+        description: t.externalBackupBlockedDisconnected,
+        confirmLabel: t.dismiss,
+        cancelLabel: t.cancel,
+        tone: "warning",
+        onConfirm: closeConfirm,
+      });
+      return;
+    }
+
+    if (!disk.dedicated_backup_disk && !disk.allow_existing_data) {
+      openConfirm({
+        title: t.confirmExternalBackupTitle,
+        description: t.externalBackupBlockedMode,
+        confirmLabel: t.dismiss,
+        cancelLabel: t.cancel,
+        tone: "warning",
+        onConfirm: closeConfirm,
+      });
+      return;
+    }
+
+    try {
+      const preview = await getExternalBackupPreview(disk.id);
+      const modeLabel =
+        preview.mode === "dedicated"
+          ? t.externalBackupDedicatedMode
+          : t.externalBackupCoexistenceMode;
+      const preserveText = preview.preserves_existing_data
+        ? t.externalBackupPreservesData
+        : t.externalBackupUsesDedicatedPath;
+
+      openConfirm({
+        title: t.confirmExternalBackupTitle,
+        description: [
+          `${t.confirmExternalBackupDescription}`,
+          `${t.diskName}: ${disk.display_name}`,
+          `${t.externalBackupMode}: ${modeLabel}`,
+          `${t.externalBackupTargetPath}: ${preview.target_path}`,
+          preserveText,
+        ].join(" "),
+        confirmLabel: t.externalBackupAction,
+        cancelLabel: t.cancel,
+        tone: "info",
+        onConfirm: () => {
+          void startExternalBackup(disk.id, t.externalBackupSummary);
+          closeConfirm();
+        },
+      });
+    } catch (previewError) {
+      openConfirm({
+        title: t.confirmExternalBackupTitle,
+        description: previewError instanceof Error ? previewError.message : t.error,
+        confirmLabel: t.dismiss,
+        cancelLabel: t.cancel,
+        tone: "warning",
+        onConfirm: closeConfirm,
+      });
+    }
+  }
+
   if (loading) {
     return (
       <div className="centered-shell">
@@ -194,6 +273,7 @@ export default function App() {
                 data={data}
                 language={language}
                 onDiskFieldChange={(diskId, payload) => void mutateDisk(diskId, payload)}
+                onExternalBackupRequest={(disk) => void handleExternalBackupRequest(disk)}
                 onDiskToggleRequest={handleDiskToggleRequest}
                 savingKey={savingKey}
                 t={t}
@@ -216,7 +296,17 @@ export default function App() {
             }
             path="/integrations"
           />
-          <Route element={<ActivityPage data={data} language={language} t={t} />} path="/activity" />
+          <Route
+            element={
+              <ActivityPage
+                data={data}
+                externalBackupRuns={data.externalBackupRuns}
+                language={language}
+                t={t}
+              />
+            }
+            path="/activity"
+          />
           <Route element={<SettingsPage t={t} />} path="/settings" />
         </Routes>
       </AppShell>

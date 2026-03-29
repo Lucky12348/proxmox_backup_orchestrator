@@ -1,6 +1,6 @@
 import type { AppDataState } from "../hooks/useAppData";
 import type { Language, TranslationDictionary } from "../i18n";
-import type { ExternalDisk, VirtualMachine } from "../types";
+import type { ExternalBackupRun, ExternalDisk, VirtualMachine } from "../types";
 
 export interface PageCommonProps {
   data: AppDataState;
@@ -23,6 +23,7 @@ export interface DiskActionRequest {
 export interface DisksPageProps extends PageCommonProps {
   savingKey: string | null;
   onDiskToggleRequest: (request: DiskActionRequest) => void;
+  onExternalBackupRequest: (disk: ExternalDisk) => void;
   onDiskFieldChange: (
     diskId: number,
     payload: Partial<
@@ -50,7 +51,9 @@ export interface IntegrationsPageProps extends PageCommonProps {
 
 export interface PlanningPageProps extends PageCommonProps {}
 
-export interface ActivityPageProps extends PageCommonProps {}
+export interface ActivityPageProps extends PageCommonProps {
+  externalBackupRuns: ExternalBackupRun[];
+}
 
 export interface SettingsPageProps {
   t: TranslationDictionary;

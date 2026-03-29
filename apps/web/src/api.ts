@@ -2,6 +2,8 @@ import type {
   AgentStatus,
   BackupRun,
   DiskPlanningSummary,
+  ExternalBackupPreview,
+  ExternalBackupRun,
   ExternalDisk,
   Overview,
   PBSInventoryItem,
@@ -134,4 +136,22 @@ export function getPlanningOverview() {
 
 export function getUnplannedAssets() {
   return request<UnplannedAsset[]>("/planning/unplanned-assets");
+}
+
+export function getExternalBackupPreview(diskId: number) {
+  return request<ExternalBackupPreview>(`/external-backups/preview/${diskId}`);
+}
+
+export function runExternalBackup(diskId: number) {
+  return request<ExternalBackupRun>("/external-backups/run", {
+    method: "POST",
+    body: JSON.stringify({
+      disk_id: diskId,
+      confirmation: true,
+    }),
+  });
+}
+
+export function getExternalBackupRuns() {
+  return request<ExternalBackupRun[]>("/external-backups/runs");
 }

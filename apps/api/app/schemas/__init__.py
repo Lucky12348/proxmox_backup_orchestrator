@@ -1,6 +1,11 @@
 from app.schemas.agent import AgentHeartbeatRead, AgentStatusRead
 from app.schemas.backup_run import BackupRunRead
 from app.schemas.external_disk import ExternalDiskRead, ExternalDiskUpdate
+from app.schemas.external_backup import (
+    ExternalBackupRunRead,
+    ExternalBackupRunRequest,
+    ExternalBackupRunSummaryRead,
+)
 from app.schemas.integrations_proxmox import ProxmoxStatusRead, ProxmoxSyncRead
 from app.schemas.integrations_pbs import PBSInventoryRead, PBSStatusRead, PBSSyncRead
 from app.schemas.overview import OverviewRead
@@ -11,6 +16,9 @@ __all__ = [
     "AgentHeartbeatRead",
     "AgentStatusRead",
     "BackupRunRead",
+    "ExternalBackupRunRead",
+    "ExternalBackupRunRequest",
+    "ExternalBackupRunSummaryRead",
     "ExternalDiskRead",
     "ExternalDiskUpdate",
     "PBSInventoryRead",

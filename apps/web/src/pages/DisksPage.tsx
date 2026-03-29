@@ -12,6 +12,7 @@ export function DisksPage({
   t,
   onDiskToggleRequest,
   onDiskFieldChange,
+  onExternalBackupRequest,
 }: DisksPageProps) {
   return (
     <div className="page-stack">
@@ -39,6 +40,7 @@ export function DisksPage({
                 <th>{t.diskUsableCapacity}</th>
                 <th>{t.diskReservedCapacity}</th>
                 <th>{t.diskPlanningNotes}</th>
+                <th>{t.externalBackupAction}</th>
                 <th>{t.diskLastSeen}</th>
               </tr>
             </thead>
@@ -150,6 +152,16 @@ export function DisksPage({
                       }
                       type="text"
                     />
+                  </td>
+                  <td>
+                    <button
+                      className="action-button"
+                      disabled={savingKey === `external-backup-${disk.id}`}
+                      onClick={() => onExternalBackupRequest(disk)}
+                      type="button"
+                    >
+                      {t.externalBackupAction}
+                    </button>
                   </td>
                   <td>{formatDateTime(disk.last_seen_at, language, t.notAvailable)}</td>
                 </tr>

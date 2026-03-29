@@ -4,13 +4,23 @@ from sqlalchemy import inspect, select, text
 
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
-from app.models import BackupRun, BackupRunStatus, DiskAssignment, ExternalDisk, VMType, VirtualMachine
+from app.models import (
+    BackupRun,
+    BackupRunStatus,
+    DiskAssignment,
+    ExternalBackupMode,
+    ExternalBackupRun,
+    ExternalDisk,
+    VMType,
+    VirtualMachine,
+)
 
 
 def create_tables() -> None:
     Base.metadata.create_all(bind=engine)
     ensure_virtual_machine_schema()
     ensure_external_disk_schema()
+    ensure_external_backup_run_schema()
 
 
 def ensure_virtual_machine_schema() -> None:
@@ -55,6 +65,25 @@ def ensure_external_disk_schema() -> None:
         "planning_notes": "ALTER TABLE external_disks ADD COLUMN planning_notes TEXT",
         "source": "ALTER TABLE external_disks ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'seed'",
         "active": "ALTER TABLE external_disks ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE",
+    }
+
+    with engine.begin() as connection:
+        for column_name, statement in column_statements.items():
+            if column_name not in existing_columns:
+                connection.execute(text(statement))
+
+
+def ensure_external_backup_run_schema() -> None:
+    inspector = inspect(engine)
+    if "external_backup_runs" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("external_backup_runs")}
+    column_statements = {
+        "created_at": (
+            "ALTER TABLE external_backup_runs "
+            "ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        ),
     }
 
     with engine.begin() as connection:
@@ -203,6 +232,17 @@ def seed_database() -> None:
                     finished_at=datetime.fromisoformat("2026-03-27T22:07:00"),
                     triggered_by="manual",
                     summary="Backup interrupted because Vault Beta was not connected.",
+                ),
+                ExternalBackupRun(
+                    disk_id=disk_primary.id,
+                    status=BackupRunStatus.SUCCESS,
+                    started_at=datetime.fromisoformat("2026-03-28T23:00:00"),
+                    finished_at=datetime.fromisoformat("2026-03-28T23:12:00"),
+                    target_path="/mnt/pbs-alpha/pbs-datastore",
+                    datastore_name="backup",
+                    message="Seeded external export completed to dedicated target.",
+                    mode=ExternalBackupMode.DEDICATED,
+                    created_at=datetime.fromisoformat("2026-03-28T23:00:00"),
                 ),
             ]
         )

@@ -1,6 +1,7 @@
 export type VmType = "vm" | "ct";
 export type BackupRunStatus = "pending" | "running" | "success" | "failed";
 export type VmSource = "seed" | "proxmox";
+export type ExternalBackupMode = "dedicated" | "coexistence";
 
 export interface VirtualMachine {
   id: number;
@@ -135,4 +136,24 @@ export interface PlanningOverview {
   plannable_vm_count: number;
   planned_vm_count: number;
   planning_coverage_percent: number;
+}
+
+export interface ExternalBackupPreview {
+  target_path: string;
+  mode: ExternalBackupMode;
+  preserves_existing_data: boolean;
+}
+
+export interface ExternalBackupRun {
+  id: number;
+  disk_id: number;
+  disk_name: string;
+  status: BackupRunStatus;
+  started_at: string;
+  finished_at: string | null;
+  target_path: string;
+  datastore_name: string;
+  message: string | null;
+  mode: ExternalBackupMode;
+  created_at: string;
 }

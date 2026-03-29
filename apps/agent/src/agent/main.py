@@ -6,6 +6,7 @@ import socket
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -65,6 +66,45 @@ def post_mock_disk_report(settings: AgentSettings) -> None:
 def sync_state(settings: AgentSettings) -> None:
     post_heartbeat(settings)
     post_real_disk_report(settings)
+
+
+def prepare_external_datastore(mount_path: str, target_path: str) -> None:
+    mount = Path(mount_path)
+    target = Path(target_path)
+    if not mount.exists():
+        raise FileNotFoundError(f"Mount path does not exist: {mount_path}")
+
+    target.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "ok": True,
+        "mount_path": str(mount),
+        "target_path": str(target),
+        "message": "Target directory is ready for external datastore export.",
+    }
+    print(json.dumps(payload))
+    logger.info("Prepared external datastore target %s", target)
+
+
+def run_external_export(target_path: str, datastore_name: str) -> None:
+    target = Path(target_path)
+    if not target.exists():
+        raise FileNotFoundError(f"Target path does not exist: {target_path}")
+
+    payload = {
+        "ok": True,
+        "target_path": str(target),
+        "datastore_name": datastore_name,
+        "message": (
+            "Stub export boundary: would run a PBS-native-like export using "
+            f"datastore '{datastore_name}' into '{target_path}'."
+        ),
+    }
+    print(json.dumps(payload))
+    logger.info(
+        "Stub external export for datastore %s into %s",
+        datastore_name,
+        target_path,
+    )
 
 
 def discover_real_disks() -> list[dict[str, Any]]:
@@ -332,6 +372,18 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("sync-state", help="Send heartbeat, then send a real disk report")
     subparsers.add_parser("report-disks", help="Discover backup candidate disks and send a disk report")
     subparsers.add_parser("report-mock-disks", help="Send a mock disk report for development")
+    prepare_parser = subparsers.add_parser(
+        "prepare-external-datastore",
+        help="Validate mount path and create the target export directory",
+    )
+    prepare_parser.add_argument("--mount-path", required=True)
+    prepare_parser.add_argument("--target-path", required=True)
+    export_parser = subparsers.add_parser(
+        "run-external-export",
+        help="Run or simulate the external PBS export boundary",
+    )
+    export_parser.add_argument("--target-path", required=True)
+    export_parser.add_argument("--datastore-name", required=True)
 
     return parser
 
@@ -355,6 +407,14 @@ def main() -> None:
 
     if args.command == "report-mock-disks":
         post_mock_disk_report(settings)
+        return
+
+    if args.command == "prepare-external-datastore":
+        prepare_external_datastore(args.mount_path, args.target_path)
+        return
+
+    if args.command == "run-external-export":
+        run_external_export(args.target_path, args.datastore_name)
         return
 
     parser.error("Unknown command")

@@ -114,6 +114,8 @@ It currently supports:
 - sending a heartbeat to the backend
 - sending a real disk report based on Linux host inspection
 - sending a combined heartbeat + real disk report with `sync-state`
+- preparing a dedicated target directory for an external PBS export flow
+- exercising a stubbed external export command boundary
 - sending a mock external-disk report for fallback testing
 
 Example local commands:
@@ -126,6 +128,8 @@ pip install -e .
 python -m agent.main heartbeat
 python -m agent.main report-disks
 python -m agent.main sync-state
+python -m agent.main prepare-external-datastore --mount-path /mnt/backup --target-path /mnt/backup/pbs-datastore
+python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore --datastore-name backup
 python -m agent.main report-mock-disks
 ```
 
@@ -155,6 +159,15 @@ Planning in this MVP is intentionally simple:
 - use either `usable_capacity_gb` or the full disk capacity
 - subtract `reserved_capacity_gb`
 - ignore real PBS dedup/chunk behavior for now
+
+The first external PBS export MVP builds on that disk model:
+
+- if a disk is marked as dedicated, the app uses a clean `pbs-datastore` target directory
+- if a disk allows existing data, the app writes into an isolated application subdirectory:
+  `proxmox-backup-orchestrator/<serial>/pbs-datastore`
+- coexistence mode never writes directly to the disk root
+- this is a PBS-native-like export flow intended to prepare for disaster recovery later
+- full restore workflow comes later
 
 The backend considers the agent:
 
@@ -227,6 +240,8 @@ For debugging on the Proxmox host:
 cd /opt/proxmox-backup-orchestrator-agent
 source .venv/bin/activate
 python -m agent.main sync-state
+python -m agent.main prepare-external-datastore --mount-path /mnt/backup --target-path /mnt/backup/pbs-datastore
+python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore --datastore-name backup
 ```
 
 To inspect logs:

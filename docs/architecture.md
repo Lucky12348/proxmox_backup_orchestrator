@@ -56,6 +56,15 @@ Only trusted disks are eligible for planning. Planning is currently a simple siz
 - `reserved_capacity_gb` is subtracted before fitting assets
 - no PBS chunking, deduplication, or real retention sizing is modeled yet
 
+The first external export flow also uses those trusted disks:
+
+- dedicated disks use a clean `pbs-datastore` target directory
+- coexistence disks preserve existing user data under
+  `proxmox-backup-orchestrator/<serial>/pbs-datastore`
+- coexistence mode never writes directly at the disk root
+- the current execution path is PBS-native-like by design, with a controlled command boundary
+  ready for later host-side PBS export wiring
+
 ## Proxmox Integration
 
 The first infrastructure integration is intentionally narrow:
@@ -109,11 +118,17 @@ and timer on the Proxmox host. The timer runs the agent every 2 minutes and the 
 interprets agent health using a configurable stale threshold rather than assuming continuous
 connectivity.
 
+The same host agent is also the natural boundary for later external datastore preparation
+and export execution. In this MVP, those commands are scaffolded cleanly but still use a
+stubbed execution boundary rather than full hotplug orchestration or restore workflows.
+
 ### PBS as Backup Engine
 
 PBS remains responsible for performing and storing backups. The orchestrator focuses on coordination, visibility, and workflow state rather than replacing PBS.
 
 Disk orchestration, removable-media exports, and real USB hotplug coordination are still deferred. This phase only establishes visibility, persisted disk metadata, and the first host-agent contract.
+External removable-media export now has an initial execution model, but full restore and
+end-to-end PBS-native disaster recovery workflows are still deferred.
 
 ### External Removable Disks
 

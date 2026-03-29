@@ -5,10 +5,52 @@ import { StatusBadge } from "../components/StatusBadge";
 import { formatDateTime, getBackupStatusTone } from "../utils";
 import type { ActivityPageProps } from "./shared";
 
-export function ActivityPage({ data, language, t }: ActivityPageProps) {
+export function ActivityPage({ data, externalBackupRuns, language, t }: ActivityPageProps) {
   return (
     <div className="page-stack">
       <PageHeader title={t.nav.activity} description={t.activityIntro} />
+
+      <section className="panel-card">
+        <div className="panel-card-header">
+          <h2>{t.externalBackupRuns}</h2>
+        </div>
+        {externalBackupRuns.length === 0 ? (
+          <EmptyState description={t.externalBackupRunsDescription} title={t.emptyExternalBackupRuns} />
+        ) : (
+          <DataTable>
+            <table>
+              <thead>
+                <tr>
+                  <th>{t.diskName}</th>
+                  <th>{t.backupStatus}</th>
+                  <th>{t.externalBackupMode}</th>
+                  <th>{t.externalBackupTargetPath}</th>
+                  <th>{t.backupStarted}</th>
+                  <th>{t.backupFinished}</th>
+                  <th>{t.backupSummary}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {externalBackupRuns.map((run) => (
+                  <tr key={run.id}>
+                    <td>{run.disk_name}</td>
+                    <td>
+                      <StatusBadge tone={getBackupStatusTone(run.status)}>
+                        {t.status[run.status]}
+                      </StatusBadge>
+                    </td>
+                    <td>{t.externalBackupModeLabel[run.mode]}</td>
+                    <td>{run.target_path}</td>
+                    <td>{formatDateTime(run.started_at, language, t.notAvailable)}</td>
+                    <td>{formatDateTime(run.finished_at, language, t.notAvailable)}</td>
+                    <td>{run.message ?? t.notAvailable}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </DataTable>
+        )}
+      </section>
 
       <section className="panel-card">
         <div className="panel-card-header">
