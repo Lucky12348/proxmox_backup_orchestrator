@@ -25,6 +25,9 @@ class ExternalDisk(Base):
     detection_reason: Mapped[str | None] = mapped_column(String(255))
     candidate_type: Mapped[str | None] = mapped_column(String(64))
     trusted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    usable_capacity_gb: Mapped[int | None] = mapped_column(Integer)
+    reserved_capacity_gb: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    planning_notes: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="seed")
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 

@@ -145,6 +145,14 @@ The dashboard now distinguishes:
 - candidate disks detected by the agent
 - trusted disks explicitly approved in the UI
 
+Trusted disks are the only disks that participate in backup planning.
+Planning in this MVP is intentionally simple:
+
+- use `size_gb` for each enabled VM or CT
+- use either `usable_capacity_gb` or the full disk capacity
+- subtract `reserved_capacity_gb`
+- ignore real PBS dedup/chunk behavior for now
+
 If PBS returns `401 Unauthorized`, verify:
 
 - the token id and secret are correct

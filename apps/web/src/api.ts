@@ -1,6 +1,7 @@
 import type {
   AgentStatus,
   BackupRun,
+  DiskPlanningSummary,
   ExternalDisk,
   Overview,
   PBSInventoryItem,
@@ -8,6 +9,8 @@ import type {
   PBSSyncSummary,
   ProxmoxStatus,
   ProxmoxSyncSummary,
+  PlanningOverview,
+  UnplannedAsset,
   VirtualMachine,
 } from "./types";
 
@@ -73,6 +76,9 @@ export function updateDisk(
       | "notes"
       | "display_name"
       | "trusted"
+      | "usable_capacity_gb"
+      | "reserved_capacity_gb"
+      | "planning_notes"
     >
   >,
 ) {
@@ -116,4 +122,16 @@ export function getPBSInventory() {
 
 export function getAgentStatus() {
   return request<AgentStatus>("/agent/status");
+}
+
+export function getPlanningDisks() {
+  return request<DiskPlanningSummary[]>("/planning/disks");
+}
+
+export function getPlanningOverview() {
+  return request<PlanningOverview>("/planning/overview");
+}
+
+export function getUnplannedAssets() {
+  return request<UnplannedAsset[]>("/planning/unplanned-assets");
 }

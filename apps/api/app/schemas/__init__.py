@@ -4,6 +4,7 @@ from app.schemas.external_disk import ExternalDiskRead, ExternalDiskUpdate
 from app.schemas.integrations_proxmox import ProxmoxStatusRead, ProxmoxSyncRead
 from app.schemas.integrations_pbs import PBSInventoryRead, PBSStatusRead, PBSSyncRead
 from app.schemas.overview import OverviewRead
+from app.schemas.planning import DiskPlanningRead, PlanningOverviewRead, UnplannedAssetRead
 from app.schemas.virtual_machine import VirtualMachineRead, VirtualMachineUpdate
 
 __all__ = [
@@ -15,8 +16,11 @@ __all__ = [
     "PBSInventoryRead",
     "PBSStatusRead",
     "PBSSyncRead",
+    "PlanningOverviewRead",
     "ProxmoxStatusRead",
     "ProxmoxSyncRead",
+    "DiskPlanningRead",
+    "UnplannedAssetRead",
     "OverviewRead",
     "VirtualMachineRead",
     "VirtualMachineUpdate",

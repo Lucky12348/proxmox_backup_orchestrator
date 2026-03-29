@@ -22,6 +22,9 @@ class ExternalDiskRead(BaseModel):
     detection_reason: str | None
     candidate_type: str | None
     trusted: bool
+    usable_capacity_gb: int | None
+    reserved_capacity_gb: int
+    planning_notes: str | None
     source: str
     active: bool
 
@@ -31,5 +34,8 @@ class ExternalDiskUpdate(BaseModel):
     dedicated_backup_disk: bool | None = None
     allow_existing_data: bool | None = None
     trusted: bool | None = None
+    usable_capacity_gb: int | None = Field(default=None, ge=0)
+    reserved_capacity_gb: int | None = Field(default=None, ge=0)
+    planning_notes: str | None = None
     preferred_root_path: str | None = Field(default=None, max_length=255)
     notes: str | None = None

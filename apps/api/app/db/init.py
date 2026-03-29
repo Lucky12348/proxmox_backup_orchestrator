@@ -50,6 +50,9 @@ def ensure_external_disk_schema() -> None:
         "detection_reason": "ALTER TABLE external_disks ADD COLUMN detection_reason VARCHAR(255)",
         "candidate_type": "ALTER TABLE external_disks ADD COLUMN candidate_type VARCHAR(64)",
         "trusted": "ALTER TABLE external_disks ADD COLUMN trusted BOOLEAN NOT NULL DEFAULT FALSE",
+        "usable_capacity_gb": "ALTER TABLE external_disks ADD COLUMN usable_capacity_gb INTEGER",
+        "reserved_capacity_gb": "ALTER TABLE external_disks ADD COLUMN reserved_capacity_gb INTEGER NOT NULL DEFAULT 0",
+        "planning_notes": "ALTER TABLE external_disks ADD COLUMN planning_notes TEXT",
         "source": "ALTER TABLE external_disks ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'seed'",
         "active": "ALTER TABLE external_disks ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE",
     }
@@ -118,6 +121,9 @@ def seed_database() -> None:
             detection_reason="seeded development disk",
             candidate_type="seed",
             trusted=False,
+            usable_capacity_gb=None,
+            reserved_capacity_gb=0,
+            planning_notes=None,
             source="seed",
             active=True,
         )
@@ -137,6 +143,9 @@ def seed_database() -> None:
             detection_reason="seeded development disk",
             candidate_type="seed",
             trusted=False,
+            usable_capacity_gb=None,
+            reserved_capacity_gb=0,
+            planning_notes=None,
             source="seed",
             active=True,
         )
@@ -156,6 +165,9 @@ def seed_database() -> None:
             detection_reason="seeded development disk",
             candidate_type="seed",
             trusted=False,
+            usable_capacity_gb=None,
+            reserved_capacity_gb=0,
+            planning_notes=None,
             source="seed",
             active=True,
         )

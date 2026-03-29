@@ -49,6 +49,13 @@ External disks are now first-class persisted entities. The system can store:
 Seeded disks still exist for development, but the UI prefers agent-reported disks when available.
 Trusted agent disks are surfaced first.
 
+Only trusted disks are eligible for planning. Planning is currently a simple size-based MVP:
+
+- VM or CT `size_gb` is used as the planning approximation
+- `usable_capacity_gb` overrides raw disk capacity when set
+- `reserved_capacity_gb` is subtracted before fitting assets
+- no PBS chunking, deduplication, or real retention sizing is modeled yet
+
 ## Proxmox Integration
 
 The first infrastructure integration is intentionally narrow:

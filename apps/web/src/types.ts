@@ -34,6 +34,9 @@ export interface ExternalDisk {
   detection_reason: string | null;
   candidate_type: string | null;
   trusted: boolean;
+  usable_capacity_gb: number | null;
+  reserved_capacity_gb: number;
+  planning_notes: string | null;
   source: "seed" | "agent";
   active: boolean;
 }
@@ -103,4 +106,31 @@ export interface AgentStatus {
   last_heartbeat_at: string | null;
   last_report_at: string | null;
   status: "connected" | "degraded";
+}
+
+export interface DiskPlanningSummary {
+  disk_id: number;
+  serial_number: string;
+  display_name: string;
+  trusted: boolean;
+  available_capacity_gb: number;
+  total_planned_gb: number;
+  planned_vm_count: number;
+  unplanned_vm_count: number;
+  fits_all: boolean;
+}
+
+export interface UnplannedAsset {
+  vm_id: number;
+  name: string;
+  vm_type: VmType;
+  size_gb: number;
+  critical: boolean;
+}
+
+export interface PlanningOverview {
+  trusted_disk_count: number;
+  plannable_vm_count: number;
+  planned_vm_count: number;
+  planning_coverage_percent: number;
 }

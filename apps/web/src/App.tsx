@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   getAgentStatus,
   getBackupRuns,
+  getPlanningDisks,
+  getPlanningOverview,
   getPBSInventory,
   getPBSStatus,
   getPreferredDisks,
@@ -10,6 +12,7 @@ import {
   getProxmoxStatus,
   getVMs,
   getOverview,
+  getUnplannedAssets,
   syncPBSInventory,
   syncProxmoxInventory,
   updateDisk,
@@ -20,11 +23,14 @@ import type {
   AgentStatus,
   BackupRun,
   BackupRunStatus,
+  DiskPlanningSummary,
   ExternalDisk,
   Overview,
   PBSInventoryItem,
   PBSStatus,
+  PlanningOverview,
   ProxmoxStatus,
+  UnplannedAsset,
   VirtualMachine,
 } from "./types";
 
@@ -34,6 +40,9 @@ interface DashboardState {
   vms: VirtualMachine[];
   disks: ExternalDisk[];
   backupRuns: BackupRun[];
+  planningDisks: DiskPlanningSummary[];
+  planningOverview: PlanningOverview;
+  unplannedAssets: UnplannedAsset[];
   pbsInventory: PBSInventoryItem[];
   pbsStatus: PBSStatus;
   proxmoxStatus: ProxmoxStatus;
@@ -99,6 +108,9 @@ export default function App() {
         vms,
         preferredDisks,
         backupRuns,
+        planningDisks,
+        planningOverview,
+        unplannedAssets,
         proxmoxStatus,
         proxmoxInventory,
         pbsStatus,
@@ -109,6 +121,9 @@ export default function App() {
         getVMs(),
         getPreferredDisks(),
         getBackupRuns(),
+        getPlanningDisks(),
+        getPlanningOverview(),
+        getUnplannedAssets(),
         getProxmoxStatus(),
         getProxmoxInventory(),
         getPBSStatus(),
@@ -121,6 +136,9 @@ export default function App() {
         vms: proxmoxInventory.length > 0 ? proxmoxInventory : vms,
         disks: preferredDisks,
         backupRuns,
+        planningDisks,
+        planningOverview,
+        unplannedAssets,
         pbsInventory,
         pbsStatus,
         proxmoxStatus,
@@ -137,12 +155,27 @@ export default function App() {
   }, []);
 
   async function refreshDashboardData() {
-    const [agentStatus, overview, vms, preferredDisks, proxmoxInventory, proxmoxStatus, pbsStatus, pbsInventory] =
+    const [
+      agentStatus,
+      overview,
+      vms,
+      preferredDisks,
+      planningDisks,
+      planningOverview,
+      unplannedAssets,
+      proxmoxInventory,
+      proxmoxStatus,
+      pbsStatus,
+      pbsInventory,
+    ] =
       await Promise.all([
         getAgentStatus(),
         getOverview(),
         getVMs(),
         getPreferredDisks(),
+        getPlanningDisks(),
+        getPlanningOverview(),
+        getUnplannedAssets(),
         getProxmoxInventory(),
         getProxmoxStatus(),
         getPBSStatus(),
@@ -157,6 +190,9 @@ export default function App() {
             overview,
             vms: proxmoxInventory.length > 0 ? proxmoxInventory : vms,
             disks: preferredDisks,
+            planningDisks,
+            planningOverview,
+            unplannedAssets,
             pbsInventory,
             pbsStatus,
             proxmoxStatus,
@@ -198,6 +234,9 @@ export default function App() {
         | "preferred_root_path"
         | "notes"
         | "trusted"
+        | "usable_capacity_gb"
+        | "reserved_capacity_gb"
+        | "planning_notes"
       >
     >,
   ) {
@@ -206,15 +245,8 @@ export default function App() {
     setBannerError(null);
 
     try {
-      const updated = await updateDisk(disk.id, payload);
-      setDashboard((current) =>
-        current
-          ? {
-              ...current,
-              disks: current.disks.map((item) => (item.id === updated.id ? updated : item)),
-            }
-          : current,
-      );
+      await updateDisk(disk.id, payload);
+      await refreshDashboardData();
     } catch (mutationError) {
       setBannerError(mutationError instanceof Error ? mutationError.message : "Unknown error");
     } finally {
@@ -569,6 +601,9 @@ export default function App() {
                   <th>{t.diskDedicated}</th>
                   <th>{t.diskAllowExistingData}</th>
                   <th>{t.diskTrusted}</th>
+                  <th>{t.diskUsableCapacity}</th>
+                  <th>{t.diskReservedCapacity}</th>
+                  <th>{t.diskPlanningNotes}</th>
                   <th>{t.diskLastSeen}</th>
                 </tr>
               </thead>
@@ -629,7 +664,116 @@ export default function App() {
                         <span>{disk.trusted ? t.yes : t.no}</span>
                       </label>
                     </td>
+                    <td>
+                      <input
+                        className="number-input"
+                        defaultValue={disk.usable_capacity_gb ?? ""}
+                        disabled={savingKey === `disk-${disk.id}`}
+                        type="number"
+                        min={0}
+                        onBlur={(event) =>
+                          void handleDiskFieldUpdate(disk, {
+                            usable_capacity_gb:
+                              event.target.value === "" ? null : Number(event.target.value),
+                          })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="number-input"
+                        defaultValue={disk.reserved_capacity_gb}
+                        disabled={savingKey === `disk-${disk.id}`}
+                        type="number"
+                        min={0}
+                        onBlur={(event) =>
+                          void handleDiskFieldUpdate(disk, {
+                            reserved_capacity_gb: Number(event.target.value || 0),
+                          })
+                        }
+                      />
+                    </td>
+                    <td>{disk.planning_notes ?? t.notAvailable}</td>
                     <td>{formatDateTime(disk.last_seen_at, language, t.notAvailable)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2>{t.planning}</h2>
+        <section className="card-grid compact-grid">
+          <article className="card">
+            <p className="card-label">{t.planningCoverage}</p>
+            <p className="card-value">{dashboard.planningOverview.planning_coverage_percent}%</p>
+          </article>
+          <article className="card">
+            <p className="card-label">{t.planningTrustedDisks}</p>
+            <p className="card-value">{dashboard.planningOverview.trusted_disk_count}</p>
+          </article>
+          <article className="card">
+            <p className="card-label">{t.planningPlannedAssets}</p>
+            <p className="card-value">
+              {dashboard.planningOverview.planned_vm_count} / {dashboard.planningOverview.plannable_vm_count}
+            </p>
+          </article>
+        </section>
+
+        <div className="table-wrap">
+          {dashboard.planningDisks.length === 0 ? (
+            <p className="empty-state">{t.emptyPlanningDisks}</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>{t.diskName}</th>
+                  <th>{t.planningAvailableCapacity}</th>
+                  <th>{t.planningTotalPlanned}</th>
+                  <th>{t.planningPlannedVmCount}</th>
+                  <th>{t.planningUnplannedVmCount}</th>
+                  <th>{t.planningFitsAll}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dashboard.planningDisks.map((disk) => (
+                  <tr key={disk.disk_id}>
+                    <td>{disk.display_name}</td>
+                    <td>{disk.available_capacity_gb}</td>
+                    <td>{disk.total_planned_gb}</td>
+                    <td>{disk.planned_vm_count}</td>
+                    <td>{disk.unplanned_vm_count}</td>
+                    <td>{disk.fits_all ? t.yes : t.no}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <h3>{t.planningUnplannedAssets}</h3>
+        {dashboard.unplannedAssets.length === 0 ? (
+          <p className="empty-state">{t.emptyUnplannedAssets}</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>{t.vmName}</th>
+                  <th>{t.vmType}</th>
+                  <th>{t.vmSize}</th>
+                  <th>{t.vmCritical}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dashboard.unplannedAssets.map((vm) => (
+                  <tr key={vm.vm_id}>
+                    <td>{vm.name}</td>
+                    <td>{vm.vm_type.toUpperCase()}</td>
+                    <td>{vm.size_gb}</td>
+                    <td>{vm.critical ? t.yes : t.no}</td>
                   </tr>
                 ))}
               </tbody>

@@ -79,6 +79,10 @@ h1 {
   margin-bottom: 28px;
 }
 
+.compact-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .card {
   padding: 24px;
   border: 1px solid rgba(29, 75, 111, 0.12);
@@ -213,6 +217,15 @@ tbody tr:hover {
 .checkbox-cell input {
   width: 16px;
   height: 16px;
+}
+
+.number-input {
+  width: 110px;
+  padding: 8px 10px;
+  border: 1px solid #c6d5e2;
+  border-radius: 10px;
+  font: inherit;
+  background: #ffffff;
 }
 
 .status-badge {

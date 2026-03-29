@@ -6,6 +6,7 @@ from app.api.routes.disks import router as disks_router
 from app.api.routes.integrations_pbs import router as integrations_pbs_router
 from app.api.routes.integrations_proxmox import router as integrations_proxmox_router
 from app.api.routes.overview import router as overview_router
+from app.api.routes.planning import router as planning_router
 from app.api.routes.vms import router as vms_router
 
 
@@ -17,3 +18,4 @@ api_router.include_router(disks_router)
 api_router.include_router(backup_runs_router)
 api_router.include_router(integrations_proxmox_router)
 api_router.include_router(integrations_pbs_router)
+api_router.include_router(planning_router)
