@@ -19,6 +19,7 @@ The application VM hosts the main control plane:
 - FastAPI backend with PostgreSQL-backed domain models and REST endpoints
 - React frontend for monitoring and simple operator edits
 - read-only Proxmox VE inventory sync for one configured node
+- read-only PBS snapshot sync for one configured datastore
 - PostgreSQL for persisted application state
 
 ## Current Domain Scope
@@ -43,6 +44,17 @@ The first infrastructure integration is intentionally narrow:
 
 This integration is read-only. It does not create, modify, or delete workloads in Proxmox VE.
 
+## PBS Integration
+
+The PBS integration is also intentionally narrow:
+
+- the backend checks connectivity to the PBS API
+- it reads snapshot metadata from one configured datastore
+- it infers the most recent backup time per VM or CT
+- it updates `VirtualMachine.last_backup_at` for matching Proxmox inventory rows
+
+This phase is read-only. It does not orchestrate disks, trigger exports, or manage retention.
+
 ### Agent on Proxmox Host
 
 The agent is expected to run close to the hardware and later provide:
@@ -55,7 +67,7 @@ The agent is expected to run close to the hardware and later provide:
 
 PBS remains responsible for performing and storing backups. The orchestrator focuses on coordination, visibility, and workflow state rather than replacing PBS.
 
-PBS integration is still deferred. The next stage will add PBS-oriented connectors and richer workflow state on top of the current inventory foundation.
+Disk orchestration, removable-media exports, and USB agent coordination are still deferred. This phase only establishes read-only inventory and backup visibility.
 
 ### External Removable Disks
 

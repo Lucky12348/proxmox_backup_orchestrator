@@ -35,6 +35,14 @@ For read-only Proxmox inventory sync, configure these variables in `.env`:
 - `PVE_VERIFY_SSL`
 - `PVE_NODE_NAME`
 
+For read-only PBS backup sync, configure these variables in `.env`:
+
+- `PBS_API_URL`
+- `PBS_USERNAME`
+- `PBS_PASSWORD`
+- `PBS_VERIFY_SSL`
+- `PBS_DATASTORE`
+
 For POSIX shells, a matching helper is available at `infra/scripts/bootstrap.sh`.
 
 ## Local URLs
@@ -44,6 +52,7 @@ For POSIX shells, a matching helper is available at `infra/scripts/bootstrap.sh`
 - API health: `http://localhost:8000/health`
 - API overview: `http://localhost:8000/api/v1/overview`
 - Proxmox status: `http://localhost:8000/api/v1/integrations/proxmox/status`
+- PBS status: `http://localhost:8000/api/v1/integrations/pbs/status`
 
 ## Seed Data
 
@@ -73,6 +82,20 @@ Create an API token in Proxmox VE:
 For a local self-signed Proxmox setup, keep `PVE_VERIFY_SSL=false`. For a trusted certificate, set it to `true`.
 
 After the stack starts, use the dashboard's Proxmox section to test the connection status and trigger a manual inventory sync.
+
+## PBS Credentials
+
+The PBS integration is also read-only at this stage. It fetches snapshots from one configured datastore and updates `last_backup_at` for matching Proxmox inventory rows.
+
+Configure:
+
+1. `PBS_API_URL` with your PBS API base URL ending in `/api2/json`
+2. `PBS_USERNAME` with a PBS user that can read datastore contents
+3. `PBS_PASSWORD` for that user
+4. `PBS_DATASTORE` with the datastore name to inspect
+5. `PBS_VERIFY_SSL=false` for self-signed local setups, or `true` for trusted certificates
+
+After the stack starts, use the dashboard's PBS section to check connectivity and trigger a manual backup sync.
 
 ## Example Commands
 

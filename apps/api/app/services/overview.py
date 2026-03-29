@@ -4,6 +4,7 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
 from app.models import BackupRun, ExternalDisk, VirtualMachine
+from app.services.pbs_sync import derive_latest_backup_status
 
 
 @dataclass
@@ -51,11 +52,13 @@ def get_overview_metrics(db: Session) -> OverviewMetrics:
     if enabled_vms:
         coverage_percent = round((protected_vms / enabled_vms) * 100, 1)
 
+    latest_backup_status = latest_backup.status.value if latest_backup else derive_latest_backup_status(db)
+
     return OverviewMetrics(
         total_vms=total_vms,
         protected_vms=protected_vms,
         coverage_percent=coverage_percent,
         connected_disks=connected_disks,
-        latest_backup_status=latest_backup.status.value if latest_backup else None,
+        latest_backup_status=latest_backup_status,
         recent_backup_runs=recent_backup_runs,
     )

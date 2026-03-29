@@ -2,6 +2,9 @@ import type {
   BackupRun,
   ExternalDisk,
   Overview,
+  PBSInventoryItem,
+  PBSStatus,
+  PBSSyncSummary,
   ProxmoxStatus,
   ProxmoxSyncSummary,
   VirtualMachine,
@@ -85,4 +88,18 @@ export function syncProxmoxInventory() {
 
 export function getProxmoxInventory() {
   return request<VirtualMachine[]>("/integrations/proxmox/inventory");
+}
+
+export function getPBSStatus() {
+  return request<PBSStatus>("/integrations/pbs/status");
+}
+
+export function syncPBSInventory() {
+  return request<PBSSyncSummary>("/integrations/pbs/sync", {
+    method: "POST",
+  });
+}
+
+export function getPBSInventory() {
+  return request<PBSInventoryItem[]>("/integrations/pbs/inventory");
 }

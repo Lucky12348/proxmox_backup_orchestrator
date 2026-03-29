@@ -59,3 +59,24 @@ export interface ProxmoxSyncSummary {
   synced_cts_count: number;
   total_seen: number;
 }
+
+export interface PBSStatus {
+  connected: boolean;
+  datastore: string;
+  verify_ssl: boolean;
+  message: string;
+}
+
+export interface PBSSyncSummary {
+  matched_vms: number;
+  matched_cts: number;
+  total_snapshots_seen: number;
+}
+
+export interface PBSInventoryItem {
+  vm_id: number;
+  name: string;
+  vm_type: VmType;
+  last_backup_at: string | null;
+  protected: boolean;
+}

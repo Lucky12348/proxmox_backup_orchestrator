@@ -4,9 +4,12 @@ import {
   getBackupRuns,
   getDisks,
   getOverview,
+  getPBSInventory,
+  getPBSStatus,
   getProxmoxInventory,
   getProxmoxStatus,
   getVMs,
+  syncPBSInventory,
   syncProxmoxInventory,
   updateDisk,
   updateVM,
@@ -17,6 +20,8 @@ import type {
   BackupRunStatus,
   ExternalDisk,
   Overview,
+  PBSInventoryItem,
+  PBSStatus,
   ProxmoxStatus,
   VirtualMachine,
 } from "./types";
@@ -26,6 +31,8 @@ interface DashboardState {
   vms: VirtualMachine[];
   disks: ExternalDisk[];
   backupRuns: BackupRun[];
+  pbsInventory: PBSInventoryItem[];
+  pbsStatus: PBSStatus;
   proxmoxStatus: ProxmoxStatus;
 }
 
@@ -64,6 +71,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [bannerError, setBannerError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [pbsSyncing, setPbsSyncing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
@@ -74,7 +82,16 @@ export default function App() {
     setError(null);
 
     try {
-      const [overview, vms, disks, backupRuns, proxmoxStatus, proxmoxInventory] =
+      const [
+        overview,
+        vms,
+        disks,
+        backupRuns,
+        proxmoxStatus,
+        proxmoxInventory,
+        pbsStatus,
+        pbsInventory,
+      ] =
         await Promise.all([
           getOverview(),
           getVMs(),
@@ -82,6 +99,8 @@ export default function App() {
           getBackupRuns(),
           getProxmoxStatus(),
           getProxmoxInventory(),
+          getPBSStatus(),
+          getPBSInventory(),
         ]);
 
       setDashboard({
@@ -89,6 +108,8 @@ export default function App() {
         vms: proxmoxInventory.length > 0 ? proxmoxInventory : vms,
         disks,
         backupRuns,
+        pbsInventory,
+        pbsStatus,
         proxmoxStatus,
       });
     } catch (loadError) {
@@ -103,11 +124,13 @@ export default function App() {
   }, []);
 
   async function refreshVmInventory() {
-    const [overview, vms, proxmoxInventory, proxmoxStatus] = await Promise.all([
+    const [overview, vms, proxmoxInventory, proxmoxStatus, pbsStatus, pbsInventory] = await Promise.all([
       getOverview(),
       getVMs(),
       getProxmoxInventory(),
       getProxmoxStatus(),
+      getPBSStatus(),
+      getPBSInventory(),
     ]);
 
     setDashboard((current) =>
@@ -116,6 +139,8 @@ export default function App() {
             ...current,
             overview,
             vms: proxmoxInventory.length > 0 ? proxmoxInventory : vms,
+            pbsInventory,
+            pbsStatus,
             proxmoxStatus,
           }
         : current,
@@ -183,6 +208,29 @@ export default function App() {
       setSyncing(false);
     }
   }
+
+  async function handlePBSSync() {
+    setPbsSyncing(true);
+    setBannerError(null);
+    setSyncMessage(null);
+
+    try {
+      const summary = await syncPBSInventory();
+      await refreshVmInventory();
+      setSyncMessage(
+        `${t.pbsSyncSummary}: ${summary.total_snapshots_seen} (${summary.matched_vms} VM, ${summary.matched_cts} CT)`,
+      );
+    } catch (syncError) {
+      setBannerError(syncError instanceof Error ? syncError.message : "Unknown error");
+    } finally {
+      setPbsSyncing(false);
+    }
+  }
+
+  const pbsInventoryByVmId = useMemo(
+    () => new Map(dashboard?.pbsInventory.map((item) => [item.vm_id, item]) ?? []),
+    [dashboard?.pbsInventory],
+  );
 
   const latestStatusLabel = useMemo(() => {
     const status = dashboard?.overview.latest_backup_status;
@@ -318,6 +366,41 @@ export default function App() {
 
       <section className="panel">
         <div className="section-heading">
+          <h2>{t.pbsConnection}</h2>
+          <button
+            className="action-button"
+            disabled={pbsSyncing}
+            onClick={() => void handlePBSSync()}
+            type="button"
+          >
+            {pbsSyncing ? t.pbsSyncing : t.pbsSync}
+          </button>
+        </div>
+
+        <div className="proxmox-grid">
+          <div>
+            <p className="card-label">{t.pbsStatus}</p>
+            <p className={statusClassName(dashboard.pbsStatus.connected ? "success" : "failed")}>
+              {dashboard.pbsStatus.connected ? t.connected : t.disconnected}
+            </p>
+          </div>
+          <div>
+            <p className="card-label">{t.pbsDatastore}</p>
+            <p>{dashboard.pbsStatus.datastore}</p>
+          </div>
+          <div>
+            <p className="card-label">{t.pbsSsl}</p>
+            <p>{dashboard.pbsStatus.verify_ssl ? t.yes : t.no}</p>
+          </div>
+          <div>
+            <p className="card-label">{t.pbsMessage}</p>
+            <p>{dashboard.pbsStatus.message}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
           <h2>{t.virtualMachines}</h2>
           {savingKey?.startsWith("vm-") ? <span className="saving-indicator">{t.saving}</span> : null}
         </div>
@@ -334,6 +417,7 @@ export default function App() {
                   <th>{t.vmSource}</th>
                   <th>{t.vmNode}</th>
                   <th>{t.vmRuntimeStatus}</th>
+                  <th>{t.vmProtected}</th>
                   <th>{t.vmCritical}</th>
                   <th>{t.vmSize}</th>
                   <th>{t.vmEnabled}</th>
@@ -341,8 +425,11 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {dashboard.vms.map((vm) => (
-                  <tr key={vm.id}>
+                {dashboard.vms.map((vm) => {
+                  const backupState = pbsInventoryByVmId.get(vm.id);
+
+                  return (
+                    <tr key={vm.id}>
                     <td>{vm.name}</td>
                     <td>{vm.vm_type.toUpperCase()}</td>
                     <td>
@@ -350,6 +437,7 @@ export default function App() {
                     </td>
                     <td>{vm.node_name ?? t.notAvailable}</td>
                     <td>{vm.runtime_status ?? t.notAvailable}</td>
+                    <td>{backupState?.protected ? t.yes : t.no}</td>
                     <td>
                       <label className="checkbox-cell">
                         <input
@@ -363,9 +451,16 @@ export default function App() {
                     </td>
                     <td>{vm.size_gb}</td>
                     <td>{vm.enabled ? t.yes : t.no}</td>
-                    <td>{formatDateTime(vm.last_backup_at, language, t.notAvailable)}</td>
+                    <td>
+                      {formatDateTime(
+                        backupState?.last_backup_at ?? vm.last_backup_at,
+                        language,
+                        t.notAvailable,
+                      )}
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
