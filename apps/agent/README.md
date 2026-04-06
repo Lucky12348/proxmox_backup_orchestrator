@@ -44,7 +44,7 @@ This phase does not implement hotplug watching yet. It provides:
 8. Exercise the export boundary with `python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore --datastore-name backup --mode dedicated`
 9. Inspect a disk with `python -m agent.main inspect-disk --disk <serial-or-path>`
 10. Prepare a disk with `python -m agent.main prepare-disk --disk <serial-or-path> --mode preserve_existing_data`
-11. Start the HTTP API with `uvicorn agent.server:app --host 0.0.0.0 --port 8081`
+11. Start the HTTP API with `python -m agent.main serve`
 
 ## Systemd deployment
 
@@ -66,6 +66,12 @@ When the backend triggers host-side commands, it calls the agent API with:
 
 - `HOST_AGENT_BASE_URL=http://proxmox-host:8081`
 - `HOST_AGENT_TOKEN=...`
+
+The `serve` command reads:
+
+- `AGENT_SERVER_HOST`
+- `AGENT_SERVER_PORT`
+- `AGENT_SERVER_TOKEN`
 
 ## Real discovery heuristics
 

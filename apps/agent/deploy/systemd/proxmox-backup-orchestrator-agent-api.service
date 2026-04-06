@@ -8,7 +8,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/proxmox-backup-orchestrator-agent
 EnvironmentFile=/opt/proxmox-backup-orchestrator-agent/.env
-ExecStart=/opt/proxmox-backup-orchestrator-agent/.venv/bin/python -m uvicorn agent.server:app --host 0.0.0.0 --port 8081
+ExecStart=/opt/proxmox-backup-orchestrator-agent/.venv/bin/python -m agent.main serve
 Restart=on-failure
 RestartSec=5
 

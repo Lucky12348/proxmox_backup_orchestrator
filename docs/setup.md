@@ -142,7 +142,7 @@ pip install -e .
 python -m agent.main heartbeat
 python -m agent.main report-disks
 python -m agent.main sync-state
-uvicorn agent.server:app --host 0.0.0.0 --port 8081
+python -m agent.main serve
 python -m agent.main prepare-external-datastore --mount-path /mnt/backup --target-path /mnt/backup/pbs-datastore --mode dedicated
 python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore --datastore-name backup --mode dedicated
 python -m agent.main report-mock-disks
@@ -308,7 +308,7 @@ For debugging on the Proxmox host:
 cd /opt/proxmox-backup-orchestrator-agent
 source .venv/bin/activate
 python -m agent.main sync-state
-uvicorn agent.server:app --host 0.0.0.0 --port 8081
+python -m agent.main serve
 python -m agent.main prepare-external-datastore --mount-path /mnt/backup --target-path /mnt/backup/pbs-datastore --mode dedicated
 python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore --datastore-name backup --mode dedicated
 ```

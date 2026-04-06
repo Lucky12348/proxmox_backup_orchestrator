@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+import uvicorn
 
 
 logging.basicConfig(
@@ -106,6 +107,7 @@ def prepare_external_datastore_result(mount_path: str, target_path: str, mode: s
 
     payload = {
         "ok": True,
+        "success": True,
         "mount_path": str(mount),
         "target_path": str(target),
         "command_summary": f"mkdir -p {target} && chmod 750 {target}",
@@ -284,6 +286,7 @@ def run_external_export_result(
 
     payload = {
         "ok": sync_completed,
+        "success": sync_completed,
         "target_path": str(target),
         "datastore_name": datastore_name,
         "mode": mode,
@@ -347,10 +350,16 @@ def prepare_disk_result(
         ensure_fstab_entry(filesystem_node["path"], str(mount_path), filesystem_type)
         mount_target(filesystem_node["path"], str(mount_path))
         payload = {
+            "ok": True,
             "success": True,
             "mount_path": str(mount_path),
             "filesystem_type": filesystem_type,
             "message": "Existing filesystem mounted under an application-managed path.",
+            "command_summary": f"mount {filesystem_node['path']} {mount_path}",
+            "execution_cwd": str(Path.cwd()),
+            "stdout_log": f"Mounted existing filesystem at {mount_path}",
+            "stderr_log": None,
+            "return_code": 0,
         }
         logger.info("Prepared disk %s in preserve mode at %s", identifier, mount_path)
         return payload
@@ -366,10 +375,16 @@ def prepare_disk_result(
         ensure_fstab_entry(target_node["path"], str(mount_path), filesystem_type)
         mount_target(target_node["path"], str(mount_path))
         payload = {
+            "ok": True,
             "success": True,
             "mount_path": str(mount_path),
             "filesystem_type": filesystem_type,
             "message": "Disk formatted as ext4 and mounted under an application-managed path.",
+            "command_summary": f"mkfs.ext4 -F {target_node['path']} && mount {target_node['path']} {mount_path}",
+            "execution_cwd": str(Path.cwd()),
+            "stdout_log": f"Formatted {target_node['path']} as ext4 and mounted it at {mount_path}",
+            "stderr_log": None,
+            "return_code": 0,
         }
         logger.info("Prepared disk %s in dedicated mode at %s", identifier, mount_path)
         return payload
@@ -1013,6 +1028,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Minimal Proxmox host agent scaffold")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    subparsers.add_parser("serve", help="Start the host agent HTTP API server")
     subparsers.add_parser("heartbeat", help="Send a heartbeat to the backend")
     subparsers.add_parser("sync-state", help="Send heartbeat, then send a real disk report")
     subparsers.add_parser("report-disks", help="Discover backup candidate disks and send a disk report")
@@ -1086,10 +1102,23 @@ def _infer_error_return_code(exc: Exception) -> int:
     return 1
 
 
+def serve_http_api(settings: AgentSettings) -> None:
+    uvicorn.run(
+        "agent.server:app",
+        host=settings.server_host,
+        port=settings.server_port,
+        log_level="info",
+    )
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     settings = AgentSettings()
+
+    if args.command == "serve":
+        serve_http_api(settings)
+        return
 
     if args.command == "heartbeat":
         post_heartbeat(settings)
