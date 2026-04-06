@@ -27,6 +27,11 @@ class ExternalDiskRead(BaseModel):
     planning_notes: str | None
     source: str
     active: bool
+    handoff_status: str | None
+    proxmox_usb_mapping: str | None
+    pbs_handoff_slot: str | None
+    pbs_visible: bool
+    pbs_device_path: str | None
 
 
 class ExternalDiskUpdate(BaseModel):

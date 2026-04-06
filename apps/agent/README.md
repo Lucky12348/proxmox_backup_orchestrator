@@ -10,6 +10,7 @@ This phase does not implement hotplug watching yet. It provides:
 - real disk report submission using Linux host inspection
 - one-shot state sync combining heartbeat and real disk report
 - an authenticated HTTP API for host-side disk preparation and PBS-side export actions
+- an authenticated HTTP API for disk inspection used during Proxmox-to-PBS handoff checks
 - target-directory preparation for an external datastore path
 - disk inspection and application-managed preparation commands
 - a real PBS-native-like external export command boundary when host dependencies are present
@@ -56,6 +57,7 @@ The same agent app is deployed in two pragmatic roles:
   PBS-native export execution through `proxmox-backup-manager`
 
 The HTTP surface can be the same on both, but the backend now uses different base URLs and tokens for each responsibility.
+For PBS-native export, the backend also asks Proxmox to pass the detected USB disk through to the PBS VM, then verifies visibility on PBS via the `/inspect-disk` endpoint.
 
 ## Systemd deployment
 

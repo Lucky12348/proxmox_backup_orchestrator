@@ -36,6 +36,8 @@ export function DisksPage({
                 <th>{t.diskCandidateType}</th>
                 <th>{t.diskDetectionReason}</th>
                 <th>{t.diskTrusted}</th>
+                <th>{t.diskHandoffStatus}</th>
+                <th>{t.diskPbsVisible}</th>
                 <th>{t.diskDedicated}</th>
                 <th>{t.diskAllowExistingData}</th>
                 <th>{t.diskUsableCapacity}</th>
@@ -78,6 +80,12 @@ export function DisksPage({
                       />
                       <span>{disk.trusted ? t.yes : t.no}</span>
                     </label>
+                  </td>
+                  <td>{disk.handoff_status ?? t.notAvailable}</td>
+                  <td>
+                    <StatusBadge tone={disk.pbs_visible ? "success" : "neutral"}>
+                      {disk.pbs_visible ? t.yes : t.no}
+                    </StatusBadge>
                   </td>
                   <td>
                     <label className="checkbox-cell">

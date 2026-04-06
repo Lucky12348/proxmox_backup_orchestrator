@@ -1,6 +1,7 @@
 from app.schemas.agent import AgentHeartbeatRead, AgentStatusRead
 from app.schemas.backup_run import BackupRunRead
 from app.schemas.disk_preparation import DiskPreparationRequest, DiskPreparationRunRead
+from app.schemas.disk_handoff import DiskHandoffRequest, DiskHandoffStatusRead
 from app.schemas.external_disk import ExternalDiskRead, ExternalDiskUpdate
 from app.schemas.external_backup import (
     ExternalBackupRunRead,
@@ -19,6 +20,8 @@ __all__ = [
     "BackupRunRead",
     "DiskPreparationRequest",
     "DiskPreparationRunRead",
+    "DiskHandoffRequest",
+    "DiskHandoffStatusRead",
     "ExternalBackupRunRead",
     "ExternalBackupRunRequest",
     "ExternalBackupRunSummaryRead",

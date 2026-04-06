@@ -69,6 +69,11 @@ def ensure_external_disk_schema() -> None:
         "source": "ALTER TABLE external_disks ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'seed'",
         "reported_by_hostname": "ALTER TABLE external_disks ADD COLUMN reported_by_hostname VARCHAR(255)",
         "active": "ALTER TABLE external_disks ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE",
+        "handoff_status": "ALTER TABLE external_disks ADD COLUMN handoff_status VARCHAR(32)",
+        "proxmox_usb_mapping": "ALTER TABLE external_disks ADD COLUMN proxmox_usb_mapping VARCHAR(255)",
+        "pbs_handoff_slot": "ALTER TABLE external_disks ADD COLUMN pbs_handoff_slot VARCHAR(32)",
+        "pbs_visible": "ALTER TABLE external_disks ADD COLUMN pbs_visible BOOLEAN NOT NULL DEFAULT FALSE",
+        "pbs_device_path": "ALTER TABLE external_disks ADD COLUMN pbs_device_path VARCHAR(255)",
     }
 
     with engine.begin() as connection:

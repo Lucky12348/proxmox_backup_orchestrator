@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from app.models import ExternalBackupMode, ExternalDisk
+from app.models import DiskPreparationMode, ExternalBackupMode, ExternalDisk
 from app.services.host_agent import HostAgentError, get_host_agent_client, get_pbs_agent_client
 
 
@@ -13,6 +13,7 @@ class AgentCommandResult:
     command_summary: str
     execution_cwd: str
     return_code: int | None
+    payload: dict[str, object] | None = None
 
 
 class AgentCommandError(RuntimeError):
@@ -41,18 +42,29 @@ class ExternalBackupAgentBridge:
 
     def prepare_external_datastore(
         self,
-        disk: ExternalDisk,
+        mount_path: str,
         target_path: str,
         mode: ExternalBackupMode,
     ) -> AgentCommandResult:
-        mount_path = disk.mount_path
-        if not mount_path:
-            raise RuntimeError("Disk has no mount path, so the host agent cannot prepare the export target.")
-
         return self._run_command(
-            self.host_client,
+            self.pbs_client,
             "/prepare-external-datastore",
             {"mount_path": mount_path, "target_path": target_path, "mode": mode.value},
+        )
+
+    def prepare_disk_on_pbs(
+        self,
+        disk: ExternalDisk,
+        mode: DiskPreparationMode,
+    ) -> AgentCommandResult:
+        return self._run_command(
+            self.pbs_client,
+            "/prepare-disk",
+            {
+                "disk": disk.serial_number,
+                "mode": mode.value,
+                "confirm_destructive": mode == DiskPreparationMode.DEDICATED_BACKUP,
+            },
         )
 
     def run_external_export(
@@ -67,7 +79,7 @@ class ExternalBackupAgentBridge:
             {"target_path": target_path, "datastore_name": datastore_name, "mode": mode.value},
         )
 
-    def _run_command(self, client, path: str, payload: dict[str, str]) -> AgentCommandResult:
+    def _run_command(self, client, path: str, payload: dict[str, object]) -> AgentCommandResult:
         try:
             result = client.post(path, payload)
         except HostAgentError as exc:
@@ -88,6 +100,7 @@ class ExternalBackupAgentBridge:
             command_summary=result.command_summary or f"POST {path}",
             execution_cwd=result.execution_cwd or client.base_url,
             return_code=result.return_code,
+            payload=result.payload,
         )
 
 

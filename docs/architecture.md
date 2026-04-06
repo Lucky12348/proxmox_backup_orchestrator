@@ -149,8 +149,9 @@ The same agent app is also deployed on the PBS host as a dedicated execution bou
 In this phase:
 
 - the PBS agent exposes the same authenticated HTTP server shape
-- the backend uses it only for `/run-external-export`
+- the backend uses it for `/inspect-disk`, `/prepare-disk`, `/prepare-external-datastore`, and `/run-external-export`
 - commands requiring `proxmox-backup-manager` are isolated to the PBS machine where that tooling belongs
+- the backend orchestrates a USB handoff through the Proxmox API before PBS-native export starts
 
 ### PBS as Backup Engine
 
@@ -158,9 +159,9 @@ PBS remains responsible for performing and storing backups. The orchestrator foc
 
 Disk orchestration, removable-media exports, and real USB hotplug coordination are still deferred. This phase establishes visibility, persisted disk metadata, a two-agent contract, and a pragmatic end-to-end external export flow.
 External removable-media export now prepares the path through the Proxmox host agent,
-then attempts a real PBS-native sync through the PBS agent by creating a target datastore
-on the removable media, creating a temporary PBS remote and sync job, running the sync,
-and storing the resulting command/stdout/stderr logs in `external_backup_runs`.
+then hands the USB disk through to the PBS VM through the Proxmox API, waits for PBS visibility,
+and attempts a real PBS-native sync through the PBS agent by creating a target datastore on the removable media,
+creating a temporary PBS remote and sync job, running the sync, and storing the resulting command/stdout/stderr logs in `external_backup_runs`.
 Full restore and end-to-end PBS-native disaster recovery workflows are still deferred.
 
 ### External Removable Disks

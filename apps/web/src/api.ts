@@ -1,6 +1,7 @@
 import type {
   AgentStatus,
   BackupRun,
+  DiskHandoffStatus,
   DiskPreparationRun,
   DiskPlanningSummary,
   ExternalBackupPreview,
@@ -169,6 +170,23 @@ export function prepareDisk(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function handoffDiskToPBS(diskId: number) {
+  return request<DiskHandoffStatus>(`/disks/${diskId}/handoff-to-pbs`, {
+    method: "POST",
+    body: JSON.stringify({ confirmation: true }),
+  });
+}
+
+export function detachDiskFromPBS(diskId: number) {
+  return request<DiskHandoffStatus>(`/disks/${diskId}/handoff-to-pbs`, {
+    method: "DELETE",
+  });
+}
+
+export function getDiskPBSVisibility(diskId: number) {
+  return request<DiskHandoffStatus>(`/disks/${diskId}/pbs-visibility`);
 }
 
 export function getDiskPreparationRuns(diskId: number) {

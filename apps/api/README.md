@@ -18,6 +18,7 @@ FastAPI backend for orchestration, state tracking, and integrations.
 
 Disk preparation calls the Proxmox host agent over HTTP.
 PBS-native export execution calls a separate PBS-side agent over HTTP.
+For PBS-native export, the backend also uses the Proxmox API to hand the selected USB disk through to the PBS VM before preparation/export.
 
 - `HOST_AGENT_BASE_URL` points to the host agent API, for example `http://proxmox-host:8081`
 - `HOST_AGENT_TOKEN` is sent as the shared `X-Agent-Token` header
@@ -25,3 +26,5 @@ PBS-native export execution calls a separate PBS-side agent over HTTP.
 - `PBS_AGENT_BASE_URL` points to the PBS execution agent API, for example `http://pbs-host:8081`
 - `PBS_AGENT_TOKEN` is sent as the shared `X-Agent-Token` header
 - `PBS_AGENT_TIMEOUT_SECONDS` controls request timeout
+- `PBS_EXECUTION_VM_ID` identifies the PBS VM on Proxmox for USB handoff
+- `PBS_EXECUTION_VM_NODE` identifies the Proxmox node hosting that PBS VM

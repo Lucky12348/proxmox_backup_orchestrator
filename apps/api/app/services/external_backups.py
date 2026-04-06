@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models import BackupRunStatus, ExternalBackupMode, ExternalBackupRun, ExternalDisk
+from app.services.disk_handoff import handoff_disk_to_pbs
 from app.services.external_backup_agent import AgentCommandError
-from app.services.external_backup_execution import get_external_backup_execution_service
+from app.services.external_backup_execution import build_export_target_path, get_external_backup_execution_service
 
 
 @dataclass(frozen=True)
@@ -19,51 +20,23 @@ class ExternalBackupPlan:
     preserves_existing_data: bool
 
 
-def _require_mount_path(disk: ExternalDisk) -> PurePosixPath:
-    if disk.mount_path:
-        return PurePosixPath(disk.mount_path)
-
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Disk has no mount path for external backup execution.",
-    )
-
-
-def _normalize_base_path(disk: ExternalDisk) -> PurePosixPath:
-    mount_path = _require_mount_path(disk)
-    base_path = PurePosixPath(disk.preferred_root_path) if disk.preferred_root_path else mount_path
-
-    try:
-        base_path.relative_to(mount_path)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Preferred root path must stay inside the disk mount path.",
-        ) from exc
-
-    return base_path
+def _expected_pbs_mount_path(serial_number: str) -> PurePosixPath:
+    return PurePosixPath("/mnt/pbo") / serial_number
 
 
 def build_external_backup_plan(disk: ExternalDisk) -> ExternalBackupPlan:
-    base_path = _normalize_base_path(disk)
+    base_path = _expected_pbs_mount_path(disk.serial_number)
 
     if disk.dedicated_backup_disk:
-        target = base_path / "pbs-datastore"
         return ExternalBackupPlan(
-            target_path=str(target),
+            target_path=build_export_target_path(str(base_path), disk.serial_number, ExternalBackupMode.DEDICATED),
             mode=ExternalBackupMode.DEDICATED,
             preserves_existing_data=False,
         )
 
     if disk.allow_existing_data:
-        target = (
-            base_path
-            / "proxmox-backup-orchestrator"
-            / disk.serial_number
-            / "pbs-datastore"
-        )
         return ExternalBackupPlan(
-            target_path=str(target),
+            target_path=build_export_target_path(str(base_path), disk.serial_number, ExternalBackupMode.COEXISTENCE),
             mode=ExternalBackupMode.COEXISTENCE,
             preserves_existing_data=True,
         )
@@ -124,12 +97,6 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
             detail="Disk must be connected before an external backup can run.",
         )
 
-    if not disk.mount_path:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Disk must have a mount path before an external backup can run.",
-        )
-
     plan = build_external_backup_plan(disk)
     settings = get_settings()
     now = datetime.utcnow()
@@ -163,19 +130,20 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
     prepare_result = None
     export_result = None
     try:
+        handoff_status = handoff_disk_to_pbs(db, disk, confirmation=True)
         execution_result = execution_service.execute(
             disk=disk,
-            target_path=plan.target_path,
             datastore_name=settings.pbs_datastore,
             mode=plan.mode,
         )
         prepare_result = execution_result.prepare
         export_result = execution_result.export
+        run.target_path = execution_result.target_path
 
         run.status = BackupRunStatus.SUCCESS
         run.finished_at = datetime.utcnow()
-        run.message = export_result.message
-        run.stdout_log = _merge_logs(prepare_result.stdout_log, export_result.stdout_log)
+        run.message = f"{handoff_status.message} {export_result.message}".strip()
+        run.stdout_log = _merge_logs(handoff_status.message, prepare_result.stdout_log, export_result.stdout_log)
         run.stderr_log = _merge_logs(prepare_result.stderr_log, export_result.stderr_log)
         run.command_summary = _merge_logs(prepare_result.command_summary, export_result.command_summary)
         run.execution_cwd = _merge_logs(prepare_result.execution_cwd, export_result.execution_cwd)
@@ -202,6 +170,12 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
             exc.execution_cwd,
         )
         run.return_code = exc.return_code
+    except HTTPException as exc:
+        run.status = BackupRunStatus.FAILED
+        run.finished_at = datetime.utcnow()
+        run.message = str(exc.detail)
+        run.stderr_log = _merge_logs(run.stderr_log, str(exc.detail))
+        run.return_code = None
     except RuntimeError as exc:
         run.status = BackupRunStatus.FAILED
         run.finished_at = datetime.utcnow()

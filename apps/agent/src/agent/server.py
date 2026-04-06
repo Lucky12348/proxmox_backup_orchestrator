@@ -11,6 +11,7 @@ from agent.main import (
     AgentSettings,
     build_command_failure_payload,
     current_timestamp,
+    inspect_disk_result,
     prepare_disk_result,
     prepare_external_datastore_result,
     run_external_export_result,
@@ -40,6 +41,11 @@ class RunExternalExportRequest(BaseModel):
     target_path: str = Field(min_length=1)
     datastore_name: str = Field(min_length=1)
     mode: str
+
+
+class InspectDiskRequest(BaseModel):
+    disk: str = Field(min_length=1)
+    mount_base_path: str | None = Field(default=None, max_length=255)
 
 
 def get_settings() -> AgentSettings:
@@ -95,6 +101,17 @@ def prepare_external_datastore(
     return _run_endpoint(
         "prepare-external-datastore",
         lambda: prepare_external_datastore_result(payload.mount_path, payload.target_path, payload.mode),
+    )
+
+
+@app.post("/inspect-disk", response_model=None)
+def inspect_disk(
+    payload: InspectDiskRequest,
+    _: None = Depends(require_agent_token),
+) -> Response:
+    return _run_endpoint(
+        "inspect-disk",
+        lambda: inspect_disk_result(payload.disk, payload.mount_base_path),
     )
 
 

@@ -34,6 +34,8 @@ For read-only Proxmox inventory sync, configure these variables in `.env`:
 - `PVE_API_TOKEN_SECRET`
 - `PVE_VERIFY_SSL`
 - `PVE_NODE_NAME`
+- `PBS_EXECUTION_VM_ID`
+- `PBS_EXECUTION_VM_NODE`
 
 For read-only PBS backup sync, configure these variables in `.env`:
 
@@ -128,12 +130,15 @@ The same app is deployed in two pragmatic roles:
 - Proxmox host agent for disk detection, disk preparation, and mount handling
 - PBS execution agent for PBS-native export commands
 
+For PBS-native export, the application also uses the Proxmox API to attach the selected USB disk to the PBS VM before the PBS agent prepares or exports it.
+
 It currently supports:
 
 - sending a heartbeat to the backend
 - sending a real disk report based on Linux host inspection
 - sending a combined heartbeat + real disk report with `sync-state`
 - serving authenticated HTTP endpoints for `GET /health`, `POST /prepare-disk`, `POST /prepare-external-datastore`, and `POST /run-external-export`
+- serving `POST /inspect-disk` for PBS visibility checks after USB handoff
 - preparing a dedicated target directory for an external PBS export flow
 - running a real PBS-native-like external export boundary when `proxmox-backup-manager` is available
 - sending a mock external-disk report for fallback testing
@@ -198,16 +203,20 @@ The first external PBS export MVP builds on that disk model:
 - coexistence mode never writes directly to the disk root
 - this phase replaces the earlier stub with a real split-agent PBS-native sync attempt
 - the backend now calls the Proxmox host agent over HTTP for disk-side preparation
+- the backend uses the Proxmox API to attach the selected USB disk to the PBS VM
 - the backend calls a separate PBS agent over HTTP for PBS-native export execution
+- the backend verifies that PBS can see the disk before continuing
 - the PBS agent uses `proxmox-backup-manager` to create a local datastore, a temporary remote, and a temporary sync job before running the sync
 - full restore workflow comes later
 
 Host-side dependencies for that execution path:
 
 - the Proxmox host agent HTTP service must run on the Proxmox machine for disk preparation and mount work
+- the selected USB disk must not remain mounted or in conflicting use on the Proxmox host during PBS-native export
 - `proxmox-backup-manager` must be installed on the PBS machine running the PBS agent
 - the PBS agent HTTP service must run on the PBS host for PBS-native export execution
 - the backend must be able to reach both `HOST_AGENT_BASE_URL` and `PBS_AGENT_BASE_URL`
+- `PBS_EXECUTION_VM_ID` and usually `PBS_EXECUTION_VM_NODE` must point to the PBS VM on Proxmox
 - the backend and each agent must share matching tokens through `HOST_AGENT_TOKEN` / `PBS_AGENT_TOKEN` and `AGENT_SERVER_TOKEN`
 - the PBS agent environment must include valid `PBS_API_URL`, `PBS_TOKEN_ID`, `PBS_TOKEN_SECRET`, and usually `PBS_DATASTORE`
 - if the PBS certificate is not already trusted by the host, `PBS_FINGERPRINT` may also be required
@@ -311,6 +320,7 @@ The split is intentional:
 - `proxmox-backup-orchestrator-agent-api.service` exposes the host-local action API
 - `proxmox-backup-orchestrator-agent.timer` continues to schedule heartbeat and disk report syncs
 - the backend talks to the host agent with `HOST_AGENT_BASE_URL`, `HOST_AGENT_TOKEN`, and `HOST_AGENT_TIMEOUT_SECONDS`
+- the backend uses the Proxmox API plus `PBS_EXECUTION_VM_ID` to hand the selected USB disk to PBS for PBS-native export
 
 ## PBS Agent Deployment
 

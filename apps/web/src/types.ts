@@ -41,6 +41,22 @@ export interface ExternalDisk {
   planning_notes: string | null;
   source: "seed" | "agent";
   active: boolean;
+  handoff_status: string | null;
+  proxmox_usb_mapping: string | null;
+  pbs_handoff_slot: string | null;
+  pbs_visible: boolean;
+  pbs_device_path: string | null;
+}
+
+export interface DiskHandoffStatus {
+  disk_id: number;
+  serial_number: string;
+  handoff_status: string;
+  proxmox_usb_mapping: string | null;
+  pbs_handoff_slot: string | null;
+  pbs_visible: boolean;
+  pbs_device_path: string | null;
+  message: string;
 }
 
 export interface BackupRun {

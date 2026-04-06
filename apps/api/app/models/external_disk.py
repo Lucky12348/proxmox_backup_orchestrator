@@ -31,5 +31,10 @@ class ExternalDisk(Base):
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="seed")
     reported_by_hostname: Mapped[str | None] = mapped_column(String(255))
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    handoff_status: Mapped[str | None] = mapped_column(String(32))
+    proxmox_usb_mapping: Mapped[str | None] = mapped_column(String(255))
+    pbs_handoff_slot: Mapped[str | None] = mapped_column(String(32))
+    pbs_visible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    pbs_device_path: Mapped[str | None] = mapped_column(String(255))
 
     assignments = relationship("DiskAssignment", back_populates="disk", cascade="all, delete-orphan")

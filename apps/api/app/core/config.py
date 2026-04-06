@@ -40,6 +40,8 @@ class Settings:
     pve_api_token_secret: str = os.getenv("PVE_API_TOKEN_SECRET", "")
     pve_verify_ssl: bool = parse_bool(os.getenv("PVE_VERIFY_SSL"), default=False)
     pve_node_name: str = os.getenv("PVE_NODE_NAME", "proxmox")
+    pbs_execution_vm_id: int = int(os.getenv("PBS_EXECUTION_VM_ID", "100"))
+    pbs_execution_vm_node: str = os.getenv("PBS_EXECUTION_VM_NODE", os.getenv("PVE_NODE_NAME", "proxmox"))
     pbs_api_url: str = os.getenv(
         "PBS_API_URL",
         "https://pbs.example.local:8007/api2/json",

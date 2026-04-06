@@ -192,6 +192,8 @@ export default function App() {
           `${t.diskName}: ${disk.display_name}`,
           `${t.externalBackupMode}: ${modeLabel}`,
           `${t.externalBackupTargetPath}: ${preview.target_path}`,
+          `${t.externalBackupPBSHandoff}`,
+          `${t.externalBackupPBSExclusive}`,
           preserveText,
         ].join(" "),
         confirmLabel: t.externalBackupAction,

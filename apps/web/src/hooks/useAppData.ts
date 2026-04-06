@@ -228,6 +228,7 @@ export function useAppData() {
     setSyncMessage(null);
 
     try {
+      setSyncMessage("USB handoff to PBS in progress...");
       const run = await runExternalBackup(diskId);
       await refresh();
       setSyncMessage(`${successMessage}: ${run.disk_name}`);

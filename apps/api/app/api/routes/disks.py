@@ -3,7 +3,19 @@ from sqlalchemy import select
 
 from app.api.dependencies import DbSession
 from app.models import ExternalDisk
-from app.schemas import DiskPreparationRequest, DiskPreparationRunRead, ExternalDiskRead, ExternalDiskUpdate
+from app.schemas import (
+    DiskHandoffRequest,
+    DiskHandoffStatusRead,
+    DiskPreparationRequest,
+    DiskPreparationRunRead,
+    ExternalDiskRead,
+    ExternalDiskUpdate,
+)
+from app.services.disk_handoff import (
+    detach_disk_from_pbs,
+    get_pbs_disk_visibility,
+    handoff_disk_to_pbs,
+)
 from app.services.disk_preparations import get_disk_preparation_run, list_disk_preparation_runs, prepare_disk
 from app.services.disks import list_preferred_disks
 
@@ -72,3 +84,34 @@ def get_preparation_runs(disk_id: int, db: DbSession) -> list[DiskPreparationRun
 def get_preparation_run(run_id: int, db: DbSession) -> DiskPreparationRunRead:
     run = get_disk_preparation_run(db, run_id)
     return DiskPreparationRunRead.model_validate(run)
+
+
+@router.post("/{disk_id}/handoff-to-pbs", response_model=DiskHandoffStatusRead)
+def handoff_disk_to_pbs_route(
+    disk_id: int,
+    payload: DiskHandoffRequest,
+    db: DbSession,
+) -> DiskHandoffStatusRead:
+    disk = db.get(ExternalDisk, disk_id)
+    if disk is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Disk not found")
+    result = handoff_disk_to_pbs(db, disk, confirmation=payload.confirmation)
+    return DiskHandoffStatusRead.model_validate(result)
+
+
+@router.delete("/{disk_id}/handoff-to-pbs", response_model=DiskHandoffStatusRead)
+def detach_disk_from_pbs_route(disk_id: int, db: DbSession) -> DiskHandoffStatusRead:
+    disk = db.get(ExternalDisk, disk_id)
+    if disk is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Disk not found")
+    result = detach_disk_from_pbs(db, disk)
+    return DiskHandoffStatusRead.model_validate(result)
+
+
+@router.get("/{disk_id}/pbs-visibility", response_model=DiskHandoffStatusRead)
+def get_pbs_visibility_route(disk_id: int, db: DbSession) -> DiskHandoffStatusRead:
+    disk = db.get(ExternalDisk, disk_id)
+    if disk is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Disk not found")
+    result = get_pbs_disk_visibility(db, disk)
+    return DiskHandoffStatusRead.model_validate(result)
