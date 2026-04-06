@@ -1,0 +1,16 @@
+[Unit]
+Description=Proxmox Backup Orchestrator host agent API
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/proxmox-backup-orchestrator-agent
+EnvironmentFile=/opt/proxmox-backup-orchestrator-agent/.env
+ExecStart=/opt/proxmox-backup-orchestrator-agent/.venv/bin/python -m uvicorn agent.server:app --host 0.0.0.0 --port 8081
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -48,14 +48,8 @@ class Settings:
     pbs_token_secret: str = os.getenv("PBS_TOKEN_SECRET", "")
     pbs_verify_ssl: bool = parse_bool(os.getenv("PBS_VERIFY_SSL"), default=False)
     pbs_datastore: str = os.getenv("PBS_DATASTORE", "backup")
-    agent_exec_python_path: str = os.getenv(
-        "AGENT_EXEC_PYTHON_PATH",
-        "/opt/proxmox-backup-orchestrator-agent/.venv/bin/python",
-    )
-    agent_exec_workdir: str = os.getenv(
-        "AGENT_EXEC_WORKDIR",
-        "/opt/proxmox-backup-orchestrator-agent",
-    )
+    host_agent_base_url: str = os.getenv("HOST_AGENT_BASE_URL", "http://proxmox-host:8081")
+    host_agent_token: str = os.getenv("HOST_AGENT_TOKEN", "")
     host_agent_timeout_seconds: float = float(os.getenv("HOST_AGENT_TIMEOUT_SECONDS", "7200"))
     agent_stale_after_minutes: int = int(os.getenv("AGENT_STALE_AFTER_MINUTES", "10"))
 

@@ -46,8 +46,8 @@ For read-only PBS backup sync, configure these variables in `.env`:
 
 For backend-to-host-agent execution, these variables are also relevant:
 
-- `AGENT_EXEC_PYTHON_PATH`
-- `AGENT_EXEC_WORKDIR`
+- `HOST_AGENT_BASE_URL`
+- `HOST_AGENT_TOKEN`
 - `HOST_AGENT_TIMEOUT_SECONDS`
 
 For the local host-agent scaffold, these variables are useful when running `apps/agent` manually:
@@ -59,6 +59,9 @@ For the local host-agent scaffold, these variables are useful when running `apps
 - `AGENT_INCLUDE_NON_USB_CANDIDATES`
 - `AGENT_STALE_AFTER_MINUTES`
 - `AGENT_EXPORT_TIMEOUT_SECONDS`
+- `AGENT_SERVER_HOST`
+- `AGENT_SERVER_PORT`
+- `AGENT_SERVER_TOKEN`
 
 For POSIX shells, a matching helper is available at `infra/scripts/bootstrap.sh`.
 
@@ -116,13 +119,15 @@ After the stack starts, use the dashboard's PBS section to check connectivity an
 
 ## Host Agent Scaffold
 
-The host agent is still intentionally simple in this phase. It does not run as a daemon and does not watch hotplug events yet.
+The host agent is still intentionally simple in this phase. It does not watch hotplug events yet, but it now runs as a small HTTP daemon for on-demand actions alongside the existing timer-driven sync job.
+The host-side deployment now has a daemon for HTTP actions and a timer for state sync.
 
 It currently supports:
 
 - sending a heartbeat to the backend
 - sending a real disk report based on Linux host inspection
 - sending a combined heartbeat + real disk report with `sync-state`
+- serving authenticated HTTP endpoints for `GET /health`, `POST /prepare-disk`, `POST /prepare-external-datastore`, and `POST /run-external-export`
 - preparing a dedicated target directory for an external PBS export flow
 - running a real PBS-native-like external export boundary when `proxmox-backup-manager` is available
 - sending a mock external-disk report for fallback testing
@@ -137,6 +142,7 @@ pip install -e .
 python -m agent.main heartbeat
 python -m agent.main report-disks
 python -m agent.main sync-state
+uvicorn agent.server:app --host 0.0.0.0 --port 8081
 python -m agent.main prepare-external-datastore --mount-path /mnt/backup --target-path /mnt/backup/pbs-datastore --mode dedicated
 python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore --datastore-name backup --mode dedicated
 python -m agent.main report-mock-disks
@@ -184,13 +190,16 @@ The first external PBS export MVP builds on that disk model:
   `proxmox-backup-orchestrator/<serial>/pbs-datastore`
 - coexistence mode never writes directly to the disk root
 - this phase replaces the earlier stub with a real host-side PBS-native-like sync attempt
+- the backend now calls the host agent over HTTP instead of trying to start host binaries locally
 - the agent prepares the target directory, then uses `proxmox-backup-manager` to create a local datastore, a temporary remote, and a temporary sync job before running the sync
 - full restore workflow comes later
 
 Host-side dependencies for that execution path:
 
 - `proxmox-backup-manager` must be installed on the machine running the agent command
-- the agent command must run on the Proxmox/PBS-capable host so the subprocess boundary can access host storage and PBS tooling
+- the agent HTTP service must run on the Proxmox/PBS-capable host so host-local commands can access host storage and PBS tooling
+- the backend must be able to reach `HOST_AGENT_BASE_URL`
+- the backend and host agent must share the same token through `HOST_AGENT_TOKEN` and `AGENT_SERVER_TOKEN`
 - the host agent environment must include valid `PBS_API_URL`, `PBS_TOKEN_ID`, `PBS_TOKEN_SECRET`, and usually `PBS_DATASTORE`
 - if the PBS certificate is not already trusted by the host, `PBS_FINGERPRINT` may also be required
 
@@ -210,12 +219,7 @@ When a run fails, inspect logs in this order:
 - the Activity page detail section for the persisted message, command summary, return code, stdout, and stderr excerpts
 - the Activity page detail section for the persisted message, command summary, cwd, return code, stdout, and stderr excerpts
 - `GET /api/v1/external-backups/runs/{id}` for the stored run payload
-- `journalctl -u proxmox-backup-orchestrator-agent.service` on the host running the agent command
-
-For the current Proxmox host deployment, the backend should usually point at the installed agent venv explicitly:
-
-- `AGENT_EXEC_PYTHON_PATH=/opt/proxmox-backup-orchestrator-agent/.venv/bin/python`
-- `AGENT_EXEC_WORKDIR=/opt/proxmox-backup-orchestrator-agent`
+- `journalctl -u proxmox-backup-orchestrator-agent-api.service` on the host running the agent API
 
 Disk preparation can now be triggered directly from the app through the host agent:
 
@@ -277,7 +281,10 @@ To run the agent persistently on the Proxmox host:
    - `AGENT_HOSTNAME`
    - `AGENT_VERSION`
    - `AGENT_TIMEOUT_SECONDS`
+   - `AGENT_SERVER_TOKEN`
+   - `AGENT_SERVER_PORT` if you do not want `8081`
 5. Copy:
+   - `apps/agent/deploy/systemd/proxmox-backup-orchestrator-agent-api.service`
    - `apps/agent/deploy/systemd/proxmox-backup-orchestrator-agent.service`
    - `apps/agent/deploy/systemd/proxmox-backup-orchestrator-agent.timer`
    into `/etc/systemd/system/`
@@ -285,8 +292,15 @@ To run the agent persistently on the Proxmox host:
 
 ```bash
 sudo systemctl daemon-reload
+sudo systemctl enable --now proxmox-backup-orchestrator-agent-api.service
 sudo systemctl enable --now proxmox-backup-orchestrator-agent.timer
 ```
+
+The split is intentional:
+
+- `proxmox-backup-orchestrator-agent-api.service` exposes the host-local action API
+- `proxmox-backup-orchestrator-agent.timer` continues to schedule heartbeat and disk report syncs
+- the backend talks to the host agent with `HOST_AGENT_BASE_URL`, `HOST_AGENT_TOKEN`, and `HOST_AGENT_TIMEOUT_SECONDS`
 
 For debugging on the Proxmox host:
 
@@ -294,6 +308,7 @@ For debugging on the Proxmox host:
 cd /opt/proxmox-backup-orchestrator-agent
 source .venv/bin/activate
 python -m agent.main sync-state
+uvicorn agent.server:app --host 0.0.0.0 --port 8081
 python -m agent.main prepare-external-datastore --mount-path /mnt/backup --target-path /mnt/backup/pbs-datastore --mode dedicated
 python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore --datastore-name backup --mode dedicated
 ```
@@ -301,6 +316,7 @@ python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore
 To inspect logs:
 
 ```bash
+sudo journalctl -u proxmox-backup-orchestrator-agent-api.service -f
 sudo journalctl -u proxmox-backup-orchestrator-agent.service -f
 sudo systemctl list-timers proxmox-backup-orchestrator-agent.timer
 ```

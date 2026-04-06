@@ -128,10 +128,18 @@ interprets agent health using a configurable stale threshold rather than assumin
 connectivity.
 
 The same host agent is also the boundary for external datastore preparation and export
-execution. In this phase, the backend creates the run record, calls the agent command
-boundary through a dedicated execution service, and persists the final status plus
-message/command/stdout/stderr/return-code details after the agent performs the
-host-side work.
+execution, but that boundary is now HTTP instead of backend-local subprocess execution.
+In this phase:
+
+- the backend stores run state in PostgreSQL
+- the backend calls the host agent API over HTTP with a shared token
+- the agent performs the host-local work on the Proxmox side
+- the backend persists the final status plus message/command/stdout/stderr/return-code details
+
+Operationally, the host agent is split into two pieces:
+
+- a timer-driven sync command for heartbeat and disk reporting
+- a long-running HTTP service for on-demand disk preparation and external export actions
 
 ### PBS as Backup Engine
 

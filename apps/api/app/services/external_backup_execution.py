@@ -44,6 +44,7 @@ class ExternalBackupExecutionService:
                 stdout_log=export.stdout_log,
                 stderr_log=export.stderr_log,
                 command_summary=export.command_summary,
+                execution_cwd=export.execution_cwd,
                 return_code=export.return_code,
             )
         return ExternalBackupExecutionResult(

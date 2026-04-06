@@ -9,6 +9,7 @@ This phase does not implement hotplug watching yet. It provides:
 - heartbeat reporting to the backend
 - real disk report submission using Linux host inspection
 - one-shot state sync combining heartbeat and real disk report
+- an authenticated HTTP API for host-side disk preparation and export actions
 - target-directory preparation for an external PBS export flow
 - disk inspection and application-managed preparation commands
 - a real PBS-native-like external export command boundary when host dependencies are present
@@ -22,6 +23,9 @@ This phase does not implement hotplug watching yet. It provides:
 - `AGENT_VERSION`
 - `AGENT_TIMEOUT_SECONDS`
 - `AGENT_INCLUDE_NON_USB_CANDIDATES`
+- `AGENT_SERVER_HOST`
+- `AGENT_SERVER_PORT`
+- `AGENT_SERVER_TOKEN`
 - `PBS_API_URL`
 - `PBS_TOKEN_ID`
 - `PBS_TOKEN_SECRET`
@@ -40,6 +44,7 @@ This phase does not implement hotplug watching yet. It provides:
 8. Exercise the export boundary with `python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore --datastore-name backup --mode dedicated`
 9. Inspect a disk with `python -m agent.main inspect-disk --disk <serial-or-path>`
 10. Prepare a disk with `python -m agent.main prepare-disk --disk <serial-or-path> --mode preserve_existing_data`
+11. Start the HTTP API with `uvicorn agent.server:app --host 0.0.0.0 --port 8081`
 
 ## Systemd deployment
 
@@ -51,13 +56,16 @@ The examples assume:
 - the virtual environment lives at `/opt/proxmox-backup-orchestrator-agent/.venv`
 - runtime environment variables are stored in `/opt/proxmox-backup-orchestrator-agent/.env`
 
-The service runs `python -m agent.main sync-state`.
-The timer triggers it every 2 minutes.
+The deployment now has two systemd responsibilities:
 
-When the API triggers host-side commands, it should execute the agent with:
+- `proxmox-backup-orchestrator-agent-api.service` runs the long-lived HTTP API
+- `proxmox-backup-orchestrator-agent.service` remains a one-shot sync job for heartbeat and disk reporting
+- `proxmox-backup-orchestrator-agent.timer` triggers that sync job every 2 minutes
 
-- `AGENT_EXEC_PYTHON_PATH=/opt/proxmox-backup-orchestrator-agent/.venv/bin/python`
-- `AGENT_EXEC_WORKDIR=/opt/proxmox-backup-orchestrator-agent`
+When the backend triggers host-side commands, it calls the agent API with:
+
+- `HOST_AGENT_BASE_URL=http://proxmox-host:8081`
+- `HOST_AGENT_TOKEN=...`
 
 ## Real discovery heuristics
 

@@ -16,8 +16,8 @@ FastAPI backend for orchestration, state tracking, and integrations.
 
 ## Host Agent Execution
 
-External backup execution calls the host agent with an explicit Python interpreter and working directory.
+External backup execution and disk preparation call the host agent over HTTP.
 
-- `AGENT_EXEC_PYTHON_PATH` defaults to `/opt/proxmox-backup-orchestrator-agent/.venv/bin/python`
-- `AGENT_EXEC_WORKDIR` defaults to `/opt/proxmox-backup-orchestrator-agent`
-- `HOST_AGENT_TIMEOUT_SECONDS` controls command timeout
+- `HOST_AGENT_BASE_URL` points to the host agent API, for example `http://proxmox-host:8081`
+- `HOST_AGENT_TOKEN` is sent as the shared `X-Agent-Token` header
+- `HOST_AGENT_TIMEOUT_SECONDS` controls request timeout

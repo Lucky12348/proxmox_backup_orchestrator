@@ -52,6 +52,9 @@ class AgentSettings:
     pbs_verify_ssl: bool = parse_bool(os.getenv("PBS_VERIFY_SSL"), default=False)
     pbs_fingerprint: str | None = os.getenv("PBS_FINGERPRINT") or None
     export_timeout_seconds: float = float(os.getenv("AGENT_EXPORT_TIMEOUT_SECONDS", "7200"))
+    server_host: str = os.getenv("AGENT_SERVER_HOST", "0.0.0.0")
+    server_port: int = int(os.getenv("AGENT_SERVER_PORT", "8081"))
+    server_token: str = os.getenv("AGENT_SERVER_TOKEN", "")
 
 
 def post_heartbeat(settings: AgentSettings) -> None:
@@ -90,7 +93,7 @@ def sync_state(settings: AgentSettings) -> None:
     post_real_disk_report(settings)
 
 
-def prepare_external_datastore(mount_path: str, target_path: str, mode: str) -> None:
+def prepare_external_datastore_result(mount_path: str, target_path: str, mode: str) -> dict[str, Any]:
     mount = Path(mount_path).resolve()
     target = Path(target_path).resolve()
     _validate_external_target(mount, target, mode)
@@ -112,11 +115,16 @@ def prepare_external_datastore(mount_path: str, target_path: str, mode: str) -> 
         "message": "Target directory is ready for external datastore export.",
         "return_code": 0,
     }
-    print(json.dumps(payload))
     logger.info("Prepared external datastore target %s", target)
+    return payload
 
 
-def run_external_export(target_path: str, datastore_name: str, mode: str, settings: AgentSettings) -> None:
+def run_external_export_result(
+    target_path: str,
+    datastore_name: str,
+    mode: str,
+    settings: AgentSettings,
+) -> dict[str, Any]:
     target = Path(target_path).resolve()
     if not target.is_dir():
         raise FileNotFoundError(f"Target path does not exist: {target_path}")
@@ -286,11 +294,11 @@ def run_external_export(target_path: str, datastore_name: str, mode: str, settin
         "message": message,
         "return_code": 0 if sync_completed else 1,
     }
-    print(json.dumps(payload))
     logger.info("External export finished for datastore %s into %s", datastore_name, target)
+    return payload
 
 
-def inspect_disk(identifier: str, mount_base_path: str | None = None) -> None:
+def inspect_disk_result(identifier: str, mount_base_path: str | None = None) -> dict[str, Any]:
     disk, _ = resolve_disk(identifier)
     serial = disk_serial_number(disk, load_udev_properties(device_name(disk))) or device_name(disk)
     filesystem_node = find_filesystem_node(disk)
@@ -312,16 +320,16 @@ def inspect_disk(identifier: str, mount_base_path: str | None = None) -> None:
         "candidate_mount_path": candidate_mount_path,
         "message": "Disk inspection completed.",
     }
-    print(json.dumps(payload))
     logger.info("Inspected disk %s", identifier)
+    return payload
 
 
-def prepare_disk(
+def prepare_disk_result(
     identifier: str,
     mode: str,
     mount_base_path: str | None,
     confirm_destructive: bool,
-) -> None:
+) -> dict[str, Any]:
     disk, _ = resolve_disk(identifier)
     serial = disk_serial_number(disk, load_udev_properties(device_name(disk))) or device_name(disk)
     mount_path = default_mount_base_path(mount_base_path) / serial
@@ -344,9 +352,8 @@ def prepare_disk(
             "filesystem_type": filesystem_type,
             "message": "Existing filesystem mounted under an application-managed path.",
         }
-        print(json.dumps(payload))
         logger.info("Prepared disk %s in preserve mode at %s", identifier, mount_path)
-        return
+        return payload
 
     if mode == "dedicated_backup":
         if not confirm_destructive:
@@ -364,9 +371,8 @@ def prepare_disk(
             "filesystem_type": filesystem_type,
             "message": "Disk formatted as ext4 and mounted under an application-managed path.",
         }
-        print(json.dumps(payload))
         logger.info("Prepared disk %s in dedicated mode at %s", identifier, mount_path)
-        return
+        return payload
 
     raise RuntimeError(f"Unsupported preparation mode: {mode}")
 
@@ -1055,8 +1061,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def emit_command_failure(command_name: str, exc: Exception) -> None:
-    payload = {
+def build_command_failure_payload(command_name: str, exc: Exception) -> dict[str, Any]:
+    return {
         "ok": False,
         "message": str(exc),
         "command_summary": command_name,
@@ -1065,6 +1071,10 @@ def emit_command_failure(command_name: str, exc: Exception) -> None:
         "stderr_log": str(exc),
         "return_code": _infer_error_return_code(exc),
     }
+
+
+def emit_command_failure(command_name: str, exc: Exception) -> None:
+    payload = build_command_failure_payload(command_name, exc)
     print(json.dumps(payload))
     logger.exception("Agent command %s failed", command_name)
     raise SystemExit(1) from exc
@@ -1098,23 +1108,26 @@ def main() -> None:
         return
 
     if args.command == "inspect-disk":
-        inspect_disk(args.disk, args.mount_base_path)
+        print(json.dumps(inspect_disk_result(args.disk, args.mount_base_path)))
         return
 
     if args.command == "prepare-disk":
-        prepare_disk(args.disk, args.mode, args.mount_base_path, args.confirm_destructive)
+        try:
+            print(json.dumps(prepare_disk_result(args.disk, args.mode, args.mount_base_path, args.confirm_destructive)))
+        except Exception as exc:
+            emit_command_failure(args.command, exc)
         return
 
     if args.command == "prepare-external-datastore":
         try:
-            prepare_external_datastore(args.mount_path, args.target_path, args.mode)
+            print(json.dumps(prepare_external_datastore_result(args.mount_path, args.target_path, args.mode)))
         except Exception as exc:
             emit_command_failure(args.command, exc)
         return
 
     if args.command == "run-external-export":
         try:
-            run_external_export(args.target_path, args.datastore_name, args.mode, settings)
+            print(json.dumps(run_external_export_result(args.target_path, args.datastore_name, args.mode, settings)))
         except Exception as exc:
             emit_command_failure(args.command, exc)
         return

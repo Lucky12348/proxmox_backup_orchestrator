@@ -140,7 +140,7 @@ def _reconcile_mount_path(disk: ExternalDisk, item) -> str | None:
     existing = _normalize_optional_string(disk.mount_path)
     if incoming:
         return incoming
-    if existing and item.connected:
+    if existing:
         return existing
     return incoming
 
