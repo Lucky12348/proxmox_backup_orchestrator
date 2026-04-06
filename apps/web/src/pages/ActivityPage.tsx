@@ -81,6 +81,9 @@ export function ActivityPage({ data, externalBackupRuns, language, t }: Activity
                             {run.command_summary ?? t.notAvailable}
                           </p>
                           <p>
+                            <strong>cwd:</strong> {run.execution_cwd ?? t.notAvailable}
+                          </p>
+                          <p>
                             <strong>{t.externalBackupStdout}:</strong>
                           </p>
                           <pre>{excerptLog(run.stdout_log) ?? t.externalBackupNoLogs}</pre>

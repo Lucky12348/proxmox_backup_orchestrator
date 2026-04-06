@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import os.path
 import shutil
 import socket
 import stat
@@ -105,6 +106,7 @@ def prepare_external_datastore(mount_path: str, target_path: str, mode: str) -> 
         "mount_path": str(mount),
         "target_path": str(target),
         "command_summary": f"mkdir -p {target} && chmod 750 {target}",
+        "execution_cwd": str(Path.cwd()),
         "stdout_log": f"Prepared target directory {target}",
         "stderr_log": None,
         "message": "Target directory is ready for external datastore export.",
@@ -278,6 +280,7 @@ def run_external_export(target_path: str, datastore_name: str, mode: str, settin
         "datastore_name": datastore_name,
         "mode": mode,
         "command_summary": "\n".join(command_summaries),
+        "execution_cwd": str(Path.cwd()),
         "stdout_log": "\n\n".join(chunk for chunk in stdout_logs if chunk) or None,
         "stderr_log": "\n\n".join(chunk for chunk in stderr_logs if chunk) or None,
         "message": message,
@@ -369,13 +372,14 @@ def prepare_disk(
 
 
 def discover_real_disks(settings: AgentSettings) -> list[dict[str, Any]]:
+    mount_lookup = load_mount_lookup()
     lsblk_output = run_command(
         [
             "lsblk",
             "-J",
             "-b",
             "-o",
-            "NAME,KNAME,TYPE,MODEL,SERIAL,SIZE,RM,ROTA,TRAN,MOUNTPOINT,FSTYPE,HOTPLUG,PKNAME",
+            "NAME,KNAME,PATH,TYPE,MODEL,SERIAL,SIZE,RM,ROTA,TRAN,MOUNTPOINT,FSTYPE,HOTPLUG,PKNAME",
         ]
     )
     payload = json.loads(lsblk_output)
@@ -403,11 +407,12 @@ def discover_real_disks(settings: AgentSettings) -> list[dict[str, Any]]:
 
         candidate_type, detection_reason = candidate
         disk_report = build_disk_report(
-            device=device,
+            device=normalize_lsblk_node(device),
             udev_props=udev_props,
             serial_number=serial_number,
             candidate_type=candidate_type,
             detection_reason=detection_reason,
+            mount_lookup=mount_lookup,
         )
         if disk_report:
             discovered.append(disk_report)
@@ -531,6 +536,7 @@ def resolve_disk(identifier: str) -> tuple[dict[str, Any], list[dict[str, Any]]]
 
 
 def list_all_block_nodes() -> list[dict[str, Any]]:
+    mount_lookup = load_mount_lookup()
     output = run_command(
         [
             "lsblk",
@@ -542,27 +548,31 @@ def list_all_block_nodes() -> list[dict[str, Any]]:
     payload = json.loads(output)
     nodes: list[dict[str, Any]] = []
     for device in payload.get("blockdevices", []):
-        normalized = normalize_lsblk_node(device)
+        normalized = normalize_lsblk_node(device, mount_lookup)
         nodes.append(normalized)
         nodes.extend(list_partition_nodes(normalized))
     return nodes
 
 
-def normalize_lsblk_node(device: dict[str, Any]) -> dict[str, Any]:
+def normalize_lsblk_node(
+    device: dict[str, Any],
+    mount_lookup: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    path = str(device.get("path") or f"/dev/{device.get('kname') or device.get('name') or ''}")
     return {
         "name": str(device.get("name") or ""),
         "kname": str(device.get("kname") or device.get("name") or ""),
-        "path": str(device.get("path") or f"/dev/{device.get('kname') or device.get('name') or ''}"),
+        "path": path,
         "type": str(device.get("type") or ""),
         "model": first_value(device.get("model")),
         "serial": first_value(device.get("serial")),
         "size": device.get("size"),
         "rm": device.get("rm"),
         "tran": device.get("tran"),
-        "mountpoint": device.get("mountpoint"),
+        "mountpoint": first_value(device.get("mountpoint"), recover_mount_path(path, mount_lookup or {})),
         "fstype": device.get("fstype"),
         "pkname": device.get("pkname"),
-        "children": [normalize_lsblk_node(child) for child in device.get("children", [])],
+        "children": [normalize_lsblk_node(child, mount_lookup) for child in device.get("children", [])],
     }
 
 
@@ -657,8 +667,9 @@ def build_disk_report(
     serial_number: str,
     candidate_type: str,
     detection_reason: str,
+    mount_lookup: dict[str, str],
 ) -> dict[str, Any] | None:
-    partition_info = derive_partition_info(device)
+    partition_info = derive_partition_info(device, mount_lookup)
     model_name = first_value(device.get("model"), udev_props.get("ID_MODEL"))
     display_name = first_value(model_name, serial_number, device_name(device))
     capacity_gb = bytes_to_gb(device.get("size"))
@@ -677,11 +688,11 @@ def build_disk_report(
     }
 
 
-def derive_partition_info(device: dict[str, Any]) -> dict[str, str | None]:
+def derive_partition_info(device: dict[str, Any], mount_lookup: dict[str, str]) -> dict[str, str | None]:
     partitions = flatten_partitions(device.get("children", []))
     for partition in partitions:
         filesystem_type = partition.get("fstype")
-        mount_path = partition.get("mountpoint")
+        mount_path = first_value(partition.get("mountpoint"), recover_mount_path(partition.get("path"), mount_lookup))
         if filesystem_type or mount_path:
             return {
                 "filesystem_type": filesystem_type,
@@ -690,7 +701,7 @@ def derive_partition_info(device: dict[str, Any]) -> dict[str, str | None]:
 
     return {
         "filesystem_type": device.get("fstype"),
-        "mount_path": device.get("mountpoint"),
+        "mount_path": first_value(device.get("mountpoint"), recover_mount_path(device.get("path"), mount_lookup)),
     }
 
 
@@ -719,6 +730,49 @@ def load_udev_properties(name: str) -> dict[str, str]:
         properties[key] = value
 
     return properties
+
+
+def load_mount_lookup() -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    mounts_path = Path("/proc/mounts")
+    if not mounts_path.exists():
+        return lookup
+
+    for line in mounts_path.read_text(encoding="utf-8").splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        source = _decode_mount_field(parts[0])
+        mount_path = _decode_mount_field(parts[1])
+        for candidate in _mount_lookup_keys(source):
+            lookup[candidate] = mount_path
+    return lookup
+
+
+def recover_mount_path(device_path: Any, mount_lookup: dict[str, str]) -> str | None:
+    if not isinstance(device_path, str) or not device_path:
+        return None
+
+    for candidate in _mount_lookup_keys(device_path):
+        mount_path = mount_lookup.get(candidate)
+        if mount_path:
+            return mount_path
+    return None
+
+
+def _mount_lookup_keys(device_path: str) -> list[str]:
+    candidates = [device_path]
+    try:
+        resolved = os.path.realpath(device_path)
+    except OSError:
+        resolved = device_path
+    if resolved not in candidates:
+        candidates.append(resolved)
+    return candidates
+
+
+def _decode_mount_field(value: str) -> str:
+    return value.replace("\\040", " ").replace("\\011", "\t").replace("\\012", "\n").replace("\\134", "\\")
 
 
 @dataclass(frozen=True)
@@ -1006,6 +1060,7 @@ def emit_command_failure(command_name: str, exc: Exception) -> None:
         "ok": False,
         "message": str(exc),
         "command_summary": command_name,
+        "execution_cwd": str(Path.cwd()),
         "stdout_log": None,
         "stderr_log": str(exc),
         "return_code": _infer_error_return_code(exc),

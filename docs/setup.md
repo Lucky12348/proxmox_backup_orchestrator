@@ -46,8 +46,8 @@ For read-only PBS backup sync, configure these variables in `.env`:
 
 For backend-to-host-agent execution, these variables are also relevant:
 
-- `HOST_AGENT_COMMAND`
-- `HOST_AGENT_WORKDIR`
+- `AGENT_EXEC_PYTHON_PATH`
+- `AGENT_EXEC_WORKDIR`
 - `HOST_AGENT_TIMEOUT_SECONDS`
 
 For the local host-agent scaffold, these variables are useful when running `apps/agent` manually:
@@ -197,7 +197,8 @@ Host-side dependencies for that execution path:
 When an external backup run finishes, the API stores:
 
 - final status and message
-- command summary
+- exact command
+- execution cwd
 - return code
 - captured stdout log
 - captured stderr log
@@ -207,8 +208,14 @@ Those details are visible from the Activity page and the `/api/v1/external-backu
 When a run fails, inspect logs in this order:
 
 - the Activity page detail section for the persisted message, command summary, return code, stdout, and stderr excerpts
+- the Activity page detail section for the persisted message, command summary, cwd, return code, stdout, and stderr excerpts
 - `GET /api/v1/external-backups/runs/{id}` for the stored run payload
 - `journalctl -u proxmox-backup-orchestrator-agent.service` on the host running the agent command
+
+For the current Proxmox host deployment, the backend should usually point at the installed agent venv explicitly:
+
+- `AGENT_EXEC_PYTHON_PATH=/opt/proxmox-backup-orchestrator-agent/.venv/bin/python`
+- `AGENT_EXEC_WORKDIR=/opt/proxmox-backup-orchestrator-agent`
 
 Disk preparation can now be triggered directly from the app through the host agent:
 

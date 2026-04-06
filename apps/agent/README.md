@@ -54,6 +54,11 @@ The examples assume:
 The service runs `python -m agent.main sync-state`.
 The timer triggers it every 2 minutes.
 
+When the API triggers host-side commands, it should execute the agent with:
+
+- `AGENT_EXEC_PYTHON_PATH=/opt/proxmox-backup-orchestrator-agent/.venv/bin/python`
+- `AGENT_EXEC_WORKDIR=/opt/proxmox-backup-orchestrator-agent`
+
 ## Real discovery heuristics
 
 The real disk report uses `lsblk -J` and optional `udevadm info`.

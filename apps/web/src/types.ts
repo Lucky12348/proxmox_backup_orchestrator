@@ -158,6 +158,7 @@ export interface ExternalBackupRun {
   stdout_log: string | null;
   stderr_log: string | null;
   command_summary: string | null;
+  execution_cwd: string | null;
   return_code: number | null;
   mode: ExternalBackupMode;
   created_at: string;

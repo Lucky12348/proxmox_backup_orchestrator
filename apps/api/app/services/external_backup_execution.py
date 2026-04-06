@@ -11,6 +11,7 @@ class ExternalBackupExecutionStep:
     stdout_log: str | None
     stderr_log: str | None
     command_summary: str
+    execution_cwd: str
     return_code: int | None
 
 
@@ -51,6 +52,7 @@ class ExternalBackupExecutionService:
                 stdout_log=prepare.stdout_log,
                 stderr_log=prepare.stderr_log,
                 command_summary=prepare.command_summary,
+                execution_cwd=prepare.execution_cwd,
                 return_code=prepare.return_code,
             ),
             export=ExternalBackupExecutionStep(
@@ -58,6 +60,7 @@ class ExternalBackupExecutionService:
                 stdout_log=export.stdout_log,
                 stderr_log=export.stderr_log,
                 command_summary=export.command_summary,
+                execution_cwd=export.execution_cwd,
                 return_code=export.return_code,
             ),
         )

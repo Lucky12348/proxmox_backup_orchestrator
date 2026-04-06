@@ -144,6 +144,7 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
         stdout_log=None,
         stderr_log=None,
         command_summary=None,
+        execution_cwd=None,
         return_code=None,
         mode=plan.mode,
         created_at=now,
@@ -177,6 +178,7 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
         run.stdout_log = _merge_logs(prepare_result.stdout_log, export_result.stdout_log)
         run.stderr_log = _merge_logs(prepare_result.stderr_log, export_result.stderr_log)
         run.command_summary = _merge_logs(prepare_result.command_summary, export_result.command_summary)
+        run.execution_cwd = _merge_logs(prepare_result.execution_cwd, export_result.execution_cwd)
         run.return_code = export_result.return_code
     except AgentCommandError as exc:
         run.status = BackupRunStatus.FAILED
@@ -195,6 +197,10 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
             prepare_result.command_summary if prepare_result else None,
             exc.command_summary,
         )
+        run.execution_cwd = _merge_logs(
+            prepare_result.execution_cwd if prepare_result else None,
+            exc.execution_cwd,
+        )
         run.return_code = exc.return_code
     except RuntimeError as exc:
         run.status = BackupRunStatus.FAILED
@@ -212,6 +218,10 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
         run.command_summary = _merge_logs(
             prepare_result.command_summary if prepare_result else None,
             export_result.command_summary if export_result else None,
+        )
+        run.execution_cwd = _merge_logs(
+            prepare_result.execution_cwd if prepare_result else None,
+            export_result.execution_cwd if export_result else None,
         )
         run.return_code = export_result.return_code if export_result else prepare_result.return_code if prepare_result else None
 

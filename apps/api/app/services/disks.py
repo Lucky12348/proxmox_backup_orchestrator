@@ -105,8 +105,8 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
         disk.display_name = item.display_name
         disk.model_name = item.model_name
         disk.capacity_gb = item.capacity_gb
-        disk.filesystem_type = item.filesystem_type
-        disk.mount_path = item.mount_path
+        disk.filesystem_type = _reconcile_filesystem_type(disk, item)
+        disk.mount_path = _reconcile_mount_path(disk, item)
         disk.detection_reason = item.detection_reason
         disk.candidate_type = item.candidate_type
         disk.connected = item.connected
@@ -133,6 +133,33 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
         db.refresh(disk)
 
     return upserted
+
+
+def _reconcile_mount_path(disk: ExternalDisk, item) -> str | None:
+    incoming = _normalize_optional_string(item.mount_path)
+    existing = _normalize_optional_string(disk.mount_path)
+    if incoming:
+        return incoming
+    if existing and item.connected:
+        return existing
+    return incoming
+
+
+def _reconcile_filesystem_type(disk: ExternalDisk, item) -> str | None:
+    incoming = _normalize_optional_string(item.filesystem_type)
+    existing = _normalize_optional_string(disk.filesystem_type)
+    if incoming:
+        return incoming
+    if existing and item.connected:
+        return existing
+    return incoming
+
+
+def _normalize_optional_string(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
 def get_agent_status(db: Session) -> dict[str, datetime | str | bool | int | None]:
