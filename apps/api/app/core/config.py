@@ -51,6 +51,9 @@ class Settings:
     host_agent_base_url: str = os.getenv("HOST_AGENT_BASE_URL", "http://proxmox-host:8081")
     host_agent_token: str = os.getenv("HOST_AGENT_TOKEN", "")
     host_agent_timeout_seconds: float = float(os.getenv("HOST_AGENT_TIMEOUT_SECONDS", "7200"))
+    pbs_agent_base_url: str = os.getenv("PBS_AGENT_BASE_URL", "http://pbs-host:8081")
+    pbs_agent_token: str = os.getenv("PBS_AGENT_TOKEN", "")
+    pbs_agent_timeout_seconds: float = float(os.getenv("PBS_AGENT_TIMEOUT_SECONDS", "7200"))
     agent_stale_after_minutes: int = int(os.getenv("AGENT_STALE_AFTER_MINUTES", "10"))
 
     @property

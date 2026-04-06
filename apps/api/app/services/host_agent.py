@@ -3,7 +3,7 @@ from typing import Any
 
 import httpx
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 
 
 MAX_LOG_LENGTH = 32000
@@ -41,8 +41,11 @@ class HostAgentError(RuntimeError):
 
 
 class HostAgentClient:
-    def __init__(self) -> None:
-        self.settings = get_settings()
+    def __init__(self, *, base_url: str, token: str, timeout_seconds: float, label: str) -> None:
+        self.base_url = base_url
+        self.token = token
+        self.timeout_seconds = timeout_seconds
+        self.label = label
 
     def get_health(self) -> dict[str, Any]:
         result = self._request("GET", "/health")
@@ -52,16 +55,16 @@ class HostAgentClient:
         return self._request("POST", path, payload)
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> HostAgentResult:
-        base_url = self.settings.host_agent_base_url.rstrip("/")
+        base_url = self.base_url.rstrip("/")
         url = f"{base_url}{path}"
-        headers = {"X-Agent-Token": self.settings.host_agent_token}
+        headers = {"X-Agent-Token": self.token}
 
         try:
-            with httpx.Client(timeout=self.settings.host_agent_timeout_seconds, headers=headers) as client:
+            with httpx.Client(timeout=self.timeout_seconds, headers=headers) as client:
                 response = client.request(method, url, json=payload)
         except httpx.TimeoutException as exc:
             raise HostAgentError(
-                f"Host agent request timed out after {self.settings.host_agent_timeout_seconds} seconds: `{method} {url}`.",
+                f"{self.label} request timed out after {self.timeout_seconds} seconds: `{method} {url}`.",
                 stdout_log=None,
                 stderr_log=str(exc),
                 command_summary=f"{method} {url}",
@@ -70,7 +73,7 @@ class HostAgentClient:
             ) from exc
         except httpx.HTTPError as exc:
             raise HostAgentError(
-                f"Host agent request failed: `{method} {url}`.",
+                f"{self.label} request failed: `{method} {url}`.",
                 stdout_log=None,
                 stderr_log=str(exc),
                 command_summary=f"{method} {url}",
@@ -141,4 +144,38 @@ def _truncate_log(value: str | None) -> str | None:
 
 
 def get_host_agent_client() -> HostAgentClient:
-    return HostAgentClient()
+    settings = get_settings()
+    return _build_agent_client(
+        settings,
+        base_url=settings.host_agent_base_url,
+        token=settings.host_agent_token,
+        timeout_seconds=settings.host_agent_timeout_seconds,
+        label="Host agent",
+    )
+
+
+def get_pbs_agent_client() -> HostAgentClient:
+    settings = get_settings()
+    return _build_agent_client(
+        settings,
+        base_url=settings.pbs_agent_base_url,
+        token=settings.pbs_agent_token,
+        timeout_seconds=settings.pbs_agent_timeout_seconds,
+        label="PBS agent",
+    )
+
+
+def _build_agent_client(
+    settings: Settings,
+    *,
+    base_url: str,
+    token: str,
+    timeout_seconds: float,
+    label: str,
+) -> HostAgentClient:
+    return HostAgentClient(
+        base_url=base_url,
+        token=token,
+        timeout_seconds=timeout_seconds,
+        label=label,
+    )

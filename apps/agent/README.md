@@ -1,6 +1,6 @@
 # Agent
 
-Minimal Python scaffold intended to run on a Proxmox host.
+Minimal Python scaffold intended to run on either a Proxmox host or a PBS host.
 
 ## Current scope
 
@@ -9,8 +9,8 @@ This phase does not implement hotplug watching yet. It provides:
 - heartbeat reporting to the backend
 - real disk report submission using Linux host inspection
 - one-shot state sync combining heartbeat and real disk report
-- an authenticated HTTP API for host-side disk preparation and export actions
-- target-directory preparation for an external PBS export flow
+- an authenticated HTTP API for host-side disk preparation and PBS-side export actions
+- target-directory preparation for an external datastore path
 - disk inspection and application-managed preparation commands
 - a real PBS-native-like external export command boundary when host dependencies are present
 - optional mock disk report submission for development
@@ -46,6 +46,17 @@ This phase does not implement hotplug watching yet. It provides:
 10. Prepare a disk with `python -m agent.main prepare-disk --disk <serial-or-path> --mode preserve_existing_data`
 11. Start the HTTP API with `python -m agent.main serve`
 
+## Deployment roles
+
+The same agent app is deployed in two pragmatic roles:
+
+- Proxmox host agent:
+  disk detection, heartbeat/report sync, disk preparation, mount-path handling
+- PBS execution agent:
+  PBS-native export execution through `proxmox-backup-manager`
+
+The HTTP surface can be the same on both, but the backend now uses different base URLs and tokens for each responsibility.
+
 ## Systemd deployment
 
 Deployable systemd examples are in `deploy/systemd/`.
@@ -56,16 +67,25 @@ The examples assume:
 - the virtual environment lives at `/opt/proxmox-backup-orchestrator-agent/.venv`
 - runtime environment variables are stored in `/opt/proxmox-backup-orchestrator-agent/.env`
 
-The deployment now has two systemd responsibilities:
+On the Proxmox host, the deployment has two systemd responsibilities:
 
 - `proxmox-backup-orchestrator-agent-api.service` runs the long-lived HTTP API
 - `proxmox-backup-orchestrator-agent.service` remains a one-shot sync job for heartbeat and disk reporting
 - `proxmox-backup-orchestrator-agent.timer` triggers that sync job every 2 minutes
 
-When the backend triggers host-side commands, it calls the agent API with:
+On the PBS host, deploy the same app with:
+
+- `proxmox-backup-orchestrator-pbs-agent-api.service`
+
+When the backend triggers host-side commands, it calls the Proxmox host agent API with:
 
 - `HOST_AGENT_BASE_URL=http://proxmox-host:8081`
 - `HOST_AGENT_TOKEN=...`
+
+For PBS-native export execution, the backend calls the PBS agent API with:
+
+- `PBS_AGENT_BASE_URL=http://pbs-host:8081`
+- `PBS_AGENT_TOKEN=...`
 
 The `serve` command reads:
 
@@ -94,6 +114,6 @@ That allows standalone non-system physical disks again, but the default remains 
 
 If a filesystem or mount point exists on a partition, the agent derives it from child partitions instead of requiring it on the parent disk node.
 
-For external export execution, the host also needs `proxmox-backup-manager` in `PATH`.
+For PBS-native export execution, the PBS host also needs `proxmox-backup-manager` in `PATH`.
 The command flow creates a target datastore on the removable media, creates a temporary
 remote and sync job, runs the sync, and returns structured stdout/stderr logs.

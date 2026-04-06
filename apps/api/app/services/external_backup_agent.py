@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from app.models import ExternalBackupMode, ExternalDisk
-from app.services.host_agent import HostAgentError, get_host_agent_client
+from app.services.host_agent import HostAgentError, get_host_agent_client, get_pbs_agent_client
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,8 @@ class AgentCommandError(RuntimeError):
 
 class ExternalBackupAgentBridge:
     def __init__(self) -> None:
-        self.client = get_host_agent_client()
+        self.host_client = get_host_agent_client()
+        self.pbs_client = get_pbs_agent_client()
 
     def prepare_external_datastore(
         self,
@@ -49,6 +50,7 @@ class ExternalBackupAgentBridge:
             raise RuntimeError("Disk has no mount path, so the host agent cannot prepare the export target.")
 
         return self._run_command(
+            self.host_client,
             "/prepare-external-datastore",
             {"mount_path": mount_path, "target_path": target_path, "mode": mode.value},
         )
@@ -60,20 +62,21 @@ class ExternalBackupAgentBridge:
         mode: ExternalBackupMode,
     ) -> AgentCommandResult:
         return self._run_command(
+            self.pbs_client,
             "/run-external-export",
             {"target_path": target_path, "datastore_name": datastore_name, "mode": mode.value},
         )
 
-    def _run_command(self, path: str, payload: dict[str, str]) -> AgentCommandResult:
+    def _run_command(self, client, path: str, payload: dict[str, str]) -> AgentCommandResult:
         try:
-            result = self.client.post(path, payload)
+            result = client.post(path, payload)
         except HostAgentError as exc:
             raise AgentCommandError(
                 str(exc),
                 stdout_log=exc.stdout_log,
                 stderr_log=exc.stderr_log,
                 command_summary=exc.command_summary or f"POST {path}",
-                execution_cwd=exc.execution_cwd or self.client.settings.host_agent_base_url,
+                execution_cwd=exc.execution_cwd or client.base_url,
                 return_code=exc.return_code,
             ) from exc
 
@@ -83,7 +86,7 @@ class ExternalBackupAgentBridge:
             stdout_log=result.stdout_log,
             stderr_log=result.stderr_log,
             command_summary=result.command_summary or f"POST {path}",
-            execution_cwd=result.execution_cwd or self.client.settings.host_agent_base_url,
+            execution_cwd=result.execution_cwd or client.base_url,
             return_code=result.return_code,
         )
 

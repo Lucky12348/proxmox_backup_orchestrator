@@ -5,7 +5,7 @@
 The current MVP stage is intentionally simple:
 
 - a dedicated VM runs the API, web application, and PostgreSQL database
-- a lightweight Python agent runs directly on a Proxmox host
+- a lightweight Python agent runs on the Proxmox host and can also be deployed on the PBS host
 - Proxmox Backup Server (PBS) remains the backup engine
 - external removable disks are attached to the Proxmox host and observed by the agent
 - notifications are emitted through `ntfy`
@@ -127,30 +127,41 @@ and timer on the Proxmox host. The timer runs the agent every 2 minutes and the 
 interprets agent health using a configurable stale threshold rather than assuming continuous
 connectivity.
 
-The same host agent is also the boundary for external datastore preparation and export
-execution, but that boundary is now HTTP instead of backend-local subprocess execution.
+The same host agent is also the boundary for external datastore preparation,
+but PBS-native export execution is no longer attempted on the Proxmox VE host.
 In this phase:
 
 - the backend stores run state in PostgreSQL
-- the backend calls the host agent API over HTTP with a shared token
-- the agent performs the host-local work on the Proxmox side
+- the backend calls the Proxmox host agent API over HTTP with a shared token for disk work
+- the Proxmox host agent performs host-local preparation and mount management
+- the backend calls a separate PBS agent API over HTTP for PBS-native export execution
 - the backend persists the final status plus message/command/stdout/stderr/return-code details
 
-Operationally, the host agent is split into two pieces:
+Operationally, the Proxmox host agent is split into two pieces:
 
 - a timer-driven sync command for heartbeat and disk reporting
-- a long-running HTTP service for on-demand disk preparation and external export actions
+- a long-running HTTP service for on-demand disk preparation actions
+
+### Agent on PBS Host
+
+The same agent app is also deployed on the PBS host as a dedicated execution boundary for PBS-native export commands.
+
+In this phase:
+
+- the PBS agent exposes the same authenticated HTTP server shape
+- the backend uses it only for `/run-external-export`
+- commands requiring `proxmox-backup-manager` are isolated to the PBS machine where that tooling belongs
 
 ### PBS as Backup Engine
 
 PBS remains responsible for performing and storing backups. The orchestrator focuses on coordination, visibility, and workflow state rather than replacing PBS.
 
-Disk orchestration, removable-media exports, and real USB hotplug coordination are still deferred. This phase establishes visibility, persisted disk metadata, the host-agent contract, and a pragmatic end-to-end external export flow.
-External removable-media export now attempts a real PBS-native-like sync by creating a
-target datastore on the removable media, creating a temporary PBS remote and sync job,
-running the sync, and storing the resulting command/stdout/stderr logs in
-`external_backup_runs`. Full restore and end-to-end PBS-native disaster recovery
-workflows are still deferred.
+Disk orchestration, removable-media exports, and real USB hotplug coordination are still deferred. This phase establishes visibility, persisted disk metadata, a two-agent contract, and a pragmatic end-to-end external export flow.
+External removable-media export now prepares the path through the Proxmox host agent,
+then attempts a real PBS-native sync through the PBS agent by creating a target datastore
+on the removable media, creating a temporary PBS remote and sync job, running the sync,
+and storing the resulting command/stdout/stderr logs in `external_backup_runs`.
+Full restore and end-to-end PBS-native disaster recovery workflows are still deferred.
 
 ### External Removable Disks
 

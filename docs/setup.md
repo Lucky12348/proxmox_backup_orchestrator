@@ -49,6 +49,9 @@ For backend-to-host-agent execution, these variables are also relevant:
 - `HOST_AGENT_BASE_URL`
 - `HOST_AGENT_TOKEN`
 - `HOST_AGENT_TIMEOUT_SECONDS`
+- `PBS_AGENT_BASE_URL`
+- `PBS_AGENT_TOKEN`
+- `PBS_AGENT_TIMEOUT_SECONDS`
 
 For the local host-agent scaffold, these variables are useful when running `apps/agent` manually:
 
@@ -117,10 +120,13 @@ Configure:
 
 After the stack starts, use the dashboard's PBS section to check connectivity and trigger a manual backup sync.
 
-## Host Agent Scaffold
+## Agent Scaffold
 
-The host agent is still intentionally simple in this phase. It does not watch hotplug events yet, but it now runs as a small HTTP daemon for on-demand actions alongside the existing timer-driven sync job.
-The host-side deployment now has a daemon for HTTP actions and a timer for state sync.
+The agent is still intentionally simple in this phase. It does not watch hotplug events yet, but it now runs as a small HTTP daemon for on-demand actions alongside the existing timer-driven sync job.
+The same app is deployed in two pragmatic roles:
+
+- Proxmox host agent for disk detection, disk preparation, and mount handling
+- PBS execution agent for PBS-native export commands
 
 It currently supports:
 
@@ -148,7 +154,8 @@ python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore
 python -m agent.main report-mock-disks
 ```
 
-Run the agent on the Proxmox host itself so `lsblk -J` reflects the real attached storage.
+Run the Proxmox-side agent on the Proxmox host itself so `lsblk -J` reflects the real attached storage.
+Run the PBS-side agent on the PBS host so `proxmox-backup-manager` and datastore management are available locally.
 
 The current real disk report now defaults to strict external-only detection:
 
@@ -189,18 +196,20 @@ The first external PBS export MVP builds on that disk model:
 - if a disk allows existing data, the app writes into an isolated application subdirectory:
   `proxmox-backup-orchestrator/<serial>/pbs-datastore`
 - coexistence mode never writes directly to the disk root
-- this phase replaces the earlier stub with a real host-side PBS-native-like sync attempt
-- the backend now calls the host agent over HTTP instead of trying to start host binaries locally
-- the agent prepares the target directory, then uses `proxmox-backup-manager` to create a local datastore, a temporary remote, and a temporary sync job before running the sync
+- this phase replaces the earlier stub with a real split-agent PBS-native sync attempt
+- the backend now calls the Proxmox host agent over HTTP for disk-side preparation
+- the backend calls a separate PBS agent over HTTP for PBS-native export execution
+- the PBS agent uses `proxmox-backup-manager` to create a local datastore, a temporary remote, and a temporary sync job before running the sync
 - full restore workflow comes later
 
 Host-side dependencies for that execution path:
 
-- `proxmox-backup-manager` must be installed on the machine running the agent command
-- the agent HTTP service must run on the Proxmox/PBS-capable host so host-local commands can access host storage and PBS tooling
-- the backend must be able to reach `HOST_AGENT_BASE_URL`
-- the backend and host agent must share the same token through `HOST_AGENT_TOKEN` and `AGENT_SERVER_TOKEN`
-- the host agent environment must include valid `PBS_API_URL`, `PBS_TOKEN_ID`, `PBS_TOKEN_SECRET`, and usually `PBS_DATASTORE`
+- the Proxmox host agent HTTP service must run on the Proxmox machine for disk preparation and mount work
+- `proxmox-backup-manager` must be installed on the PBS machine running the PBS agent
+- the PBS agent HTTP service must run on the PBS host for PBS-native export execution
+- the backend must be able to reach both `HOST_AGENT_BASE_URL` and `PBS_AGENT_BASE_URL`
+- the backend and each agent must share matching tokens through `HOST_AGENT_TOKEN` / `PBS_AGENT_TOKEN` and `AGENT_SERVER_TOKEN`
+- the PBS agent environment must include valid `PBS_API_URL`, `PBS_TOKEN_ID`, `PBS_TOKEN_SECRET`, and usually `PBS_DATASTORE`
 - if the PBS certificate is not already trusted by the host, `PBS_FINGERPRINT` may also be required
 
 When an external backup run finishes, the API stores:
@@ -219,7 +228,8 @@ When a run fails, inspect logs in this order:
 - the Activity page detail section for the persisted message, command summary, return code, stdout, and stderr excerpts
 - the Activity page detail section for the persisted message, command summary, cwd, return code, stdout, and stderr excerpts
 - `GET /api/v1/external-backups/runs/{id}` for the stored run payload
-- `journalctl -u proxmox-backup-orchestrator-agent-api.service` on the host running the agent API
+- `journalctl -u proxmox-backup-orchestrator-agent-api.service` on the Proxmox host
+- `journalctl -u proxmox-backup-orchestrator-pbs-agent-api.service` on the PBS host
 
 Disk preparation can now be triggered directly from the app through the host agent:
 
@@ -301,6 +311,37 @@ The split is intentional:
 - `proxmox-backup-orchestrator-agent-api.service` exposes the host-local action API
 - `proxmox-backup-orchestrator-agent.timer` continues to schedule heartbeat and disk report syncs
 - the backend talks to the host agent with `HOST_AGENT_BASE_URL`, `HOST_AGENT_TOKEN`, and `HOST_AGENT_TIMEOUT_SECONDS`
+
+## PBS Agent Deployment
+
+To run the PBS execution agent persistently on the PBS host:
+
+1. Copy `apps/agent` to a host path such as `/opt/proxmox-backup-orchestrator-agent`
+2. Create a virtual environment there
+3. Install the package into that venv
+4. Create `/opt/proxmox-backup-orchestrator-agent/.env` with:
+   - `AGENT_HOSTNAME`
+   - `AGENT_SERVER_TOKEN`
+   - `AGENT_SERVER_PORT` if you do not want `8081`
+   - `PBS_API_URL`
+   - `PBS_TOKEN_ID`
+   - `PBS_TOKEN_SECRET`
+   - `PBS_FINGERPRINT` when required
+5. Copy:
+   - `apps/agent/deploy/systemd/proxmox-backup-orchestrator-pbs-agent-api.service`
+   into `/etc/systemd/system/`
+6. Run:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now proxmox-backup-orchestrator-pbs-agent-api.service
+```
+
+The backend talks to the PBS execution agent with:
+
+- `PBS_AGENT_BASE_URL`
+- `PBS_AGENT_TOKEN`
+- `PBS_AGENT_TIMEOUT_SECONDS`
 
 For debugging on the Proxmox host:
 
