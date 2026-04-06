@@ -3,7 +3,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -71,11 +71,11 @@ def health(_: None = Depends(require_agent_token), settings: AgentSettings = Dep
     }
 
 
-@app.post("/prepare-disk")
+@app.post("/prepare-disk", response_model=None)
 def prepare_disk(
     payload: PrepareDiskRequest,
     _: None = Depends(require_agent_token),
-) -> JSONResponse | dict[str, Any]:
+) -> Response:
     return _run_endpoint(
         "prepare-disk",
         lambda: prepare_disk_result(
@@ -87,32 +87,32 @@ def prepare_disk(
     )
 
 
-@app.post("/prepare-external-datastore")
+@app.post("/prepare-external-datastore", response_model=None)
 def prepare_external_datastore(
     payload: PrepareExternalDatastoreRequest,
     _: None = Depends(require_agent_token),
-) -> JSONResponse | dict[str, Any]:
+) -> Response:
     return _run_endpoint(
         "prepare-external-datastore",
         lambda: prepare_external_datastore_result(payload.mount_path, payload.target_path, payload.mode),
     )
 
 
-@app.post("/run-external-export")
+@app.post("/run-external-export", response_model=None)
 def run_external_export(
     payload: RunExternalExportRequest,
     _: None = Depends(require_agent_token),
     settings: AgentSettings = Depends(get_settings),
-) -> JSONResponse | dict[str, Any]:
+) -> Response:
     return _run_endpoint(
         "run-external-export",
         lambda: run_external_export_result(payload.target_path, payload.datastore_name, payload.mode, settings),
     )
 
 
-def _run_endpoint(command_name: str, action) -> JSONResponse | dict[str, Any]:
+def _run_endpoint(command_name: str, action) -> Response:
     try:
-        return action()
+        return JSONResponse(content=action())
     except Exception as exc:
         logger.exception("Agent HTTP command %s failed", command_name)
         return JSONResponse(status_code=500, content=build_command_failure_payload(command_name, exc))
