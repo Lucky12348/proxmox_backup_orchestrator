@@ -127,17 +127,21 @@ and timer on the Proxmox host. The timer runs the agent every 2 minutes and the 
 interprets agent health using a configurable stale threshold rather than assuming continuous
 connectivity.
 
-The same host agent is also the natural boundary for later external datastore preparation
-and export execution. In this MVP, those commands are scaffolded cleanly but still use a
-stubbed execution boundary rather than full hotplug orchestration or restore workflows.
+The same host agent is also the boundary for external datastore preparation and export
+execution. In this phase, the backend creates the run record, calls the agent command
+boundary, and persists the final status plus command/stdout/stderr details after the
+agent performs the host-side work.
 
 ### PBS as Backup Engine
 
 PBS remains responsible for performing and storing backups. The orchestrator focuses on coordination, visibility, and workflow state rather than replacing PBS.
 
-Disk orchestration, removable-media exports, and real USB hotplug coordination are still deferred. This phase only establishes visibility, persisted disk metadata, and the first host-agent contract.
-External removable-media export now has an initial execution model, but full restore and
-end-to-end PBS-native disaster recovery workflows are still deferred.
+Disk orchestration, removable-media exports, and real USB hotplug coordination are still deferred. This phase establishes visibility, persisted disk metadata, the host-agent contract, and a pragmatic end-to-end external export flow.
+External removable-media export now attempts a real PBS-native-like sync by creating a
+target datastore on the removable media, creating a temporary PBS remote and sync job,
+running the sync, and storing the resulting command/stdout/stderr logs in
+`external_backup_runs`. Full restore and end-to-end PBS-native disaster recovery
+workflows are still deferred.
 
 ### External Removable Disks
 

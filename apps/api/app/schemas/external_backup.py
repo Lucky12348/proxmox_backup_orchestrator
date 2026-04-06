@@ -21,6 +21,9 @@ class ExternalBackupRunRead(BaseModel):
     target_path: str
     datastore_name: str
     message: str | None
+    stdout_log: str | None
+    stderr_log: str | None
+    command_summary: str | None
     mode: ExternalBackupMode
     created_at: datetime
 
@@ -35,5 +38,8 @@ class ExternalBackupRunSummaryRead(BaseModel):
     target_path: str
     datastore_name: str
     message: str | None
+    stdout_log: str | None
+    stderr_log: str | None
+    command_summary: str | None
     mode: ExternalBackupMode
     created_at: datetime

@@ -155,6 +155,9 @@ export interface ExternalBackupRun {
   target_path: string;
   datastore_name: string;
   message: string | null;
+  stdout_log: string | null;
+  stderr_log: string | null;
+  command_summary: string | null;
   mode: ExternalBackupMode;
   created_at: string;
 }

@@ -200,6 +200,10 @@ export const translations = {
     externalBackupBlockedDisconnected: "The selected disk is not currently connected.",
     externalBackupBlockedMode: "Enable dedicated mode or allow existing data before running an external backup.",
     externalBackupSummary: "External backup execution recorded",
+    externalBackupCommand: "Command",
+    externalBackupStdout: "Stdout",
+    externalBackupStderr: "Stderr",
+    externalBackupNoLogs: "No logs captured.",
     externalBackupModeLabel: {
       dedicated: "Dedicated",
       coexistence: "Coexistence",
@@ -404,6 +408,10 @@ export const translations = {
     externalBackupBlockedDisconnected: "Le disque selectionne n'est pas actuellement connecte.",
     externalBackupBlockedMode: "Activez le mode dedie ou l'autorisation des donnees existantes avant de lancer une sauvegarde externe.",
     externalBackupSummary: "Execution de sauvegarde externe enregistree",
+    externalBackupCommand: "Commande",
+    externalBackupStdout: "Stdout",
+    externalBackupStderr: "Stderr",
+    externalBackupNoLogs: "Aucun log capture.",
     externalBackupModeLabel: {
       dedicated: "Dedie",
       coexistence: "Coexistence",

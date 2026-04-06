@@ -30,7 +30,7 @@ interface ConfirmState {
 }
 
 export default function App() {
-  const [language, setLanguage] = useState<Language>("en");
+  const [language, setLanguage] = useState<Language>("fr");
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [preparationDisk, setPreparationDisk] = useState<ExternalDisk | null>(null);
 

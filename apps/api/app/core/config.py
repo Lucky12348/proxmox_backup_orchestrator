@@ -1,4 +1,5 @@
 import os
+import shlex
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -48,11 +49,18 @@ class Settings:
     pbs_token_secret: str = os.getenv("PBS_TOKEN_SECRET", "")
     pbs_verify_ssl: bool = parse_bool(os.getenv("PBS_VERIFY_SSL"), default=False)
     pbs_datastore: str = os.getenv("PBS_DATASTORE", "backup")
+    host_agent_command: str = os.getenv("HOST_AGENT_COMMAND", "python -m agent.main")
+    host_agent_workdir: str | None = os.getenv("HOST_AGENT_WORKDIR")
+    host_agent_timeout_seconds: float = float(os.getenv("HOST_AGENT_TIMEOUT_SECONDS", "7200"))
     agent_stale_after_minutes: int = int(os.getenv("AGENT_STALE_AFTER_MINUTES", "10"))
 
     @property
     def cors_origins(self) -> list[str]:
         return [self.frontend_origin, self.frontend_origin_alt]
+
+    @property
+    def host_agent_command_parts(self) -> list[str]:
+        return shlex.split(self.host_agent_command)
 
 
 @lru_cache(maxsize=1)

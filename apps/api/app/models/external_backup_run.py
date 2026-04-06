@@ -27,6 +27,9 @@ class ExternalBackupRun(Base):
     target_path: Mapped[str] = mapped_column(String(512), nullable=False)
     datastore_name: Mapped[str] = mapped_column(String(255), nullable=False)
     message: Mapped[str | None] = mapped_column(Text)
+    stdout_log: Mapped[str | None] = mapped_column(Text)
+    stderr_log: Mapped[str | None] = mapped_column(Text)
+    command_summary: Mapped[str | None] = mapped_column(Text)
     mode: Mapped[ExternalBackupMode] = mapped_column(
         SqlEnum(ExternalBackupMode, name="external_backup_mode", native_enum=False),
         nullable=False,

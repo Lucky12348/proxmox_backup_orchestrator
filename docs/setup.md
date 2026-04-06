@@ -41,7 +41,14 @@ For read-only PBS backup sync, configure these variables in `.env`:
 - `PBS_TOKEN_ID`
 - `PBS_TOKEN_SECRET`
 - `PBS_VERIFY_SSL`
+- `PBS_FINGERPRINT` when the host-side sync remote needs an explicit certificate fingerprint
 - `PBS_DATASTORE`
+
+For backend-to-host-agent execution, these variables are also relevant:
+
+- `HOST_AGENT_COMMAND`
+- `HOST_AGENT_WORKDIR`
+- `HOST_AGENT_TIMEOUT_SECONDS`
 
 For the local host-agent scaffold, these variables are useful when running `apps/agent` manually:
 
@@ -51,6 +58,7 @@ For the local host-agent scaffold, these variables are useful when running `apps
 - `AGENT_TIMEOUT_SECONDS`
 - `AGENT_INCLUDE_NON_USB_CANDIDATES`
 - `AGENT_STALE_AFTER_MINUTES`
+- `AGENT_EXPORT_TIMEOUT_SECONDS`
 
 For POSIX shells, a matching helper is available at `infra/scripts/bootstrap.sh`.
 
@@ -116,7 +124,7 @@ It currently supports:
 - sending a real disk report based on Linux host inspection
 - sending a combined heartbeat + real disk report with `sync-state`
 - preparing a dedicated target directory for an external PBS export flow
-- exercising a stubbed external export command boundary
+- running a real PBS-native-like external export boundary when `proxmox-backup-manager` is available
 - sending a mock external-disk report for fallback testing
 
 Example local commands:
@@ -129,8 +137,8 @@ pip install -e .
 python -m agent.main heartbeat
 python -m agent.main report-disks
 python -m agent.main sync-state
-python -m agent.main prepare-external-datastore --mount-path /mnt/backup --target-path /mnt/backup/pbs-datastore
-python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore --datastore-name backup
+python -m agent.main prepare-external-datastore --mount-path /mnt/backup --target-path /mnt/backup/pbs-datastore --mode dedicated
+python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore --datastore-name backup --mode dedicated
 python -m agent.main report-mock-disks
 ```
 
@@ -175,8 +183,24 @@ The first external PBS export MVP builds on that disk model:
 - if a disk allows existing data, the app writes into an isolated application subdirectory:
   `proxmox-backup-orchestrator/<serial>/pbs-datastore`
 - coexistence mode never writes directly to the disk root
-- this is a PBS-native-like export flow intended to prepare for disaster recovery later
+- this phase replaces the earlier stub with a real host-side PBS-native-like sync attempt
+- the agent prepares the target directory, then uses `proxmox-backup-manager` to create a local datastore, a temporary remote, and a temporary sync job before running the sync
 - full restore workflow comes later
+
+Host-side dependencies for that execution path:
+
+- `proxmox-backup-manager` must be installed on the machine running the agent command
+- the host agent environment must include valid `PBS_API_URL`, `PBS_TOKEN_ID`, `PBS_TOKEN_SECRET`, and usually `PBS_DATASTORE`
+- if the PBS certificate is not already trusted by the host, `PBS_FINGERPRINT` may also be required
+
+When an external backup run finishes, the API stores:
+
+- final status and message
+- command summary
+- captured stdout log
+- captured stderr log
+
+Those details are visible from the Activity page and the `/api/v1/external-backups/runs` APIs.
 
 Disk preparation can now be triggered directly from the app through the host agent:
 
@@ -255,8 +279,8 @@ For debugging on the Proxmox host:
 cd /opt/proxmox-backup-orchestrator-agent
 source .venv/bin/activate
 python -m agent.main sync-state
-python -m agent.main prepare-external-datastore --mount-path /mnt/backup --target-path /mnt/backup/pbs-datastore
-python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore --datastore-name backup
+python -m agent.main prepare-external-datastore --mount-path /mnt/backup --target-path /mnt/backup/pbs-datastore --mode dedicated
+python -m agent.main run-external-export --target-path /mnt/backup/pbs-datastore --datastore-name backup --mode dedicated
 ```
 
 To inspect logs:

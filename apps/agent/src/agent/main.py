@@ -1,13 +1,17 @@
 import argparse
+import hashlib
 import json
 import logging
 import os
+import shutil
 import socket
+import stat
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -41,6 +45,12 @@ class AgentSettings:
         os.getenv("AGENT_INCLUDE_NON_USB_CANDIDATES"),
         default=False,
     )
+    pbs_api_url: str = os.getenv("PBS_API_URL", "")
+    pbs_auth_id: str = os.getenv("PBS_TOKEN_ID", "")
+    pbs_auth_secret: str = os.getenv("PBS_TOKEN_SECRET", "")
+    pbs_verify_ssl: bool = parse_bool(os.getenv("PBS_VERIFY_SSL"), default=False)
+    pbs_fingerprint: str | None = os.getenv("PBS_FINGERPRINT") or None
+    export_timeout_seconds: float = float(os.getenv("AGENT_EXPORT_TIMEOUT_SECONDS", "7200"))
 
 
 def post_heartbeat(settings: AgentSettings) -> None:
@@ -79,43 +89,200 @@ def sync_state(settings: AgentSettings) -> None:
     post_real_disk_report(settings)
 
 
-def prepare_external_datastore(mount_path: str, target_path: str) -> None:
-    mount = Path(mount_path)
-    target = Path(target_path)
-    if not mount.exists():
+def prepare_external_datastore(mount_path: str, target_path: str, mode: str) -> None:
+    mount = Path(mount_path).resolve()
+    target = Path(target_path).resolve()
+    _validate_external_target(mount, target, mode)
+
+    if not mount.is_dir():
         raise FileNotFoundError(f"Mount path does not exist: {mount_path}")
 
     target.mkdir(parents=True, exist_ok=True)
+    _ensure_directory_permissions(target)
+
     payload = {
         "ok": True,
         "mount_path": str(mount),
         "target_path": str(target),
+        "command_summary": f"mkdir -p {target} && chmod 750 {target}",
+        "stdout_log": f"Prepared target directory {target}",
+        "stderr_log": None,
         "message": "Target directory is ready for external datastore export.",
     }
     print(json.dumps(payload))
     logger.info("Prepared external datastore target %s", target)
 
 
-def run_external_export(target_path: str, datastore_name: str) -> None:
-    target = Path(target_path)
-    if not target.exists():
+def run_external_export(target_path: str, datastore_name: str, mode: str, settings: AgentSettings) -> None:
+    target = Path(target_path).resolve()
+    if not target.is_dir():
         raise FileNotFoundError(f"Target path does not exist: {target_path}")
 
+    manager = shutil.which("proxmox-backup-manager")
+    if manager is None:
+        raise RuntimeError(
+            "Missing required host dependency: `proxmox-backup-manager` was not found in PATH."
+        )
+
+    if not settings.pbs_api_url:
+        raise RuntimeError("PBS_API_URL must be configured on the host agent for external export.")
+    if not settings.pbs_auth_id or not settings.pbs_auth_secret:
+        raise RuntimeError("PBS_TOKEN_ID and PBS_TOKEN_SECRET must be configured on the host agent.")
+
+    api = parse_pbs_api_url(settings.pbs_api_url)
+    datastores_result = run_subprocess(
+        [manager, "datastore", "list", "--output-format", "json"],
+        timeout_seconds=settings.export_timeout_seconds,
+    )
+    if datastores_result.returncode != 0:
+        raise RuntimeError(format_command_failure("Unable to inspect PBS datastores.", datastores_result))
+
+    datastores = parse_json_output(datastores_result.stdout, "datastore list")
+    datastore_names = {item.get("name") for item in datastores if isinstance(item, dict)}
+    if datastore_name not in datastore_names:
+        raise RuntimeError(f"Invalid source datastore `{datastore_name}` on this PBS host.")
+
+    existing_target_store = find_datastore_by_path(datastores, target)
+    created_datastore = existing_target_store is None
+    target_store_name = existing_target_store or build_resource_name("pbo-export-store", str(target))
+    remote_name = build_resource_name("pbo-export-remote", f"{api['host']}:{datastore_name}:{target}")
+    sync_job_name = build_resource_name("pbo-export-sync", f"{datastore_name}:{target}")
+
+    command_summaries: list[str] = []
+    stdout_logs: list[str] = []
+    stderr_logs: list[str] = []
+    cleanup_errors: list[str] = []
+    sync_completed = False
+    created_temp_datastore = False
+    created_remote = False
+    created_sync_job = False
+
+    try:
+        if created_datastore:
+            create_store_result = run_subprocess(
+                [
+                    manager,
+                    "datastore",
+                    "create",
+                    target_store_name,
+                    str(target),
+                    "--reuse-datastore",
+                    "true",
+                ],
+                timeout_seconds=settings.export_timeout_seconds,
+            )
+            record_command_result(create_store_result, command_summaries, stdout_logs, stderr_logs)
+            if create_store_result.returncode != 0:
+                raise RuntimeError(
+                    format_command_failure(
+                        f"Failed to create target datastore `{target_store_name}`.",
+                        create_store_result,
+                    )
+                )
+            created_temp_datastore = True
+
+        remote_create = [
+            manager,
+            "remote",
+            "create",
+            remote_name,
+            "--host",
+            str(api["host"]),
+            "--port",
+            str(api["port"]),
+            "--auth-id",
+            settings.pbs_auth_id,
+            "--password",
+            settings.pbs_auth_secret,
+        ]
+        if settings.pbs_fingerprint:
+            remote_create.extend(["--fingerprint", settings.pbs_fingerprint])
+
+        remote_result = run_subprocess(remote_create, timeout_seconds=settings.export_timeout_seconds)
+        record_command_result(remote_result, command_summaries, stdout_logs, stderr_logs)
+        if remote_result.returncode != 0:
+            raise RuntimeError(
+                format_command_failure(f"Failed to create temporary PBS remote `{remote_name}`.", remote_result)
+            )
+        created_remote = True
+
+        sync_create = [
+            manager,
+            "sync-job",
+            "create",
+            sync_job_name,
+            "--remote",
+            remote_name,
+            "--remote-store",
+            datastore_name,
+            "--store",
+            target_store_name,
+            "--remove-vanished",
+            "false",
+            "--owner",
+            settings.pbs_auth_id.split("!", 1)[0],
+        ]
+        sync_create_result = run_subprocess(sync_create, timeout_seconds=settings.export_timeout_seconds)
+        record_command_result(sync_create_result, command_summaries, stdout_logs, stderr_logs)
+        if sync_create_result.returncode != 0:
+            raise RuntimeError(
+                format_command_failure(
+                    f"Failed to create temporary sync job `{sync_job_name}`.",
+                    sync_create_result,
+                )
+            )
+        created_sync_job = True
+
+        sync_run_result = run_subprocess(
+            [manager, "sync-job", "run", sync_job_name],
+            timeout_seconds=settings.export_timeout_seconds,
+        )
+        record_command_result(sync_run_result, command_summaries, stdout_logs, stderr_logs)
+        if sync_run_result.returncode != 0:
+            raise RuntimeError(
+                format_command_failure(
+                    f"PBS sync execution failed for datastore `{datastore_name}`.",
+                    sync_run_result,
+                )
+            )
+        sync_completed = True
+    finally:
+        if created_sync_job:
+            cleanup_errors.extend(
+                cleanup_resource([manager, "sync-job", "remove", sync_job_name], settings.export_timeout_seconds)
+            )
+        if created_remote:
+            cleanup_errors.extend(
+                cleanup_resource([manager, "remote", "remove", remote_name], settings.export_timeout_seconds)
+            )
+        if created_temp_datastore:
+            cleanup_errors.extend(
+                cleanup_resource([manager, "datastore", "remove", target_store_name], settings.export_timeout_seconds)
+            )
+
+    if cleanup_errors:
+        stderr_logs.append("\n".join(cleanup_errors))
+
+    message = (
+        f"External PBS export completed into `{target}` from datastore `{datastore_name}`."
+        if sync_completed
+        else f"External PBS export failed for datastore `{datastore_name}`."
+    )
+    if cleanup_errors and sync_completed:
+        message = f"{message} Cleanup reported warnings."
+
     payload = {
-        "ok": True,
+        "ok": sync_completed,
         "target_path": str(target),
         "datastore_name": datastore_name,
-        "message": (
-            "Stub export boundary: would run a PBS-native-like export using "
-            f"datastore '{datastore_name}' into '{target_path}'."
-        ),
+        "mode": mode,
+        "command_summary": "\n".join(command_summaries),
+        "stdout_log": "\n\n".join(chunk for chunk in stdout_logs if chunk) or None,
+        "stderr_log": "\n\n".join(chunk for chunk in stderr_logs if chunk) or None,
+        "message": message,
     }
     print(json.dumps(payload))
-    logger.info(
-        "Stub external export for datastore %s into %s",
-        datastore_name,
-        target_path,
-    )
+    logger.info("External export finished for datastore %s into %s", datastore_name, target)
 
 
 def inspect_disk(identifier: str, mount_base_path: str | None = None) -> None:
@@ -552,6 +719,137 @@ def load_udev_properties(name: str) -> dict[str, str]:
     return properties
 
 
+@dataclass(frozen=True)
+class SubprocessResult:
+    command: list[str]
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def parse_pbs_api_url(api_url: str) -> dict[str, Any]:
+    parsed = urlparse(api_url)
+    if not parsed.scheme or not parsed.hostname:
+        raise RuntimeError(f"Invalid PBS_API_URL: {api_url}")
+
+    if parsed.scheme != "https":
+        raise RuntimeError("PBS_API_URL must use https for proxmox-backup-manager remote sync.")
+
+    port = parsed.port or 8007
+    return {
+        "scheme": parsed.scheme,
+        "host": parsed.hostname,
+        "port": port,
+    }
+
+
+def _validate_external_target(mount: Path, target: Path, mode: str) -> None:
+    try:
+        target.relative_to(mount)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Target path `{target}` must remain inside trusted mount path `{mount}`."
+        ) from exc
+
+    if mode == "coexistence" and target == mount:
+        raise RuntimeError("Coexistence mode must not export at the raw disk root.")
+
+
+def _ensure_directory_permissions(path: Path) -> None:
+    current_mode = stat.S_IMODE(path.stat().st_mode)
+    desired_mode = current_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+    desired_mode |= stat.S_IRGRP | stat.S_IXGRP
+    if desired_mode != current_mode:
+        path.chmod(desired_mode)
+
+
+def parse_json_output(raw_output: str, context: str) -> list[dict[str, Any]]:
+    try:
+        payload = json.loads(raw_output or "[]")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Unable to parse JSON from `{context}` output: {exc}") from exc
+
+    if not isinstance(payload, list):
+        raise RuntimeError(f"Unexpected JSON payload from `{context}` output.")
+
+    return [item for item in payload if isinstance(item, dict)]
+
+
+def build_resource_name(prefix: str, seed: str) -> str:
+    suffix = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:10]
+    return f"{prefix}-{suffix}"
+
+
+def find_datastore_by_path(datastores: list[dict[str, Any]], target: Path) -> str | None:
+    target_str = str(target)
+    for item in datastores:
+        if str(item.get("path") or "") == target_str:
+            name = item.get("name")
+            if isinstance(name, str) and name:
+                return name
+    return None
+
+
+def run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResult:
+    completed = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout_seconds,
+    )
+    return SubprocessResult(
+        command=command,
+        returncode=completed.returncode,
+        stdout=completed.stdout.strip(),
+        stderr=completed.stderr.strip(),
+    )
+
+
+def record_command_result(
+    result: SubprocessResult,
+    command_summaries: list[str],
+    stdout_logs: list[str],
+    stderr_logs: list[str],
+) -> None:
+    command_summaries.append(redact_command(result.command))
+    if result.stdout:
+        stdout_logs.append(result.stdout)
+    if result.stderr:
+        stderr_logs.append(result.stderr)
+
+
+def format_command_failure(prefix: str, result: SubprocessResult) -> str:
+    details = [prefix, f"Command: {redact_command(result.command)}", f"exit={result.returncode}"]
+    if result.stderr:
+        details.append(f"stderr: {result.stderr[:500]}")
+    if result.stdout:
+        details.append(f"stdout: {result.stdout[:500]}")
+    return " ".join(details)
+
+
+def cleanup_resource(command: list[str], timeout_seconds: float) -> list[str]:
+    result = run_subprocess(command, timeout_seconds)
+    if result.returncode == 0:
+        return []
+    return [format_command_failure("Cleanup command failed.", result)]
+
+
+def redact_command(command: list[str]) -> str:
+    redacted: list[str] = []
+    secret_flags = {"--password"}
+    skip_next = False
+    for index, part in enumerate(command):
+        if skip_next:
+            redacted.append("***")
+            skip_next = False
+            continue
+        redacted.append(part)
+        if part in secret_flags and index + 1 < len(command):
+            skip_next = True
+    return " ".join(redacted)
+
+
 def run_command(command: list[str]) -> str:
     result = subprocess.run(
         command,
@@ -667,14 +965,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prepare_parser.add_argument("--mount-path", required=True)
     prepare_parser.add_argument("--target-path", required=True)
+    prepare_parser.add_argument(
+        "--mode",
+        required=True,
+        choices=["dedicated", "coexistence"],
+    )
     export_parser = subparsers.add_parser(
         "run-external-export",
-        help="Run or simulate the external PBS export boundary",
+        help="Run a PBS-native-like external export boundary",
     )
     export_parser.add_argument("--target-path", required=True)
     export_parser.add_argument("--datastore-name", required=True)
+    export_parser.add_argument(
+        "--mode",
+        required=True,
+        choices=["dedicated", "coexistence"],
+    )
 
     return parser
+
+
+def emit_command_failure(command_name: str, exc: Exception) -> None:
+    payload = {
+        "ok": False,
+        "message": str(exc),
+        "command_summary": command_name,
+        "stdout_log": None,
+        "stderr_log": str(exc),
+    }
+    print(json.dumps(payload))
+    logger.exception("Agent command %s failed", command_name)
+    raise SystemExit(1) from exc
 
 
 def main() -> None:
@@ -707,11 +1028,17 @@ def main() -> None:
         return
 
     if args.command == "prepare-external-datastore":
-        prepare_external_datastore(args.mount_path, args.target_path)
+        try:
+            prepare_external_datastore(args.mount_path, args.target_path, args.mode)
+        except Exception as exc:
+            emit_command_failure(args.command, exc)
         return
 
     if args.command == "run-external-export":
-        run_external_export(args.target_path, args.datastore_name)
+        try:
+            run_external_export(args.target_path, args.datastore_name, args.mode, settings)
+        except Exception as exc:
+            emit_command_failure(args.command, exc)
         return
 
     parser.error("Unknown command")

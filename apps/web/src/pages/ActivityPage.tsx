@@ -28,6 +28,7 @@ export function ActivityPage({ data, externalBackupRuns, language, t }: Activity
                   <th>{t.backupStarted}</th>
                   <th>{t.backupFinished}</th>
                   <th>{t.backupSummary}</th>
+                  <th>{t.viewDetails}</th>
                 </tr>
               </thead>
               <tbody>
@@ -44,6 +45,31 @@ export function ActivityPage({ data, externalBackupRuns, language, t }: Activity
                     <td>{formatDateTime(run.started_at, language, t.notAvailable)}</td>
                     <td>{formatDateTime(run.finished_at, language, t.notAvailable)}</td>
                     <td>{run.message ?? t.notAvailable}</td>
+                    <td>
+                      <details className="log-details">
+                        <summary>{t.viewDetails}</summary>
+                        <div className="log-details-body">
+                          <p>
+                            <strong>{t.externalBackupTargetPath}:</strong> {run.target_path}
+                          </p>
+                          <p>
+                            <strong>{t.pbsDatastore}:</strong> {run.datastore_name}
+                          </p>
+                          <p>
+                            <strong>{t.externalBackupCommand}:</strong>{" "}
+                            {run.command_summary ?? t.notAvailable}
+                          </p>
+                          <p>
+                            <strong>{t.externalBackupStdout}:</strong>
+                          </p>
+                          <pre>{run.stdout_log ?? t.externalBackupNoLogs}</pre>
+                          <p>
+                            <strong>{t.externalBackupStderr}:</strong>
+                          </p>
+                          <pre>{run.stderr_log ?? t.externalBackupNoLogs}</pre>
+                        </div>
+                      </details>
+                    </td>
                   </tr>
                 ))}
               </tbody>

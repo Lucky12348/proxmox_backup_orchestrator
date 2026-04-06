@@ -581,6 +581,39 @@ tbody tr:hover {
   background: #fff8f8;
 }
 
+.log-details {
+  min-width: 280px;
+}
+
+.log-details summary {
+  cursor: pointer;
+  color: #1f6aa3;
+  font-weight: 600;
+}
+
+.log-details-body {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.log-details-body p {
+  margin: 0;
+}
+
+.log-details-body pre {
+  margin: 0;
+  max-width: 560px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #0f1b28;
+  color: #dbe7f3;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
