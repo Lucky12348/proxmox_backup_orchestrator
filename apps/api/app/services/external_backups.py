@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models import BackupRunStatus, ExternalBackupMode, ExternalBackupRun, ExternalDisk
-from app.services.external_backup_agent import AgentCommandError, get_external_backup_agent_bridge
+from app.services.external_backup_agent import AgentCommandError
+from app.services.external_backup_execution import get_external_backup_execution_service
 
 
 @dataclass(frozen=True)
@@ -143,6 +144,7 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
         stdout_log=None,
         stderr_log=None,
         command_summary=None,
+        return_code=None,
         mode=plan.mode,
         created_at=now,
     )
@@ -150,7 +152,7 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
     db.commit()
     db.refresh(run)
 
-    bridge = get_external_backup_agent_bridge()
+    execution_service = get_external_backup_execution_service()
 
     run.status = BackupRunStatus.RUNNING
     db.add(run)
@@ -160,13 +162,14 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
     prepare_result = None
     export_result = None
     try:
-        prepare_result = bridge.prepare_external_datastore(disk, plan.target_path, plan.mode)
-        if not prepare_result.ok:
-            raise RuntimeError(prepare_result.message)
-
-        export_result = bridge.run_external_export(plan.target_path, settings.pbs_datastore, plan.mode)
-        if not export_result.ok:
-            raise RuntimeError(export_result.message)
+        execution_result = execution_service.execute(
+            disk=disk,
+            target_path=plan.target_path,
+            datastore_name=settings.pbs_datastore,
+            mode=plan.mode,
+        )
+        prepare_result = execution_result.prepare
+        export_result = execution_result.export
 
         run.status = BackupRunStatus.SUCCESS
         run.finished_at = datetime.utcnow()
@@ -174,6 +177,7 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
         run.stdout_log = _merge_logs(prepare_result.stdout_log, export_result.stdout_log)
         run.stderr_log = _merge_logs(prepare_result.stderr_log, export_result.stderr_log)
         run.command_summary = _merge_logs(prepare_result.command_summary, export_result.command_summary)
+        run.return_code = export_result.return_code
     except AgentCommandError as exc:
         run.status = BackupRunStatus.FAILED
         run.finished_at = datetime.utcnow()
@@ -191,6 +195,7 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
             prepare_result.command_summary if prepare_result else None,
             exc.command_summary,
         )
+        run.return_code = exc.return_code
     except RuntimeError as exc:
         run.status = BackupRunStatus.FAILED
         run.finished_at = datetime.utcnow()
@@ -206,8 +211,9 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
         )
         run.command_summary = _merge_logs(
             prepare_result.command_summary if prepare_result else None,
-            export_result.command_summary if export_result else bridge.settings.host_agent_command,
+            export_result.command_summary if export_result else None,
         )
+        run.return_code = export_result.return_code if export_result else prepare_result.return_code if prepare_result else None
 
     db.add(run)
     db.commit()

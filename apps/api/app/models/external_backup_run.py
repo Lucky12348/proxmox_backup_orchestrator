@@ -30,6 +30,7 @@ class ExternalBackupRun(Base):
     stdout_log: Mapped[str | None] = mapped_column(Text)
     stderr_log: Mapped[str | None] = mapped_column(Text)
     command_summary: Mapped[str | None] = mapped_column(Text)
+    return_code: Mapped[int | None]
     mode: Mapped[ExternalBackupMode] = mapped_column(
         SqlEnum(ExternalBackupMode, name="external_backup_mode", native_enum=False),
         nullable=False,

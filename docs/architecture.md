@@ -129,8 +129,9 @@ connectivity.
 
 The same host agent is also the boundary for external datastore preparation and export
 execution. In this phase, the backend creates the run record, calls the agent command
-boundary, and persists the final status plus command/stdout/stderr details after the
-agent performs the host-side work.
+boundary through a dedicated execution service, and persists the final status plus
+message/command/stdout/stderr/return-code details after the agent performs the
+host-side work.
 
 ### PBS as Backup Engine
 

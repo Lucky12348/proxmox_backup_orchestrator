@@ -16,6 +16,7 @@ class AgentCommandResult:
     stdout_log: str | None
     stderr_log: str | None
     command_summary: str
+    return_code: int | None
 
 
 class AgentCommandError(RuntimeError):
@@ -26,11 +27,13 @@ class AgentCommandError(RuntimeError):
         stdout_log: str | None,
         stderr_log: str | None,
         command_summary: str,
+        return_code: int | None,
     ) -> None:
         super().__init__(message)
         self.stdout_log = stdout_log
         self.stderr_log = stderr_log
         self.command_summary = command_summary
+        self.return_code = return_code
 
 
 class ExternalBackupAgentBridge:
@@ -79,15 +82,42 @@ class ExternalBackupAgentBridge:
 
     def _run_command(self, args: list[str]) -> AgentCommandResult:
         command = [*self.settings.host_agent_command_parts, *args]
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=self.settings.host_agent_timeout_seconds,
-            cwd=self.settings.host_agent_workdir,
-            check=False,
-        )
         command_summary = " ".join(command)
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=self.settings.host_agent_timeout_seconds,
+                cwd=self.settings.host_agent_workdir,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise AgentCommandError(
+                f"Host agent command could not be started: `{command_summary}`.",
+                stdout_log=None,
+                stderr_log=str(exc),
+                command_summary=command_summary,
+                return_code=127,
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            stdout_log = _truncate_log(exc.stdout if isinstance(exc.stdout, str) else None)
+            stderr_log = _truncate_log(exc.stderr if isinstance(exc.stderr, str) else None)
+            raise AgentCommandError(
+                f"Host agent command timed out after {self.settings.host_agent_timeout_seconds} seconds: `{command_summary}`.",
+                stdout_log=stdout_log,
+                stderr_log=stderr_log,
+                command_summary=command_summary,
+                return_code=None,
+            ) from exc
+        except OSError as exc:
+            raise AgentCommandError(
+                f"Host agent command failed to start: `{command_summary}`.",
+                stdout_log=None,
+                stderr_log=str(exc),
+                command_summary=command_summary,
+                return_code=None,
+            ) from exc
         stdout_log = _truncate_log(completed.stdout)
         stderr_log = _truncate_log(completed.stderr)
         payload = _parse_payload(completed.stdout)
@@ -105,12 +135,14 @@ class ExternalBackupAgentBridge:
                     stdout_log=_truncate_log(str(payload.get("stdout_log") or "")) or stdout_log,
                     stderr_log=_truncate_log(str(payload.get("stderr_log") or "")) or stderr_log,
                     command_summary=str(payload.get("command_summary") or command_summary),
+                    return_code=_payload_return_code(payload, completed.returncode),
                 )
             raise AgentCommandError(
                 _format_failure(command_summary, stdout_log, stderr_log, completed.returncode),
                 stdout_log=stdout_log,
                 stderr_log=stderr_log,
                 command_summary=command_summary,
+                return_code=completed.returncode,
             )
 
         if payload is None:
@@ -119,6 +151,7 @@ class ExternalBackupAgentBridge:
                 stdout_log=stdout_log,
                 stderr_log=stderr_log,
                 command_summary=command_summary,
+                return_code=completed.returncode,
             )
 
         return AgentCommandResult(
@@ -127,6 +160,7 @@ class ExternalBackupAgentBridge:
             stdout_log=_truncate_log(payload.get("stdout_log")) or stdout_log,
             stderr_log=_truncate_log(payload.get("stderr_log")) or stderr_log,
             command_summary=str(payload.get("command_summary") or command_summary),
+            return_code=_payload_return_code(payload, completed.returncode),
         )
 
 
@@ -184,6 +218,16 @@ def _format_payload_failure(
     if stdout_log:
         details.append(f"stdout: {stdout_log[:500]}")
     return " ".join(details)
+
+
+def _payload_return_code(payload: dict[str, object], fallback: int | None) -> int | None:
+    raw_value = payload.get("return_code")
+    if raw_value is None:
+        return fallback
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        return fallback
 
 
 def get_external_backup_agent_bridge() -> ExternalBackupAgentBridge:

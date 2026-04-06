@@ -5,6 +5,14 @@ import { StatusBadge } from "../components/StatusBadge";
 import { formatDateTime, getBackupStatusTone } from "../utils";
 import type { ActivityPageProps } from "./shared";
 
+function excerptLog(value: string | null, maxLength = 2000) {
+  if (!value) {
+    return null;
+  }
+
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength)}\n...[truncated]`;
+}
+
 export function ActivityPage({ data, externalBackupRuns, language, t }: ActivityPageProps) {
   return (
     <div className="page-stack">
@@ -50,10 +58,23 @@ export function ActivityPage({ data, externalBackupRuns, language, t }: Activity
                         <summary>{t.viewDetails}</summary>
                         <div className="log-details-body">
                           <p>
+                            <strong>{t.backupStatus}:</strong>{" "}
+                            <StatusBadge tone={getBackupStatusTone(run.status)}>
+                              {t.status[run.status]}
+                            </StatusBadge>
+                          </p>
+                          <p>
+                            <strong>{t.externalBackupResult}:</strong> {run.message ?? t.notAvailable}
+                          </p>
+                          <p>
                             <strong>{t.externalBackupTargetPath}:</strong> {run.target_path}
                           </p>
                           <p>
                             <strong>{t.pbsDatastore}:</strong> {run.datastore_name}
+                          </p>
+                          <p>
+                            <strong>{t.externalBackupReturnCode}:</strong>{" "}
+                            {run.return_code ?? t.notAvailable}
                           </p>
                           <p>
                             <strong>{t.externalBackupCommand}:</strong>{" "}
@@ -62,11 +83,11 @@ export function ActivityPage({ data, externalBackupRuns, language, t }: Activity
                           <p>
                             <strong>{t.externalBackupStdout}:</strong>
                           </p>
-                          <pre>{run.stdout_log ?? t.externalBackupNoLogs}</pre>
+                          <pre>{excerptLog(run.stdout_log) ?? t.externalBackupNoLogs}</pre>
                           <p>
                             <strong>{t.externalBackupStderr}:</strong>
                           </p>
-                          <pre>{run.stderr_log ?? t.externalBackupNoLogs}</pre>
+                          <pre>{excerptLog(run.stderr_log) ?? t.externalBackupNoLogs}</pre>
                         </div>
                       </details>
                     </td>

@@ -201,6 +201,8 @@ export const translations = {
     externalBackupBlockedMode: "Enable dedicated mode or allow existing data before running an external backup.",
     externalBackupSummary: "External backup execution recorded",
     externalBackupCommand: "Command",
+    externalBackupResult: "Result",
+    externalBackupReturnCode: "Return code",
     externalBackupStdout: "Stdout",
     externalBackupStderr: "Stderr",
     externalBackupNoLogs: "No logs captured.",
@@ -409,6 +411,8 @@ export const translations = {
     externalBackupBlockedMode: "Activez le mode dedie ou l'autorisation des donnees existantes avant de lancer une sauvegarde externe.",
     externalBackupSummary: "Execution de sauvegarde externe enregistree",
     externalBackupCommand: "Commande",
+    externalBackupResult: "Resultat",
+    externalBackupReturnCode: "Code retour",
     externalBackupStdout: "Stdout",
     externalBackupStderr: "Stderr",
     externalBackupNoLogs: "Aucun log capture.",
@@ -419,4 +423,4 @@ export const translations = {
   },
 } as const;
 
-export type TranslationDictionary = (typeof translations)["en"];
+export type TranslationDictionary = (typeof translations)[Language];

@@ -190,6 +190,7 @@ The first external PBS export MVP builds on that disk model:
 Host-side dependencies for that execution path:
 
 - `proxmox-backup-manager` must be installed on the machine running the agent command
+- the agent command must run on the Proxmox/PBS-capable host so the subprocess boundary can access host storage and PBS tooling
 - the host agent environment must include valid `PBS_API_URL`, `PBS_TOKEN_ID`, `PBS_TOKEN_SECRET`, and usually `PBS_DATASTORE`
 - if the PBS certificate is not already trusted by the host, `PBS_FINGERPRINT` may also be required
 
@@ -197,10 +198,17 @@ When an external backup run finishes, the API stores:
 
 - final status and message
 - command summary
+- return code
 - captured stdout log
 - captured stderr log
 
-Those details are visible from the Activity page and the `/api/v1/external-backups/runs` APIs.
+Those details are visible from the Activity page and the `/api/v1/external-backups/runs` and `/api/v1/external-backups/runs/{id}` APIs.
+
+When a run fails, inspect logs in this order:
+
+- the Activity page detail section for the persisted message, command summary, return code, stdout, and stderr excerpts
+- `GET /api/v1/external-backups/runs/{id}` for the stored run payload
+- `journalctl -u proxmox-backup-orchestrator-agent.service` on the host running the agent command
 
 Disk preparation can now be triggered directly from the app through the host agent:
 

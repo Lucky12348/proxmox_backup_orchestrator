@@ -60,6 +60,7 @@ def _build_summary(run, disk_name: str) -> ExternalBackupRunSummaryRead:
         stdout_log=run.stdout_log,
         stderr_log=run.stderr_log,
         command_summary=run.command_summary,
+        return_code=run.return_code,
         mode=run.mode,
         created_at=run.created_at,
     )

@@ -24,6 +24,7 @@ class ExternalBackupRunRead(BaseModel):
     stdout_log: str | None
     stderr_log: str | None
     command_summary: str | None
+    return_code: int | None
     mode: ExternalBackupMode
     created_at: datetime
 
@@ -41,5 +42,6 @@ class ExternalBackupRunSummaryRead(BaseModel):
     stdout_log: str | None
     stderr_log: str | None
     command_summary: str | None
+    return_code: int | None
     mode: ExternalBackupMode
     created_at: datetime

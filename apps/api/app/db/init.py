@@ -91,6 +91,7 @@ def ensure_external_backup_run_schema() -> None:
         "stdout_log": "ALTER TABLE external_backup_runs ADD COLUMN stdout_log TEXT",
         "stderr_log": "ALTER TABLE external_backup_runs ADD COLUMN stderr_log TEXT",
         "command_summary": "ALTER TABLE external_backup_runs ADD COLUMN command_summary TEXT",
+        "return_code": "ALTER TABLE external_backup_runs ADD COLUMN return_code INTEGER",
     }
 
     with engine.begin() as connection:
@@ -270,6 +271,7 @@ def seed_database() -> None:
                     stdout_log="TASK OK\nSummary: synced datastore backup to /mnt/pbs-alpha/pbs-datastore",
                     stderr_log=None,
                     command_summary="proxmox-backup-manager sync-job run pbo-seeded-export",
+                    return_code=0,
                     mode=ExternalBackupMode.DEDICATED,
                     created_at=datetime.fromisoformat("2026-03-28T23:00:00"),
                 ),

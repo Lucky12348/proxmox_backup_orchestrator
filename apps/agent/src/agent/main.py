@@ -108,6 +108,7 @@ def prepare_external_datastore(mount_path: str, target_path: str, mode: str) -> 
         "stdout_log": f"Prepared target directory {target}",
         "stderr_log": None,
         "message": "Target directory is ready for external datastore export.",
+        "return_code": 0,
     }
     print(json.dumps(payload))
     logger.info("Prepared external datastore target %s", target)
@@ -280,6 +281,7 @@ def run_external_export(target_path: str, datastore_name: str, mode: str, settin
         "stdout_log": "\n\n".join(chunk for chunk in stdout_logs if chunk) or None,
         "stderr_log": "\n\n".join(chunk for chunk in stderr_logs if chunk) or None,
         "message": message,
+        "return_code": 0 if sync_completed else 1,
     }
     print(json.dumps(payload))
     logger.info("External export finished for datastore %s into %s", datastore_name, target)
@@ -791,13 +793,27 @@ def find_datastore_by_path(datastores: list[dict[str, Any]], target: Path) -> st
 
 
 def run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResult:
-    completed = subprocess.run(
-        command,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except FileNotFoundError as exc:
+        missing = command[0] if command else "<unknown>"
+        raise RuntimeError(f"Required command `{missing}` was not found in PATH.") from exc
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.strip() if isinstance(exc.stdout, str) else ""
+        stderr = exc.stderr.strip() if isinstance(exc.stderr, str) else ""
+        details = [f"Command timed out after {timeout_seconds} seconds: {redact_command(command)}"]
+        if stderr:
+            details.append(f"stderr: {stderr[:500]}")
+        if stdout:
+            details.append(f"stdout: {stdout[:500]}")
+        raise RuntimeError(" ".join(details)) from exc
+
     return SubprocessResult(
         command=command,
         returncode=completed.returncode,
@@ -992,10 +1008,17 @@ def emit_command_failure(command_name: str, exc: Exception) -> None:
         "command_summary": command_name,
         "stdout_log": None,
         "stderr_log": str(exc),
+        "return_code": _infer_error_return_code(exc),
     }
     print(json.dumps(payload))
     logger.exception("Agent command %s failed", command_name)
     raise SystemExit(1) from exc
+
+
+def _infer_error_return_code(exc: Exception) -> int:
+    if isinstance(exc, subprocess.CalledProcessError):
+        return exc.returncode
+    return 1
 
 
 def main() -> None:
