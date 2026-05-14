@@ -39,7 +39,7 @@ class DiskHandoffUsbMatchTests(TestCase):
             _disk(),
         )
 
-        self.assertEqual(result["mapping"], "3-4")
+        self.assertEqual(result["mapping"], "3-7")
 
     def test_safe_fallback_matches_real_western_digital_game_drive(self):
         result = _find_matching_usb_device(
@@ -50,6 +50,7 @@ class DiskHandoffUsbMatchTests(TestCase):
                     "vendid": "1058",
                     "prodid": "2630",
                     "usbpath": "5",
+                    "port": "4",
                     "busnum": 2,
                     "devnum": 2,
                 }
@@ -57,7 +58,21 @@ class DiskHandoffUsbMatchTests(TestCase):
             _disk(),
         )
 
-        self.assertEqual(result["mapping"], "2-2")
+        self.assertEqual(result["mapping"], "2-5")
+
+    def test_qemu_mapping_does_not_use_devnum_when_usbpath_exists(self):
+        mapping = _qemu_usb_host_mapping(
+            {
+                "busnum": 2,
+                "devnum": 2,
+                "usbpath": "5",
+                "vendid": "1058",
+                "prodid": "2630",
+            }
+        )
+
+        self.assertEqual(mapping, "2-5")
+        self.assertNotEqual(mapping, "2-2")
 
     def test_qemu_mapping_falls_back_to_vendor_product_id(self):
         result = _find_matching_usb_device(

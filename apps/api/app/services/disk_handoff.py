@@ -50,7 +50,8 @@ def handoff_disk_to_pbs(db: Session, disk: ExternalDisk, *, confirmation: bool) 
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=(
                 f"Failed to attach USB disk `{disk.serial_number}` to the PBS VM "
-                f"using Proxmox USB mapping `{device['mapping']}`"
+                f"on node `{settings.pbs_execution_vm_node}` VM `{settings.pbs_execution_vm_id}` "
+                f"slot `{slot}` using Proxmox USB mapping `{device['mapping']}`"
                 f"{_selected_usb_detail(device)}: {exc}"
             ),
         ) from exc
@@ -231,15 +232,18 @@ def _summarize_usb_devices(devices: list[dict[str, Any]]) -> str:
     for device in devices:
         manufacturer = _candidate_value(device, "manufacturer") or "unknown manufacturer"
         product = _candidate_value(device, "product", "name", "model") or "unknown product"
+        busnum = _candidate_value(device, "busnum", "bus") or "unknown busnum"
+        devnum = _candidate_value(device, "devnum", "device") or "unknown devnum"
         vendid = _candidate_value(device, "vendid", "vendorid", "vendor_id") or "unknown vendid"
         prodid = _candidate_value(device, "prodid", "productid", "product_id") or "unknown prodid"
         usbpath = _usb_debug_path(device) or "missing usbpath"
+        port = _candidate_value(device, "port") or "unknown port"
         qemu_mapping = _qemu_usb_host_mapping(device) or "missing qemu mapping"
         usb_class = _candidate_value(device, "class", "classid", "usbclass", "usb_class") or "unknown class"
         summaries.append(
             f"{manufacturer} / {product} "
-            f"(vendid={vendid}, prodid={prodid}, usbpath={usbpath}, "
-            f"class={usb_class}, qemu_mapping={qemu_mapping})"
+            f"(busnum={busnum}, devnum={devnum}, usbpath={usbpath}, port={port}, "
+            f"vendid={vendid}, prodid={prodid}, class={usb_class}, qemu_mapping={qemu_mapping})"
         )
     return "; ".join(summaries)
 
@@ -250,9 +254,9 @@ def _has_serial_identity(device: dict[str, Any]) -> bool:
 
 def _qemu_usb_host_mapping(device: dict[str, Any]) -> str | None:
     busnum = _candidate_value(device, "busnum", "bus")
-    devnum = _candidate_value(device, "devnum", "device")
-    if busnum and devnum:
-        return f"{busnum}-{devnum}"
+    usbpath = _usb_debug_path(device)
+    if busnum and usbpath:
+        return f"{busnum}-{usbpath}"
 
     vendid = _candidate_value(device, "vendid", "vendorid", "vendor_id")
     prodid = _candidate_value(device, "prodid", "productid", "product_id")
