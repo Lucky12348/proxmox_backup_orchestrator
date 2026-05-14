@@ -53,6 +53,9 @@ class AgentSettings:
     pbs_verify_ssl: bool = parse_bool(os.getenv("PBS_VERIFY_SSL"), default=False)
     pbs_fingerprint: str | None = os.getenv("PBS_FINGERPRINT") or None
     export_timeout_seconds: float = float(os.getenv("AGENT_EXPORT_TIMEOUT_SECONDS", "7200"))
+    datastore_create_timeout_seconds: float = float(
+        os.getenv("AGENT_DATASTORE_CREATE_TIMEOUT_SECONDS", "14400")
+    )
     server_host: str = os.getenv("AGENT_SERVER_HOST", "0.0.0.0")
     server_port: int = int(os.getenv("AGENT_SERVER_PORT", "8081"))
     server_token: str = os.getenv("AGENT_SERVER_TOKEN", "")
@@ -169,26 +172,59 @@ def run_external_export_result(
     created_temp_datastore = False
     created_remote = False
     created_sync_job = False
+    target_was_initialized = is_initialized_pbs_datastore_path(target)
+    datastore_create_timeout = max(
+        settings.export_timeout_seconds,
+        settings.datastore_create_timeout_seconds,
+    )
+    target_filesystem_type = filesystem_type_for_path(target)
 
     try:
         if created_datastore:
-            create_store_result = run_subprocess(
-                [
-                    manager,
-                    "datastore",
-                    "create",
-                    target_store_name,
-                    str(target),
-                    "--reuse-datastore",
-                    "true",
-                ],
-                timeout_seconds=settings.export_timeout_seconds,
+            create_store_command = [
+                manager,
+                "datastore",
+                "create",
+                target_store_name,
+                str(target),
+            ]
+            create_context = "existing initialized PBS datastore path"
+            if target_was_initialized:
+                create_store_command.extend(["--reuse-datastore", "true"])
+            else:
+                create_context = "new datastore initialization"
+
+            detection_message = (
+                f"Target datastore path `{target}` detected as "
+                f"{'initialized' if target_was_initialized else 'new/uninitialized'}; "
+                f"filesystem={target_filesystem_type or 'unknown'}; "
+                f"create_timeout_seconds={datastore_create_timeout}; "
+                f"command={redact_command(create_store_command)}"
             )
+            stdout_logs.append(detection_message)
+            logger.info(detection_message)
+
+            try:
+                create_store_result = run_subprocess(
+                    create_store_command,
+                    timeout_seconds=datastore_create_timeout,
+                )
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    f"Failed to create target datastore `{target_store_name}` "
+                    f"for {create_context}; filesystem={target_filesystem_type or 'unknown'}; "
+                    f"timeout_seconds={datastore_create_timeout}; "
+                    f"command={redact_command(create_store_command)}. {exc}"
+                ) from exc
             record_command_result(create_store_result, command_summaries, stdout_logs, stderr_logs)
             if create_store_result.returncode != 0:
                 raise RuntimeError(
                     format_command_failure(
-                        f"Failed to create target datastore `{target_store_name}`.",
+                        (
+                            f"Failed to create target datastore `{target_store_name}` "
+                            f"for {create_context}; filesystem="
+                            f"{target_filesystem_type or 'unknown'}."
+                        ),
                         create_store_result,
                     )
                 )
@@ -864,6 +900,29 @@ def find_datastore_by_path(datastores: list[dict[str, Any]], target: Path) -> st
             name = item.get("name")
             if isinstance(name, str) and name:
                 return name
+    return None
+
+
+def is_initialized_pbs_datastore_path(path: Path) -> bool:
+    chunks = path / ".chunks"
+    return chunks.is_dir()
+
+
+def filesystem_type_for_path(path: Path) -> str | None:
+    findmnt = shutil.which("findmnt")
+    if findmnt:
+        try:
+            return run_command([findmnt, "-no", "FSTYPE", "--target", str(path)]).strip() or None
+        except (RuntimeError, subprocess.CalledProcessError):
+            pass
+
+    lsblk = shutil.which("lsblk")
+    if lsblk:
+        try:
+            return run_command([lsblk, "-no", "FSTYPE", str(path)]).strip() or None
+        except (RuntimeError, subprocess.CalledProcessError):
+            pass
+
     return None
 
 
