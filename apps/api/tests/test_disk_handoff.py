@@ -3,7 +3,7 @@ from unittest import TestCase
 
 from fastapi import HTTPException
 
-from app.services.disk_handoff import _find_matching_usb_device
+from app.services.disk_handoff import _find_matching_usb_device, _qemu_usb_host_mapping
 
 
 def _disk(**overrides):
@@ -32,12 +32,14 @@ class DiskHandoffUsbMatchTests(TestCase):
                     "serial": "WD-WXD2DA1L1E7C",
                     "product": "WDC WD40NMZW-59BCBS0",
                     "usbpath": "7",
+                    "busnum": 3,
+                    "devnum": 4,
                 },
             ],
             _disk(),
         )
 
-        self.assertEqual(result, {"mapping": "7"})
+        self.assertEqual(result["mapping"], "3-4")
 
     def test_safe_fallback_matches_real_western_digital_game_drive(self):
         result = _find_matching_usb_device(
@@ -55,7 +57,26 @@ class DiskHandoffUsbMatchTests(TestCase):
             _disk(),
         )
 
-        self.assertEqual(result, {"mapping": "5"})
+        self.assertEqual(result["mapping"], "2-2")
+
+    def test_qemu_mapping_falls_back_to_vendor_product_id(self):
+        result = _find_matching_usb_device(
+            [
+                {
+                    "manufacturer": "Western Digital",
+                    "product": "Game Drive",
+                    "vendid": "1058",
+                    "prodid": "2630",
+                    "usbpath": "5",
+                }
+            ],
+            _disk(),
+        )
+
+        self.assertEqual(result["mapping"], "1058:2630")
+
+    def test_usbpath_alone_is_not_qemu_mapping(self):
+        self.assertIsNone(_qemu_usb_host_mapping({"usbpath": "5"}))
 
     def test_safe_fallback_rejects_forbidden_usb_devices(self):
         with self.assertRaises(HTTPException) as raised:

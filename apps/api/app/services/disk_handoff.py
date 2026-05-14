@@ -48,7 +48,11 @@ def handoff_disk_to_pbs(db: Session, disk: ExternalDisk, *, confirmation: bool) 
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to attach USB disk `{disk.serial_number}` to the PBS VM: {exc}",
+            detail=(
+                f"Failed to attach USB disk `{disk.serial_number}` to the PBS VM "
+                f"using Proxmox USB mapping `{device['mapping']}`"
+                f"{_selected_usb_detail(device)}: {exc}"
+            ),
         ) from exc
 
     disk.handoff_status = "attached_to_pbs"
@@ -180,10 +184,10 @@ def _find_strict_serial_match(devices: list[dict[str, Any]], disk: ExternalDisk)
         device_model = (_candidate_value(raw_device, "product", "name", "model") or "").casefold()
         if model and device_model and model not in device_model:
             continue
-        mapping = _usb_mapping(raw_device)
+        mapping = _qemu_usb_host_mapping(raw_device)
         if not mapping:
             continue
-        return {"mapping": mapping}
+        return _build_usb_match(raw_device, mapping)
     return None
 
 
@@ -195,7 +199,7 @@ def _find_safe_fallback_usb_match(devices: list[dict[str, Any]], disk: ExternalD
     for raw_device in devices:
         if _has_serial_identity(raw_device):
             continue
-        if not _usb_mapping(raw_device):
+        if not _qemu_usb_host_mapping(raw_device):
             continue
         if _is_forbidden_usb_passthrough_candidate(raw_device):
             continue
@@ -203,7 +207,9 @@ def _find_safe_fallback_usb_match(devices: list[dict[str, Any]], disk: ExternalD
             matches.append(raw_device)
 
     if len(matches) == 1:
-        return {"mapping": _usb_mapping(matches[0]) or ""}
+        mapping = _qemu_usb_host_mapping(matches[0])
+        if mapping:
+            return _build_usb_match(matches[0], mapping)
     if len(matches) > 1:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -227,11 +233,13 @@ def _summarize_usb_devices(devices: list[dict[str, Any]]) -> str:
         product = _candidate_value(device, "product", "name", "model") or "unknown product"
         vendid = _candidate_value(device, "vendid", "vendorid", "vendor_id") or "unknown vendid"
         prodid = _candidate_value(device, "prodid", "productid", "product_id") or "unknown prodid"
-        usbpath = _usb_mapping(device) or "missing usbpath"
+        usbpath = _usb_debug_path(device) or "missing usbpath"
+        qemu_mapping = _qemu_usb_host_mapping(device) or "missing qemu mapping"
         usb_class = _candidate_value(device, "class", "classid", "usbclass", "usb_class") or "unknown class"
         summaries.append(
             f"{manufacturer} / {product} "
-            f"(vendid={vendid}, prodid={prodid}, usbpath={usbpath}, class={usb_class})"
+            f"(vendid={vendid}, prodid={prodid}, usbpath={usbpath}, "
+            f"class={usb_class}, qemu_mapping={qemu_mapping})"
         )
     return "; ".join(summaries)
 
@@ -240,8 +248,33 @@ def _has_serial_identity(device: dict[str, Any]) -> bool:
     return bool(_candidate_value(device, "serial", "serial-number", "serialnumber"))
 
 
-def _usb_mapping(device: dict[str, Any]) -> str | None:
+def _qemu_usb_host_mapping(device: dict[str, Any]) -> str | None:
+    busnum = _candidate_value(device, "busnum", "bus")
+    devnum = _candidate_value(device, "devnum", "device")
+    if busnum and devnum:
+        return f"{busnum}-{devnum}"
+
+    vendid = _candidate_value(device, "vendid", "vendorid", "vendor_id")
+    prodid = _candidate_value(device, "prodid", "productid", "product_id")
+    if vendid and prodid:
+        return f"{vendid}:{prodid}"
+
+    return None
+
+
+def _usb_debug_path(device: dict[str, Any]) -> str | None:
     return _candidate_value(device, "usbpath", "path", "port", "busport", "id")
+
+
+def _build_usb_match(device: dict[str, Any], mapping: str) -> dict[str, str]:
+    return {"mapping": mapping, "summary": _summarize_usb_devices([device])}
+
+
+def _selected_usb_detail(device: dict[str, str]) -> str:
+    summary = device.get("summary")
+    if not summary:
+        return ""
+    return f" ({summary})"
 
 
 def _is_forbidden_usb_passthrough_candidate(device: dict[str, Any]) -> bool:
