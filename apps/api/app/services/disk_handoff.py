@@ -153,26 +153,211 @@ def get_pbs_disk_visibility(db: Session, disk: ExternalDisk) -> DiskHandoffStatu
 
 
 def _find_matching_usb_device(devices: list[dict[str, Any]], disk: ExternalDisk) -> dict[str, str]:
-    serial = disk.serial_number.strip()
-    model = (disk.model_name or "").strip().lower()
+    strict_match = _find_strict_serial_match(devices, disk)
+    if strict_match:
+        return strict_match
+
+    fallback_match = _find_safe_fallback_usb_match(devices, disk)
+    if fallback_match:
+        return fallback_match
+
+    detail = (
+        "No Proxmox USB passthrough candidate matched "
+        f"disk serial `{disk.serial_number}`"
+        f"{_disk_identity_suffix(disk)}. "
+        f"Available USB devices: {_summarize_usb_devices(devices)}"
+    )
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+
+
+def _find_strict_serial_match(devices: list[dict[str, Any]], disk: ExternalDisk) -> dict[str, str] | None:
+    serial = (disk.serial_number or "").strip()
+    model = (disk.model_name or "").strip().casefold()
     for raw_device in devices:
         device_serial = _candidate_value(raw_device, "serial", "serial-number", "serialnumber")
         if device_serial != serial:
             continue
-        device_model = (_candidate_value(raw_device, "product", "name", "model") or "").lower()
+        device_model = (_candidate_value(raw_device, "product", "name", "model") or "").casefold()
         if model and device_model and model not in device_model:
             continue
-        mapping = _candidate_value(raw_device, "usbpath", "path", "port", "busport", "id")
+        mapping = _usb_mapping(raw_device)
         if not mapping:
-            break
+            continue
         return {"mapping": mapping}
+    return None
 
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=(
-            f"No strict Proxmox USB passthrough candidate matched serial `{disk.serial_number}`."
-        ),
+
+def _find_safe_fallback_usb_match(devices: list[dict[str, Any]], disk: ExternalDisk) -> dict[str, str] | None:
+    if (disk.candidate_type or "").strip().casefold() != "usb":
+        return None
+
+    matches: list[dict[str, Any]] = []
+    for raw_device in devices:
+        if _has_serial_identity(raw_device):
+            continue
+        if not _usb_mapping(raw_device):
+            continue
+        if _is_forbidden_usb_passthrough_candidate(raw_device):
+            continue
+        if _is_likely_storage_usb_device(raw_device, disk):
+            matches.append(raw_device)
+
+    if len(matches) == 1:
+        return {"mapping": _usb_mapping(matches[0]) or ""}
+    if len(matches) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Ambiguous Proxmox USB passthrough candidates matched "
+                f"disk serial `{disk.serial_number}`"
+                f"{_disk_identity_suffix(disk)}. "
+                f"Matched USB devices: {_summarize_usb_devices(matches)}"
+            ),
+        )
+    return None
+
+
+def _summarize_usb_devices(devices: list[dict[str, Any]]) -> str:
+    if not devices:
+        return "none"
+
+    summaries: list[str] = []
+    for device in devices:
+        manufacturer = _candidate_value(device, "manufacturer") or "unknown manufacturer"
+        product = _candidate_value(device, "product", "name", "model") or "unknown product"
+        vendid = _candidate_value(device, "vendid", "vendorid", "vendor_id") or "unknown vendid"
+        prodid = _candidate_value(device, "prodid", "productid", "product_id") or "unknown prodid"
+        usbpath = _usb_mapping(device) or "missing usbpath"
+        usb_class = _candidate_value(device, "class", "classid", "usbclass", "usb_class") or "unknown class"
+        summaries.append(
+            f"{manufacturer} / {product} "
+            f"(vendid={vendid}, prodid={prodid}, usbpath={usbpath}, class={usb_class})"
+        )
+    return "; ".join(summaries)
+
+
+def _has_serial_identity(device: dict[str, Any]) -> bool:
+    return bool(_candidate_value(device, "serial", "serial-number", "serialnumber"))
+
+
+def _usb_mapping(device: dict[str, Any]) -> str | None:
+    return _candidate_value(device, "usbpath", "path", "port", "busport", "id")
+
+
+def _is_forbidden_usb_passthrough_candidate(device: dict[str, Any]) -> bool:
+    usb_class = (_candidate_value(device, "class", "classid", "usbclass", "usb_class") or "").casefold()
+    if usb_class in {"3", "03", "0x03", "9", "09", "0x09", "hid", "hub"}:
+        return True
+
+    text = _normalized_usb_text(device)
+    forbidden_terms = (
+        "keyboard",
+        "mouse",
+        "ups",
+        "uninterruptible",
+        "power supply",
+        "hub",
+        "root hub",
+        "host controller",
+        "controller",
+        "bluetooth",
+        "receiver",
+        "webcam",
+        "camera",
+        "audio",
+        "headset",
+        "microphone",
+        "printer",
+        "scanner",
+        "smart card",
+        "smartcard",
+        "ethernet",
+        "network",
+        "wireless",
+        "wifi",
     )
+    return any(term in text for term in forbidden_terms)
+
+
+def _is_likely_storage_usb_device(device: dict[str, Any], disk: ExternalDisk) -> bool:
+    usb_class = (_candidate_value(device, "class", "classid", "usbclass", "usb_class") or "").casefold()
+    if usb_class in {"8", "08", "0x08", "mass storage", "storage"}:
+        return True
+
+    text = _normalized_usb_text(device)
+    storage_terms = (
+        "storage",
+        "drive",
+        "disk",
+        "hdd",
+        "ssd",
+        "flash",
+        "thumb",
+        "portable",
+        "external",
+        "backup",
+        "passport",
+        "elements",
+        "easystore",
+        "my book",
+        "expansion",
+        "game drive",
+        "datatraveler",
+        "cruzer",
+        "ultra fit",
+    )
+    if any(term in text for term in storage_terms):
+        return True
+
+    known_storage_ids = {
+        ("1058", "2630"),  # Western Digital Game Drive
+    }
+    vendid = (_candidate_value(device, "vendid", "vendorid", "vendor_id") or "").casefold()
+    prodid = (_candidate_value(device, "prodid", "productid", "product_id") or "").casefold()
+    if (vendid, prodid) in known_storage_ids:
+        return True
+
+    disk_text = " ".join(
+        value.casefold()
+        for value in (disk.model_name, disk.display_name)
+        if isinstance(value, str) and value.strip()
+    )
+    if disk_text and _meaningful_shared_token(disk_text, text):
+        return True
+
+    return False
+
+
+def _normalized_usb_text(device: dict[str, Any]) -> str:
+    values = [
+        _candidate_value(device, "manufacturer"),
+        _candidate_value(device, "product", "name", "model"),
+        _candidate_value(device, "vendid", "vendorid", "vendor_id"),
+        _candidate_value(device, "prodid", "productid", "product_id"),
+    ]
+    return " ".join(value.casefold() for value in values if value)
+
+
+def _meaningful_shared_token(left: str, right: str) -> bool:
+    ignored = {"usb", "disk", "drive", "storage", "external", "portable"}
+    left_tokens = {token for token in _split_match_tokens(left) if token not in ignored}
+    right_tokens = {token for token in _split_match_tokens(right) if token not in ignored}
+    return bool(left_tokens & right_tokens)
+
+
+def _split_match_tokens(value: str) -> list[str]:
+    return [token for token in "".join(char if char.isalnum() else " " for char in value).split() if len(token) >= 3]
+
+
+def _disk_identity_suffix(disk: ExternalDisk) -> str:
+    parts = []
+    if disk.model_name:
+        parts.append(f"model `{disk.model_name}`")
+    if disk.display_name:
+        parts.append(f"display `{disk.display_name}`")
+    if not parts:
+        return ""
+    return " (" + ", ".join(parts) + ")"
 
 
 def _find_free_usb_slot(vm_config: dict[str, Any]) -> str:
@@ -200,6 +385,8 @@ def _candidate_value(device: dict[str, Any], *keys: str) -> str | None:
         value = device.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+        if isinstance(value, int):
+            return str(value)
     return None
 
 
