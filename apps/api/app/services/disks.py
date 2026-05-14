@@ -12,16 +12,20 @@ def has_agent_disks(db: Session) -> bool:
     statement = select(
         exists().where(
             ExternalDisk.source == "agent",
-            ExternalDisk.active.is_(True),
+            ExternalDisk.serial_number.not_like("agent-report::%"),
+            _preferred_disk_visibility_condition(),
         )
     )
     return bool(db.scalar(statement))
 
 
 def list_preferred_disks(db: Session) -> list[ExternalDisk]:
-    statement = select(ExternalDisk).where(ExternalDisk.active.is_(True))
+    statement = select(ExternalDisk).where(_preferred_disk_visibility_condition())
     if has_agent_disks(db):
-        statement = statement.where(ExternalDisk.source == "agent")
+        statement = statement.where(
+            ExternalDisk.source == "agent",
+            ExternalDisk.serial_number.not_like("agent-report::%"),
+        )
 
     return list(
         db.scalars(
@@ -109,7 +113,7 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
         disk.mount_path = _reconcile_mount_path(disk, item)
         disk.detection_reason = item.detection_reason
         disk.candidate_type = item.candidate_type
-        disk.connected = item.connected
+        disk.connected = True if _is_pbs_handoff_disk(disk) else item.connected
         disk.last_seen_at = observed_at
         disk.source = "agent"
         disk.reported_by_hostname = payload.hostname
@@ -120,6 +124,14 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
 
     for disk in stale_disks:
         if disk.serial_number in reported_serials:
+            continue
+
+        if _is_pbs_handoff_disk(disk):
+            disk.connected = True
+            disk.active = True
+            disk.reported_by_hostname = payload.hostname
+            disk.last_seen_at = observed_at
+            db.add(disk)
             continue
 
         disk.connected = False
@@ -160,6 +172,24 @@ def _normalize_optional_string(value: str | None) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
+
+
+def _is_pbs_handoff_disk(disk: ExternalDisk) -> bool:
+    status = (disk.handoff_status or "").strip().casefold()
+    return (
+        status in {"attached_to_pbs", "visible_on_pbs"}
+        or disk.pbs_visible is True
+        or disk.pbs_handoff_slot is not None
+    )
+
+
+def _preferred_disk_visibility_condition():
+    return or_(
+        ExternalDisk.active.is_(True),
+        ExternalDisk.pbs_visible.is_(True),
+        ExternalDisk.pbs_handoff_slot.is_not(None),
+        ExternalDisk.handoff_status.in_(["attached_to_pbs", "visible_on_pbs"]),
+    )
 
 
 def get_agent_status(db: Session) -> dict[str, datetime | str | bool | int | None]:

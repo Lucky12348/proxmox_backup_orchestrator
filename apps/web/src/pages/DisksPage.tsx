@@ -81,7 +81,17 @@ export function DisksPage({
                       <span>{disk.trusted ? t.yes : t.no}</span>
                     </label>
                   </td>
-                  <td>{disk.handoff_status ?? t.notAvailable}</td>
+                  <td>
+                    {disk.pbs_visible || disk.pbs_handoff_slot ? (
+                      <StatusBadge tone="success">
+                        {disk.pbs_device_path
+                          ? `${disk.handoff_status ?? "PBS"} (${disk.pbs_device_path})`
+                          : disk.handoff_status ?? "PBS"}
+                      </StatusBadge>
+                    ) : (
+                      disk.handoff_status ?? t.notAvailable
+                    )}
+                  </td>
                   <td>
                     <StatusBadge tone={disk.pbs_visible ? "success" : "neutral"}>
                       {disk.pbs_visible ? t.yes : t.no}
