@@ -10,6 +10,7 @@ from agent.main import (
     _ensure_loop_image_mounted,
     _find_mount_source,
     is_initialized_pbs_datastore_path,
+    loop_backing_file,
     prepare_external_datastore_result,
     run_external_export_result,
 )
@@ -186,6 +187,60 @@ class ExternalExportDatastoreCreateTests(TestCase):
             patch("agent.main.run_command", return_value="\n/dev/loop0\n/dev/loop0\n"),
         ):
             self.assertEqual(_find_mount_source(Path("/mnt/example")), "/dev/loop0")
+
+    def test_loop_backing_file_uses_long_losetup_output_form(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image = Path(temp_dir) / "pbs-export.ext4"
+            image.touch()
+            commands: list[list[str]] = []
+
+            def fake_run_command(command: list[str]) -> str:
+                commands.append(command)
+                return f"  {image}\n"
+
+            with (
+                patch("agent.main.shutil.which", return_value="/usr/sbin/losetup"),
+                patch("agent.main.run_command", side_effect=fake_run_command),
+            ):
+                self.assertEqual(loop_backing_file("/dev/loop0"), image.resolve())
+
+        self.assertEqual(
+            commands,
+            [["/usr/sbin/losetup", "--noheadings", "--output", "BACK-FILE", "/dev/loop0"]],
+        )
+
+    def test_loop_backing_file_falls_back_to_short_output_form(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image = Path(temp_dir) / "pbs-export.ext4"
+            image.touch()
+            commands: list[list[str]] = []
+
+            def fake_run_command(command: list[str]) -> str:
+                commands.append(command)
+                if "--noheadings" in command:
+                    raise RuntimeError("unsupported option")
+                return f"{image}\n"
+
+            with (
+                patch("agent.main.shutil.which", return_value="/usr/sbin/losetup"),
+                patch("agent.main.run_command", side_effect=fake_run_command),
+            ):
+                self.assertEqual(loop_backing_file("/dev/loop0"), image.resolve())
+
+        self.assertEqual(
+            commands,
+            [
+                ["/usr/sbin/losetup", "--noheadings", "--output", "BACK-FILE", "/dev/loop0"],
+                ["/usr/sbin/losetup", "-n", "-O", "BACK-FILE", "/dev/loop0"],
+            ],
+        )
+
+    def test_loop_backing_file_returns_none_without_backing_output(self):
+        with (
+            patch("agent.main.shutil.which", return_value="/usr/sbin/losetup"),
+            patch("agent.main.run_command", return_value="\n\n"),
+        ):
+            self.assertIsNone(loop_backing_file("/dev/loop0"))
 
     def _run_export_and_capture_calls(
         self,

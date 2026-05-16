@@ -1053,15 +1053,35 @@ def loop_backing_file(loop_source: str) -> Path | None:
     losetup = shutil.which("losetup")
     if not losetup:
         return None
-    try:
-        output = run_command([losetup, "-no", "BACK-FILE", loop_source])
-    except (RuntimeError, subprocess.CalledProcessError):
-        return None
-    for line in output.splitlines():
-        backing_file = line.strip()
+    commands = (
+        [losetup, "--noheadings", "--output", "BACK-FILE", loop_source],
+        [losetup, "-n", "-O", "BACK-FILE", loop_source],
+    )
+    for command in commands:
+        try:
+            output = run_command(command)
+        except (RuntimeError, subprocess.CalledProcessError):
+            continue
+        backing_file = _first_non_empty_line(output)
         if backing_file:
-            return Path(backing_file)
+            return _resolve_path_best_effort(backing_file)
     return None
+
+
+def _first_non_empty_line(value: str) -> str | None:
+    for line in value.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return None
+
+
+def _resolve_path_best_effort(value: str | Path) -> Path:
+    path = Path(value)
+    try:
+        return path.resolve()
+    except OSError:
+        return Path(os.path.realpath(str(path)))
 
 
 def _same_path(left: str | Path, right: str | Path) -> bool:
