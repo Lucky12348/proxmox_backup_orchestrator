@@ -97,10 +97,11 @@ def prepare_disk(
 def prepare_external_datastore(
     payload: PrepareExternalDatastoreRequest,
     _: None = Depends(require_agent_token),
+    settings: AgentSettings = Depends(get_settings),
 ) -> Response:
     return _run_endpoint(
         "prepare-external-datastore",
-        lambda: prepare_external_datastore_result(payload.mount_path, payload.target_path, payload.mode),
+        lambda: prepare_external_datastore_result(payload.mount_path, payload.target_path, payload.mode, settings),
     )
 
 

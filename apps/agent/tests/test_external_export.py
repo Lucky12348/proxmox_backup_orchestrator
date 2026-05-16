@@ -8,11 +8,54 @@ from agent.main import (
     AgentSettings,
     SubprocessResult,
     is_initialized_pbs_datastore_path,
+    prepare_external_datastore_result,
     run_external_export_result,
 )
 
 
 class ExternalExportDatastoreCreateTests(TestCase):
+    def test_exfat_coexistence_prepare_returns_loop_backed_target(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mount = Path(temp_dir)
+            target = mount / "proxmox-backup-orchestrator" / "WD-WXD2DA1L1E7C" / "pbs-datastore"
+            settings = AgentSettings(loop_datastore_size_gb=50)
+            commands: list[list[str]] = []
+
+            def fake_run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResult:
+                commands.append(command)
+                return SubprocessResult(command, 0, "", "")
+
+            with (
+                patch("agent.main.filesystem_type_for_path", return_value="exfat"),
+                patch("agent.main._find_mount_source", return_value=None),
+                patch("agent.main.run_subprocess", side_effect=fake_run_subprocess),
+            ):
+                result = prepare_external_datastore_result(str(mount), str(target), "coexistence", settings)
+
+        self.assertTrue(result["loop_backed"])
+        self.assertEqual(
+            result["actual_target_path"],
+            str((mount / "proxmox-backup-orchestrator" / "WD-WXD2DA1L1E7C" / "loop-pbs-datastore").resolve()),
+        )
+        self.assertEqual(result["target_path"], result["actual_target_path"])
+        self.assertEqual(
+            result["loop_image_path"],
+            str((mount / "proxmox-backup-orchestrator" / "WD-WXD2DA1L1E7C" / "images" / "pbs-export.ext4").resolve()),
+        )
+        self.assertIn(["truncate", "-s", "50G", result["loop_image_path"]], commands)
+
+    def test_ext4_coexistence_prepare_keeps_direct_target(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mount = Path(temp_dir)
+            target = mount / "proxmox-backup-orchestrator" / "WD-WXD2DA1L1E7C" / "pbs-datastore"
+            with patch("agent.main.filesystem_type_for_path", return_value="ext4"):
+                result = prepare_external_datastore_result(str(mount), str(target), "coexistence", AgentSettings())
+
+        self.assertFalse(result["loop_backed"])
+        self.assertEqual(result["target_path"], str(target.resolve()))
+        self.assertEqual(result["actual_target_path"], str(target.resolve()))
+        self.assertIsNone(result["loop_image_path"])
+
     def test_new_target_datastore_create_does_not_use_reuse_flag(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir)

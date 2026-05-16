@@ -56,6 +56,7 @@ class AgentSettings:
     datastore_create_timeout_seconds: float = float(
         os.getenv("AGENT_DATASTORE_CREATE_TIMEOUT_SECONDS", "14400")
     )
+    loop_datastore_size_gb: int = int(os.getenv("AGENT_LOOP_DATASTORE_SIZE_GB", "500"))
     server_host: str = os.getenv("AGENT_SERVER_HOST", "0.0.0.0")
     server_port: int = int(os.getenv("AGENT_SERVER_PORT", "8081"))
     server_token: str = os.getenv("AGENT_SERVER_TOKEN", "")
@@ -97,30 +98,124 @@ def sync_state(settings: AgentSettings) -> None:
     post_real_disk_report(settings)
 
 
-def prepare_external_datastore_result(mount_path: str, target_path: str, mode: str) -> dict[str, Any]:
+def prepare_external_datastore_result(
+    mount_path: str,
+    target_path: str,
+    mode: str,
+    settings: AgentSettings | None = None,
+) -> dict[str, Any]:
+    settings = settings or AgentSettings()
     mount = Path(mount_path).resolve()
-    target = Path(target_path).resolve()
-    _validate_external_target(mount, target, mode)
+    requested_target = Path(target_path).resolve()
+    _validate_external_target(mount, requested_target, mode)
 
     if not mount.is_dir():
         raise FileNotFoundError(f"Mount path does not exist: {mount_path}")
 
-    target.mkdir(parents=True, exist_ok=True)
-    _ensure_directory_permissions(target)
+    filesystem_type = filesystem_type_for_path(mount)
+    command_summaries: list[str] = []
+    stdout_logs: list[str] = []
+    stderr_logs: list[str] = []
+
+    if mode == "coexistence" and _requires_loop_backed_datastore(filesystem_type):
+        serial = _extract_serial_from_external_target(mount, requested_target)
+        image_dir = mount / "proxmox-backup-orchestrator" / serial / "images"
+        image_path = image_dir / "pbs-export.ext4"
+        loop_mount_path = mount / "proxmox-backup-orchestrator" / serial / "loop-pbs-datastore"
+
+        image_dir.mkdir(parents=True, exist_ok=True)
+        loop_mount_path.mkdir(parents=True, exist_ok=True)
+        image_created = False
+        image_needs_format = not image_path.exists() or image_path.stat().st_size == 0
+        if image_needs_format:
+            image_created = True
+            _run_logged_command(
+                ["truncate", "-s", f"{settings.loop_datastore_size_gb}G", str(image_path)],
+                command_summaries,
+                stdout_logs,
+                stderr_logs,
+                f"Failed to create loop-backed datastore image `{image_path}`.",
+            )
+            _run_logged_command(
+                ["mkfs.ext4", "-F", str(image_path)],
+                command_summaries,
+                stdout_logs,
+                stderr_logs,
+                f"Failed to format new loop-backed datastore image `{image_path}` as ext4.",
+            )
+
+        loop_mounted = _ensure_loop_image_mounted(
+            image_path,
+            loop_mount_path,
+            command_summaries,
+            stdout_logs,
+            stderr_logs,
+        )
+        _run_logged_command(
+            ["chown", "backup:backup", str(loop_mount_path)],
+            command_summaries,
+            stdout_logs,
+            stderr_logs,
+            f"Failed to chown loop-backed datastore mount `{loop_mount_path}`.",
+        )
+        _run_logged_command(
+            ["chmod", "750", str(loop_mount_path)],
+            command_summaries,
+            stdout_logs,
+            stderr_logs,
+            f"Failed to chmod loop-backed datastore mount `{loop_mount_path}`.",
+        )
+        actual_target = loop_mount_path
+        stdout_logs.append(
+            f"Prepared loop-backed ext4 datastore at {actual_target} for requested target {requested_target}"
+        )
+        logger.info("Prepared loop-backed external datastore target %s via image %s", actual_target, image_path)
+
+        return {
+            "ok": True,
+            "success": True,
+            "mount_path": str(mount),
+            "target_path": str(actual_target),
+            "requested_target_path": str(requested_target),
+            "actual_target_path": str(actual_target),
+            "loop_image_path": str(image_path),
+            "loop_mount_path": str(loop_mount_path),
+            "filesystem_type": filesystem_type,
+            "loop_backed": True,
+            "image_created": image_created,
+            "loop_mounted": loop_mounted,
+            "command_summary": "\n".join(command_summaries),
+            "execution_cwd": str(Path.cwd()),
+            "stdout_log": "\n\n".join(chunk for chunk in stdout_logs if chunk) or None,
+            "stderr_log": "\n\n".join(chunk for chunk in stderr_logs if chunk) or None,
+            "message": "Loop-backed ext4 datastore target is ready for external datastore export.",
+            "return_code": 0,
+        }
+
+    requested_target.mkdir(parents=True, exist_ok=True)
+    _ensure_directory_permissions(requested_target)
 
     payload = {
         "ok": True,
         "success": True,
         "mount_path": str(mount),
-        "target_path": str(target),
-        "command_summary": f"mkdir -p {target} && chmod 750 {target}",
+        "target_path": str(requested_target),
+        "requested_target_path": str(requested_target),
+        "actual_target_path": str(requested_target),
+        "loop_image_path": None,
+        "loop_mount_path": None,
+        "filesystem_type": filesystem_type,
+        "loop_backed": False,
+        "image_created": False,
+        "loop_mounted": False,
+        "command_summary": f"mkdir -p {requested_target} && chmod 750 {requested_target}",
         "execution_cwd": str(Path.cwd()),
-        "stdout_log": f"Prepared target directory {target}",
+        "stdout_log": f"Prepared target directory {requested_target}",
         "stderr_log": None,
         "message": "Target directory is ready for external datastore export.",
         "return_code": 0,
     }
-    logger.info("Prepared external datastore target %s", target)
+    logger.info("Prepared external datastore target %s", requested_target)
     return payload
 
 
@@ -868,6 +963,102 @@ def _validate_external_target(mount: Path, target: Path, mode: str) -> None:
         raise RuntimeError("Coexistence mode must not export at the raw disk root.")
 
 
+def _requires_loop_backed_datastore(filesystem_type: str | None) -> bool:
+    if filesystem_type is None:
+        return True
+    return filesystem_type.strip().lower() not in {"ext4", "xfs"}
+
+
+def _extract_serial_from_external_target(mount: Path, target: Path) -> str:
+    try:
+        relative_parts = target.relative_to(mount).parts
+    except ValueError as exc:
+        raise RuntimeError(f"Target path `{target}` must remain inside mount path `{mount}`.") from exc
+
+    if len(relative_parts) >= 3 and relative_parts[0] == "proxmox-backup-orchestrator":
+        serial = relative_parts[1].strip()
+        if serial:
+            return serial
+
+    raise RuntimeError(
+        "Unable to derive disk serial from external target path. Expected "
+        "`<mount>/proxmox-backup-orchestrator/<serial>/pbs-datastore`."
+    )
+
+
+def _ensure_loop_image_mounted(
+    image_path: Path,
+    loop_mount_path: Path,
+    command_summaries: list[str],
+    stdout_logs: list[str],
+    stderr_logs: list[str],
+) -> bool:
+    mounted_source = _find_mount_source(loop_mount_path)
+    if mounted_source:
+        allowed_sources = {str(image_path), *loop_devices_for_image(image_path)}
+        if mounted_source in allowed_sources:
+            stdout_logs.append(f"Loop-backed datastore image already mounted at {loop_mount_path}")
+            return True
+        raise RuntimeError(
+            f"Loop datastore mount point `{loop_mount_path}` is already mounted from "
+            f"`{mounted_source}`, not `{image_path}`."
+        )
+
+    _run_logged_command(
+        ["mount", "-o", "loop", str(image_path), str(loop_mount_path)],
+        command_summaries,
+        stdout_logs,
+        stderr_logs,
+        f"Failed to mount loop-backed datastore image `{image_path}` at `{loop_mount_path}`.",
+    )
+    return True
+
+
+def _find_mount_source(path: Path) -> str | None:
+    findmnt = shutil.which("findmnt")
+    if not findmnt:
+        return None
+    try:
+        output = run_command([findmnt, "-no", "SOURCE", "--mountpoint", str(path)]).strip()
+    except (RuntimeError, subprocess.CalledProcessError):
+        return None
+    return output or None
+
+
+def loop_devices_for_image(image_path: Path) -> set[str]:
+    losetup = shutil.which("losetup")
+    if not losetup:
+        return set()
+    try:
+        output = run_command([losetup, "-j", str(image_path)])
+    except (RuntimeError, subprocess.CalledProcessError):
+        return set()
+    devices: set[str] = set()
+    for line in output.splitlines():
+        device, _, _ = line.partition(":")
+        if device:
+            devices.add(device.strip())
+    return devices
+
+
+def _run_logged_command(
+    command: list[str],
+    command_summaries: list[str],
+    stdout_logs: list[str],
+    stderr_logs: list[str],
+    failure_prefix: str,
+    timeout_seconds: float = 7200,
+) -> SubprocessResult:
+    try:
+        result = run_subprocess(command, timeout_seconds=timeout_seconds)
+    except RuntimeError as exc:
+        raise RuntimeError(f"{failure_prefix} {exc}") from exc
+    record_command_result(result, command_summaries, stdout_logs, stderr_logs)
+    if result.returncode != 0:
+        raise RuntimeError(format_command_failure(failure_prefix, result))
+    return result
+
+
 def _ensure_directory_permissions(path: Path) -> None:
     current_mode = stat.S_IMODE(path.stat().st_mode)
     desired_mode = current_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
@@ -1208,7 +1399,7 @@ def main() -> None:
 
     if args.command == "prepare-external-datastore":
         try:
-            print(json.dumps(prepare_external_datastore_result(args.mount_path, args.target_path, args.mode)))
+            print(json.dumps(prepare_external_datastore_result(args.mount_path, args.target_path, args.mode, settings)))
         except Exception as exc:
             emit_command_failure(args.command, exc)
         return

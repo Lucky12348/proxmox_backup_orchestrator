@@ -52,7 +52,8 @@ class ExternalBackupExecutionService:
         if not prepare.ok:
             raise RuntimeError(prepare.message)
 
-        export = self._bridge.run_external_export(target_path, datastore_name, mode)
+        actual_target_path = _extract_actual_target_path(prepare.payload) or target_path
+        export = self._bridge.run_external_export(actual_target_path, datastore_name, mode)
         if not export.ok:
             raise AgentCommandError(
                 export.message,
@@ -65,7 +66,11 @@ class ExternalBackupExecutionService:
         return ExternalBackupExecutionResult(
             prepare=ExternalBackupExecutionStep(
                 message=f"{disk_prepare.message} {prepare.message}".strip(),
-                stdout_log=_merge_logs(disk_prepare.stdout_log, prepare.stdout_log),
+                stdout_log=_merge_logs(
+                    disk_prepare.stdout_log,
+                    _format_prepare_target_details(prepare.payload, target_path, actual_target_path),
+                    prepare.stdout_log,
+                ),
                 stderr_log=_merge_logs(disk_prepare.stderr_log, prepare.stderr_log),
                 command_summary=_merge_logs(disk_prepare.command_summary, prepare.command_summary) or "",
                 execution_cwd=_merge_logs(disk_prepare.execution_cwd, prepare.execution_cwd) or "",
@@ -79,7 +84,7 @@ class ExternalBackupExecutionService:
                 execution_cwd=export.execution_cwd,
                 return_code=export.return_code,
             ),
-            target_path=target_path,
+            target_path=actual_target_path,
         )
 
 
@@ -98,6 +103,32 @@ def _extract_mount_path(payload: dict[str, Any] | None) -> str | None:
         return None
     stripped = raw_value.strip()
     return stripped or None
+
+
+def _extract_actual_target_path(payload: dict[str, Any] | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in ("actual_target_path", "target_path"):
+        raw_value = payload.get(key)
+        if isinstance(raw_value, str) and raw_value.strip():
+            return raw_value.strip()
+    return None
+
+
+def _format_prepare_target_details(
+    payload: dict[str, Any] | None,
+    requested_target_path: str,
+    actual_target_path: str,
+) -> str:
+    details = [
+        f"Requested target path: {requested_target_path}",
+        f"Actual datastore path: {actual_target_path}",
+    ]
+    if isinstance(payload, dict):
+        loop_image_path = payload.get("loop_image_path")
+        if isinstance(loop_image_path, str) and loop_image_path.strip():
+            details.append(f"Loop image path: {loop_image_path.strip()}")
+    return "\n".join(details)
 
 
 def _merge_logs(*values: str | None) -> str | None:
