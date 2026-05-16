@@ -7,6 +7,8 @@ from unittest.mock import patch
 from agent.main import (
     AgentSettings,
     SubprocessResult,
+    _ensure_loop_image_mounted,
+    _find_mount_source,
     is_initialized_pbs_datastore_path,
     prepare_external_datastore_result,
     run_external_export_result,
@@ -116,6 +118,74 @@ class ExternalExportDatastoreCreateTests(TestCase):
         self.assertIn("filesystem=exfat", message)
         self.assertIn("datastore create", message)
         self.assertNotIn("--reuse-datastore", message)
+
+    def test_existing_loop_mount_backed_by_expected_image_is_reused(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image = Path(temp_dir) / "pbs-export.ext4"
+            image.touch()
+            mount = Path(temp_dir) / "loop-pbs-datastore"
+            mount.mkdir()
+            stdout_logs: list[str] = []
+
+            with (
+                patch("agent.main._find_mount_source", return_value="/dev/loop0"),
+                patch("agent.main.loop_backing_file", return_value=image),
+            ):
+                reused = _ensure_loop_image_mounted(image, mount, [], stdout_logs, [])
+
+        self.assertTrue(reused)
+        self.assertTrue(any("Reusing existing loop-backed datastore mount" in item for item in stdout_logs))
+
+    def test_existing_loop_mount_backed_by_different_image_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image = Path(temp_dir) / "pbs-export.ext4"
+            other_image = Path(temp_dir) / "other.ext4"
+            image.touch()
+            other_image.touch()
+            mount = Path(temp_dir) / "loop-pbs-datastore"
+            mount.mkdir()
+
+            with (
+                patch("agent.main._find_mount_source", return_value="/dev/loop0"),
+                patch("agent.main.loop_backing_file", return_value=other_image),
+                self.assertRaises(RuntimeError) as raised,
+            ):
+                _ensure_loop_image_mounted(image, mount, [], [], [])
+
+        self.assertIn("already mounted from `/dev/loop0`", str(raised.exception))
+        self.assertIn("backed by", str(raised.exception))
+        self.assertIn("other.ext4", str(raised.exception))
+
+    def test_existing_non_loop_mount_source_fails_unless_it_matches_image(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image = Path(temp_dir) / "pbs-export.ext4"
+            image.touch()
+            mount = Path(temp_dir) / "loop-pbs-datastore"
+            mount.mkdir()
+
+            with (
+                patch("agent.main._find_mount_source", return_value="/dev/sdb1"),
+                patch("agent.main.loop_backing_file", return_value=None),
+                self.assertRaises(RuntimeError),
+            ):
+                _ensure_loop_image_mounted(image, mount, [], [], [])
+
+            stdout_logs: list[str] = []
+            with (
+                patch("agent.main._find_mount_source", return_value=str(image)),
+                patch("agent.main.loop_backing_file", return_value=None),
+            ):
+                reused = _ensure_loop_image_mounted(image, mount, [], stdout_logs, [])
+
+        self.assertTrue(reused)
+        self.assertTrue(any("Reusing existing loop-backed datastore mount" in item for item in stdout_logs))
+
+    def test_find_mount_source_uses_first_valid_duplicate_line(self):
+        with (
+            patch("agent.main.shutil.which", return_value="/usr/bin/findmnt"),
+            patch("agent.main.run_command", return_value="\n/dev/loop0\n/dev/loop0\n"),
+        ):
+            self.assertEqual(_find_mount_source(Path("/mnt/example")), "/dev/loop0")
 
     def _run_export_and_capture_calls(
         self,

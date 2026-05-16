@@ -995,13 +995,29 @@ def _ensure_loop_image_mounted(
 ) -> bool:
     mounted_source = _find_mount_source(loop_mount_path)
     if mounted_source:
-        allowed_sources = {str(image_path), *loop_devices_for_image(image_path)}
-        if mounted_source in allowed_sources:
-            stdout_logs.append(f"Loop-backed datastore image already mounted at {loop_mount_path}")
+        resolved_backing_file = loop_backing_file(mounted_source)
+        stdout_logs.append(
+            f"Existing loop datastore mount source for {loop_mount_path}: {mounted_source}; "
+            f"resolved_backing_file={resolved_backing_file or 'none'}"
+        )
+        logger.info(
+            "Existing loop datastore mount source for %s: %s; resolved_backing_file=%s",
+            loop_mount_path,
+            mounted_source,
+            resolved_backing_file,
+        )
+
+        if _same_path(mounted_source, image_path) or (
+            resolved_backing_file is not None and _same_path(resolved_backing_file, image_path)
+        ):
+            stdout_logs.append(f"Reusing existing loop-backed datastore mount at {loop_mount_path}")
+            logger.info("Reusing existing loop-backed datastore mount at %s", loop_mount_path)
             return True
         raise RuntimeError(
             f"Loop datastore mount point `{loop_mount_path}` is already mounted from "
-            f"`{mounted_source}`, not `{image_path}`."
+            f"`{mounted_source}`"
+            + (f" backed by `{resolved_backing_file}`" if resolved_backing_file else "")
+            + f", not `{image_path}`."
         )
 
     _run_logged_command(
@@ -1022,23 +1038,37 @@ def _find_mount_source(path: Path) -> str | None:
         output = run_command([findmnt, "-no", "SOURCE", "--mountpoint", str(path)]).strip()
     except (RuntimeError, subprocess.CalledProcessError):
         return None
-    return output or None
+    for line in output.splitlines():
+        source = line.strip()
+        if source:
+            return source
+    return None
 
 
-def loop_devices_for_image(image_path: Path) -> set[str]:
+def loop_backing_file(loop_source: str) -> Path | None:
+    source_path = Path(loop_source)
+    if not source_path.name.startswith("loop") and not loop_source.startswith("/dev/loop"):
+        return None
+
     losetup = shutil.which("losetup")
     if not losetup:
-        return set()
+        return None
     try:
-        output = run_command([losetup, "-j", str(image_path)])
+        output = run_command([losetup, "-no", "BACK-FILE", loop_source])
     except (RuntimeError, subprocess.CalledProcessError):
-        return set()
-    devices: set[str] = set()
+        return None
     for line in output.splitlines():
-        device, _, _ = line.partition(":")
-        if device:
-            devices.add(device.strip())
-    return devices
+        backing_file = line.strip()
+        if backing_file:
+            return Path(backing_file)
+    return None
+
+
+def _same_path(left: str | Path, right: str | Path) -> bool:
+    try:
+        return Path(left).resolve() == Path(right).resolve()
+    except OSError:
+        return os.path.realpath(str(left)) == os.path.realpath(str(right))
 
 
 def _run_logged_command(
