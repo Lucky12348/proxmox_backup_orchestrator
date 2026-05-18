@@ -66,6 +66,7 @@ class Settings:
     )
     external_loop_datastore_size_gb: int = int(os.getenv("AGENT_LOOP_DATASTORE_SIZE_GB", "500"))
     agent_stale_after_minutes: int = int(os.getenv("AGENT_STALE_AFTER_MINUTES", "10"))
+    show_seed_disks: bool = parse_bool(os.getenv("SHOW_SEED_DISKS"), default=False)
 
     @property
     def cors_origins(self) -> list[str]:

@@ -1,4 +1,5 @@
 from datetime import datetime
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -98,6 +99,62 @@ class DiskInventoryTests(TestCase):
         preferred = list_preferred_disks(self.session)
 
         self.assertEqual([item.serial_number for item in preferred], ["WD-WXD2DA1L1E7C"])
+
+    def test_seed_disks_are_hidden_by_default_even_without_agent_disks(self):
+        self.session.add(
+            _external_disk(
+                serial_number="PBO-DISK-001",
+                display_name="Seed Disk",
+                source="seed",
+                active=True,
+                connected=True,
+            )
+        )
+        self.session.commit()
+
+        preferred = list_preferred_disks(self.session)
+
+        self.assertEqual(preferred, [])
+
+    def test_seed_disks_can_be_shown_with_development_flag(self):
+        self.session.add(
+            _external_disk(
+                serial_number="PBO-DISK-001",
+                display_name="Seed Disk",
+                source="seed",
+                active=True,
+                connected=True,
+            )
+        )
+        self.session.commit()
+
+        with patch("app.services.disks.get_settings", return_value=SimpleNamespace(show_seed_disks=True)):
+            preferred = list_preferred_disks(self.session)
+
+        self.assertEqual([item.serial_number for item in preferred], ["PBO-DISK-001"])
+
+    def test_trusted_dedicated_agent_disk_remains_visible_after_eject_and_removal(self):
+        disk = _external_disk(
+            serial_number="WD-WXD2DA1L1E7C",
+            display_name="Western Digital Game Drive",
+            source="agent",
+            active=False,
+            connected=False,
+            trusted=True,
+            dedicated_backup_disk=True,
+            handoff_status="ejected",
+            pbs_visible=False,
+            pbs_handoff_slot=None,
+            pbs_device_path=None,
+        )
+        self.session.add(disk)
+        self.session.commit()
+
+        preferred = list_preferred_disks(self.session)
+
+        self.assertEqual([item.serial_number for item in preferred], ["WD-WXD2DA1L1E7C"])
+        self.assertFalse(preferred[0].connected)
+        self.assertEqual(preferred[0].handoff_status, "ejected")
 
     def test_eject_refuses_when_external_backup_run_is_active(self):
         disk = _external_disk(

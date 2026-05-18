@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -20,11 +20,25 @@ def has_agent_disks(db: Session) -> bool:
 
 
 def list_preferred_disks(db: Session) -> list[ExternalDisk]:
-    statement = select(ExternalDisk).where(_preferred_disk_visibility_condition())
-    if has_agent_disks(db):
+    settings = get_settings()
+    visibility_condition = _preferred_disk_visibility_condition()
+    if settings.show_seed_disks:
+        visibility_condition = or_(
+            visibility_condition,
+            and_(ExternalDisk.source == "seed", ExternalDisk.active.is_(True)),
+        )
+    statement = select(ExternalDisk).where(
+        visibility_condition,
+        ExternalDisk.serial_number.not_like("agent-report::%"),
+    )
+    if not settings.show_seed_disks:
+        statement = statement.where(ExternalDisk.source != "seed")
+    elif has_agent_disks(db):
         statement = statement.where(
-            ExternalDisk.source == "agent",
-            ExternalDisk.serial_number.not_like("agent-report::%"),
+            or_(
+                ExternalDisk.source == "seed",
+                ExternalDisk.source == "agent",
+            )
         )
 
     return list(
@@ -185,10 +199,18 @@ def _is_pbs_handoff_disk(disk: ExternalDisk) -> bool:
 
 def _preferred_disk_visibility_condition():
     return or_(
-        ExternalDisk.active.is_(True),
+        and_(ExternalDisk.source != "seed", ExternalDisk.active.is_(True)),
+        and_(
+            ExternalDisk.source != "seed",
+            or_(
+                ExternalDisk.trusted.is_(True),
+                ExternalDisk.dedicated_backup_disk.is_(True),
+                ExternalDisk.prepared_as_pbs_datastore.is_(True),
+            ),
+        ),
         ExternalDisk.pbs_visible.is_(True),
         ExternalDisk.pbs_handoff_slot.is_not(None),
-        ExternalDisk.handoff_status.in_(["attached_to_pbs", "visible_on_pbs"]),
+        ExternalDisk.handoff_status.in_(["attached_to_pbs", "visible_on_pbs", "ejected"]),
     )
 
 
