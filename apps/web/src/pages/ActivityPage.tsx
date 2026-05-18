@@ -74,9 +74,9 @@ export function ActivityPage({
                     </td>
                     <td>{formatExternalBackupMode(run, t)}</td>
                     <td>
-                      <strong>{run.current_step ?? t.notAvailable}</strong>
+                      <strong>{formatExternalBackupStep(run.current_step, t)}</strong>
                       <br />
-                      {run.progress_message ?? run.message ?? t.notAvailable}
+                      {formatExternalBackupMessage(run.progress_message ?? run.message, t) ?? t.notAvailable}
                       <br />
                       <span className="muted-text">
                         {t.externalBackupLastLogAt}: {formatDateTime(run.last_log_at, language, t.notAvailable)}
@@ -153,6 +153,20 @@ function formatExternalBackupMode(run: ExternalBackupRun, t: ActivityPageProps["
   return t.externalBackupModeLabel[run.mode];
 }
 
+function formatExternalBackupStep(step: string | null, t: ActivityPageProps["t"]) {
+  if (step === "prepare_dedicated_datastore") {
+    return t.externalBackupPrepareDedicatedDatastore;
+  }
+  return step ?? t.notAvailable;
+}
+
+function formatExternalBackupMessage(message: string | null, t: ActivityPageProps["t"]) {
+  if (message === "Existing dedicated PBS datastore reused. No formatting performed.") {
+    return t.externalBackupDedicatedReuseMessage;
+  }
+  return message;
+}
+
 function ExternalBackupRunDetails({
   run,
   language,
@@ -204,8 +218,8 @@ function ExternalBackupRunDetails({
           <strong>{t.externalBackupResult}:</strong> {liveRun.message ?? t.notAvailable}
         </p>
         <p>
-          <strong>{t.externalBackupProgress}:</strong> {liveRun.current_step ?? t.notAvailable} -{" "}
-          {liveRun.progress_message ?? t.notAvailable}
+          <strong>{t.externalBackupProgress}:</strong> {formatExternalBackupStep(liveRun.current_step, t)} -{" "}
+          {formatExternalBackupMessage(liveRun.progress_message, t) ?? t.notAvailable}
         </p>
         <p>
           <strong>{t.externalBackupLastLogAt}:</strong>{" "}

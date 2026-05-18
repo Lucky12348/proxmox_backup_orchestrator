@@ -352,7 +352,10 @@ def prepare_dedicated_pbs_datastore_result(
             _ensure_dedicated_datastore_permissions(mount_path, command_summaries, stdout_logs, stderr_logs, progress)
             _ensure_pbs_datastore(manager, datastore_name, mount_path, settings, command_summaries, stdout_logs, stderr_logs, progress)
             _write_dedicated_datastore_marker(mount_path, serial, datastore_name, "ext4", existing_partition_path)
-            progress.post("prepare_dedicated_datastore", f"Existing dedicated PBS datastore reused at `{mount_path}`.")
+            progress.post(
+                "prepare_dedicated_datastore",
+                "Existing dedicated PBS datastore reused. No formatting performed.",
+            )
             return _dedicated_datastore_payload(
                 device_path=device_path,
                 partition_path=existing_partition_path,

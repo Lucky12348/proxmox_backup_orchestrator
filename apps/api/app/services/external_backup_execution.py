@@ -125,7 +125,7 @@ class ExternalBackupExecutionService:
         if not disk_inspect.ok:
             raise RuntimeError(disk_inspect.message)
 
-        _report(progress, "destructive_format", "Formatting disk as a dedicated PBS datastore.")
+        _report(progress, "prepare_dedicated_datastore", "Preparing or reusing dedicated PBS datastore.")
         prepare = self._bridge.prepare_dedicated_pbs_datastore(
             disk,
             target_datastore_name,
@@ -133,6 +133,12 @@ class ExternalBackupExecutionService:
         )
         if not prepare.ok:
             raise RuntimeError(prepare.message)
+        if prepare.message == "Existing dedicated PBS datastore reused.":
+            _report(
+                progress,
+                "prepare_dedicated_datastore",
+                "Existing dedicated PBS datastore reused. No formatting performed.",
+            )
 
         mount_path = _extract_mount_path(prepare.payload)
         if not mount_path:
