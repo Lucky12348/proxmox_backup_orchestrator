@@ -1,5 +1,7 @@
 from collections.abc import Mapping
+from time import sleep
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -19,7 +21,7 @@ class ProxmoxClient:
             )
         }
 
-    def _request(self, method: str, path: str, *, data: Mapping[str, Any] | None = None) -> list[dict] | dict:
+    def _request(self, method: str, path: str, *, data: Mapping[str, Any] | None = None) -> Any:
         if not self.settings.pve_api_token_id or not self.settings.pve_api_token_secret:
             raise RuntimeError("Proxmox API token credentials are not configured")
 
@@ -35,11 +37,14 @@ class ProxmoxClient:
 
         return payload.get("data", payload)
 
-    def _get(self, path: str) -> list[dict] | dict:
+    def _get(self, path: str) -> Any:
         return self._request("GET", path)
 
-    def _post(self, path: str, *, data: Mapping[str, Any] | None = None) -> list[dict] | dict:
+    def _post(self, path: str, *, data: Mapping[str, Any] | None = None) -> Any:
         return self._request("POST", path, data=data)
+
+    def _put(self, path: str, *, data: Mapping[str, Any] | None = None) -> Any:
+        return self._request("PUT", path, data=data)
 
     def get_cluster_status(self) -> list[dict]:
         data = self._get("cluster/status")
@@ -61,17 +66,65 @@ class ProxmoxClient:
         data = self._get(f"nodes/{node_name}/qemu/{vm_id}/config")
         return data if isinstance(data, dict) else {}
 
-    def set_qemu_usb_device(self, node_name: str, vm_id: int, slot: str, host_mapping: str, *, usb3: bool | None = None) -> None:
+    def set_qemu_usb_device(self, node_name: str, vm_id: int, slot: str, host_mapping: str, *, usb3: bool | None = None) -> Any:
         value = f"host={host_mapping}"
         if usb3 is not None:
             value = f"{value},usb3={1 if usb3 else 0}"
-        self._post(
+        response = self._put(
             f"nodes/{node_name}/qemu/{vm_id}/config",
             data={slot: value},
         )
+        return self._wait_for_task_if_needed(node_name, response)
 
-    def delete_qemu_usb_device(self, node_name: str, vm_id: int, slot: str) -> None:
-        self._post(
+    def delete_qemu_usb_device(self, node_name: str, vm_id: int, slot: str) -> Any:
+        response = self._put(
             f"nodes/{node_name}/qemu/{vm_id}/config",
             data={"delete": slot},
         )
+        return self._wait_for_task_if_needed(node_name, response)
+
+    def debug_set_delete_qemu_usb_device(self, node_name: str, vm_id: int, slot: str, host_mapping: str) -> dict[str, Any]:
+        before = self.get_qemu_config(node_name, vm_id)
+        set_response = self.set_qemu_usb_device(node_name, vm_id, slot, host_mapping)
+        after_set = self.get_qemu_config(node_name, vm_id)
+        delete_response = self.delete_qemu_usb_device(node_name, vm_id, slot)
+        after_delete = self.get_qemu_config(node_name, vm_id)
+        return {
+            "before": before,
+            "set_response": set_response,
+            "after_set": after_set,
+            "delete_response": delete_response,
+            "after_delete": after_delete,
+            "set_verified": slot in after_set,
+            "delete_verified": slot not in after_delete,
+        }
+
+    def _wait_for_task_if_needed(self, node_name: str, response: Any) -> Any:
+        upid = response if isinstance(response, str) and response.startswith("UPID:") else None
+        if upid is None:
+            return response
+
+        quoted_upid = quote(upid, safe="")
+        last_status: dict[str, Any] | None = None
+        for _ in range(60):
+            status_payload = self._get(f"nodes/{node_name}/tasks/{quoted_upid}/status")
+            last_status = status_payload if isinstance(status_payload, dict) else {"raw": status_payload}
+            if last_status.get("status") == "stopped":
+                exit_status = str(last_status.get("exitstatus") or "")
+                if exit_status == "OK":
+                    return {"upid": upid, "task_status": last_status}
+                task_log = self._get_task_log(node_name, quoted_upid)
+                raise RuntimeError(
+                    f"Proxmox task `{upid}` failed with exitstatus `{exit_status}`. "
+                    f"Status: {last_status}. Log: {task_log}"
+                )
+            sleep(1)
+
+        task_log = self._get_task_log(node_name, quoted_upid)
+        raise RuntimeError(f"Timed out waiting for Proxmox task `{upid}`. Last status: {last_status}. Log: {task_log}")
+
+    def _get_task_log(self, node_name: str, quoted_upid: str) -> Any:
+        try:
+            return self._get(f"nodes/{node_name}/tasks/{quoted_upid}/log")
+        except Exception as exc:
+            return f"Unable to fetch task log: {exc}"

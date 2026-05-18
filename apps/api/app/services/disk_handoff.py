@@ -223,8 +223,10 @@ def _attach_usb_candidate(
     usb3 = _usb3_enabled(device)
     payload = f"{slot}=host={mapping}" + (f",usb3={1 if usb3 else 0}" if usb3 is not None else "")
     _report(progress, "handoff_disk", f"Attach payload: `{payload}`.")
+    api_response: Any = None
     try:
-        client.set_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot, mapping, usb3=usb3)
+        api_response = client.set_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot, mapping, usb3=usb3)
+        _report(progress, "handoff_disk", f"Proxmox USB attach API response: `{api_response}`.")
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -251,7 +253,9 @@ def _attach_usb_candidate(
     raise HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail=(
-            f"USB attach failed: VM config does not contain `{slot}=host={mapping}` after Proxmox API update. "
+            f"USB attach failed on node `{settings.pbs_execution_vm_node}` VM `{settings.pbs_execution_vm_id}`. "
+            f"Payload: `{payload}`. API response: `{api_response}`. "
+            f"VM config does not contain `{slot}=host={mapping}` after Proxmox API update. "
             f"USB config: {_vm_usb_config_summary(vm_config)}"
         ),
     )
