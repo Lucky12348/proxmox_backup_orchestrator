@@ -116,6 +116,23 @@ class ExternalBackupAgentBridge:
             {"disk": disk.serial_number},
         )
 
+    def eject_dedicated_pbs_datastore(
+        self,
+        *,
+        serial: str,
+        datastore_name: str,
+        mount_path: str,
+    ) -> AgentCommandResult:
+        return self._run_command(
+            self.pbs_client,
+            "/eject-dedicated-pbs-datastore",
+            {
+                "serial": serial,
+                "datastore_name": datastore_name,
+                "mount_path": mount_path,
+            },
+        )
+
     def cleanup_legacy_external_export_objects(self) -> AgentCommandResult:
         return self._run_command(self.pbs_client, "/cleanup-legacy-external-export-objects", {})
 

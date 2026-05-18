@@ -13,6 +13,7 @@ export function DisksPage({
   onDiskToggleRequest,
   onDiskFieldChange,
   onExternalBackupRequest,
+  onDiskEjectRequest,
   onDiskPreparationRequest,
 }: DisksPageProps) {
   return (
@@ -45,6 +46,7 @@ export function DisksPage({
                 <th>{t.diskPlanningNotes}</th>
                 <th>{t.prepareDiskAction}</th>
                 <th>{t.externalBackupAction}</th>
+                <th>{t.ejectDiskAction}</th>
                 <th>{t.diskLastSeen}</th>
               </tr>
             </thead>
@@ -165,6 +167,16 @@ export function DisksPage({
                       type="button"
                     >
                       {t.externalBackupAction}
+                    </button>
+                  </td>
+                  <td>
+                    <button
+                      className="ghost-button"
+                      disabled={savingKey === `disk-eject-${disk.id}`}
+                      onClick={() => onDiskEjectRequest(disk)}
+                      type="button"
+                    >
+                      {savingKey === `disk-eject-${disk.id}` ? t.ejectingDisk : t.ejectDiskAction}
                     </button>
                   </td>
                   <td>{formatDateTime(disk.last_seen_at, language, t.notAvailable)}</td>

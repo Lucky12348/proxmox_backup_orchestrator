@@ -11,6 +11,7 @@ from agent.main import (
     AgentSettings,
     build_command_failure_payload,
     current_timestamp,
+    eject_dedicated_pbs_datastore_result,
     inspect_disk_result,
     prepare_disk_result,
     prepare_external_datastore_result,
@@ -61,6 +62,12 @@ class PrepareDedicatedPbsDatastoreRequest(BaseModel):
     callback_run_id: int | None = Field(default=None, gt=0)
     callback_url: str | None = Field(default=None, min_length=1)
     callback_token: str | None = Field(default=None, min_length=1)
+
+
+class EjectDedicatedPbsDatastoreRequest(BaseModel):
+    serial: str = Field(min_length=1)
+    datastore_name: str = Field(min_length=1)
+    mount_path: str = Field(min_length=1)
 
 
 class InspectDiskRequest(BaseModel):
@@ -150,6 +157,23 @@ def prepare_dedicated_pbs_datastore(
             callback_run_id=payload.callback_run_id,
             callback_url=payload.callback_url,
             callback_token=payload.callback_token,
+        ),
+    )
+
+
+@app.post("/eject-dedicated-pbs-datastore", response_model=None)
+def eject_dedicated_pbs_datastore(
+    payload: EjectDedicatedPbsDatastoreRequest,
+    _: None = Depends(require_agent_token),
+    settings: AgentSettings = Depends(get_settings),
+) -> Response:
+    return _run_endpoint(
+        "eject-dedicated-pbs-datastore",
+        lambda: eject_dedicated_pbs_datastore_result(
+            payload.serial,
+            payload.datastore_name,
+            payload.mount_path,
+            settings,
         ),
     )
 

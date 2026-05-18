@@ -16,6 +16,7 @@ from app.services.disk_handoff import (
     get_pbs_disk_visibility,
     handoff_disk_to_pbs,
 )
+from app.services.disk_eject import eject_dedicated_external_disk
 from app.services.activity_cleanup import cleanup_disk_preparation_runs
 from app.services.disk_preparations import get_disk_preparation_run, list_disk_preparation_runs, prepare_disk
 from app.services.disks import list_preferred_disks
@@ -113,6 +114,12 @@ def detach_disk_from_pbs_route(disk_id: int, db: DbSession) -> DiskHandoffStatus
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Disk not found")
     result = detach_disk_from_pbs(db, disk)
     return DiskHandoffStatusRead.model_validate(result)
+
+
+@router.post("/{disk_id}/eject", response_model=ExternalDiskRead)
+def eject_disk_route(disk_id: int, db: DbSession) -> ExternalDiskRead:
+    disk = eject_dedicated_external_disk(db, disk_id)
+    return ExternalDiskRead.model_validate(disk)
 
 
 @router.get("/{disk_id}/pbs-visibility", response_model=DiskHandoffStatusRead)

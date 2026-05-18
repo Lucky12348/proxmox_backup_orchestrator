@@ -210,6 +210,12 @@ export function detachDiskFromPBS(diskId: number) {
   });
 }
 
+export function ejectExternalDisk(diskId: number) {
+  return request<ExternalDisk>(`/disks/${diskId}/eject`, {
+    method: "POST",
+  });
+}
+
 export function getDiskPBSVisibility(diskId: number) {
   return request<DiskHandoffStatus>(`/disks/${diskId}/pbs-visibility`);
 }

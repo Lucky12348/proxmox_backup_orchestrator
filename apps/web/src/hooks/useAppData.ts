@@ -5,6 +5,7 @@ import {
   getBackupRuns,
   cleanupBackupRuns,
   cleanupExternalBackupRuns,
+  ejectExternalDisk,
   getExternalBackupRuns,
   getPBSInventory,
   getPBSStatus,
@@ -298,6 +299,25 @@ export function useAppData() {
     return null;
   }
 
+  async function ejectDisk(diskId: number, successMessage: string) {
+    setSavingKey(`disk-eject-${diskId}`);
+    setBannerError(null);
+    setSyncMessage(null);
+
+    try {
+      await ejectExternalDisk(diskId);
+      await refresh();
+      setSyncMessage(successMessage);
+      return true;
+    } catch (ejectError) {
+      setBannerError(ejectError instanceof Error ? ejectError.message : "Unknown error");
+    } finally {
+      setSavingKey(null);
+    }
+
+    return false;
+  }
+
   async function cleanupActivityRuns(keepLast: number, successMessage: string) {
     setSavingKey("activity-cleanup");
     setBannerError(null);
@@ -344,6 +364,7 @@ export function useAppData() {
     runPBSSync,
     startExternalBackup,
     startDiskPreparation,
+    ejectDisk,
     cleanupActivityRuns,
   };
 }

@@ -232,6 +232,11 @@ export const translations = {
     },
     externalBackupLoopSize: "Loop image size",
     externalBackupLoopSizeWarning: "The configured loop image size is likely too small for this disk.",
+    ejectDiskAction: "Eject disk",
+    ejectingDisk: "Ejecting disk...",
+    ejectDiskTitle: "Eject external disk",
+    ejectDiskConfirmation: "The external PBS datastore will be unmounted and the disk will be detached from the PBS VM. No backup must be running.",
+    ejectDiskSuccess: "The disk is ready. You can remove it.",
   },
   fr: {
     title: "Proxmox Backup Orchestrator",
@@ -464,6 +469,11 @@ export const translations = {
     },
     externalBackupLoopSize: "Taille de l'image loop",
     externalBackupLoopSizeWarning: "La taille configuree de l'image loop est probablement trop petite pour ce disque.",
+    ejectDiskAction: "Éjecter le disque",
+    ejectingDisk: "Éjection du disque...",
+    ejectDiskTitle: "Éjecter le disque externe",
+    ejectDiskConfirmation: "Le datastore PBS externe sera démonté et le disque sera détaché de la VM PBS. Aucun backup ne doit être en cours.",
+    ejectDiskSuccess: "Le disque est prêt. Vous pouvez le retirer.",
   },
 } as const;
 

@@ -1,12 +1,16 @@
 from datetime import datetime
 from unittest import TestCase
+from unittest.mock import patch
 
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.db.base import Base
-from app.models import ExternalDisk
+from app.models import BackupRunStatus, ExternalBackupMode, ExternalBackupRun, ExternalDisk
 from app.schemas.agent import AgentDiskReportCreate
+from app.services.disk_eject import eject_dedicated_external_disk
+from app.services.external_backup_agent import AgentCommandResult
 from app.services.disks import ingest_agent_disk_report, list_preferred_disks
 
 
@@ -95,6 +99,52 @@ class DiskInventoryTests(TestCase):
 
         self.assertEqual([item.serial_number for item in preferred], ["WD-WXD2DA1L1E7C"])
 
+    def test_eject_refuses_when_external_backup_run_is_active(self):
+        disk = _external_disk(
+            serial_number="WD-WXD2DA1L1E7C",
+            display_name="Western Digital Game Drive",
+            dedicated_backup_disk=True,
+            prepared_as_pbs_datastore=True,
+        )
+        self.session.add(disk)
+        self.session.commit()
+        self.session.add(_external_run(disk.id, BackupRunStatus.RUNNING))
+        self.session.commit()
+
+        with self.assertRaises(HTTPException) as raised:
+            eject_dedicated_external_disk(self.session, disk.id)
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.detail, "Impossible d’éjecter le disque: une tâche PBS est en cours.")
+
+    def test_eject_marks_disk_ejected_after_agent_unmount_and_vm_detach(self):
+        disk = _external_disk(
+            serial_number="WD-WXD2DA1L1E7C",
+            display_name="Western Digital Game Drive",
+            connected=True,
+            dedicated_backup_disk=True,
+            prepared_as_pbs_datastore=True,
+            pbs_visible=True,
+            pbs_handoff_slot="usb0",
+            pbs_device_path="/dev/sdc",
+            pbs_datastore_name="pbo-wd-wxd2da1l1e7c",
+            pbs_mount_path="/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore",
+        )
+        self.session.add(disk)
+        self.session.commit()
+
+        with (
+            patch("app.services.disk_eject.get_external_backup_agent_bridge", return_value=_FakeEjectBridge()),
+            patch("app.services.disk_eject.detach_disk_from_pbs", return_value=_detach_status()),
+        ):
+            result = eject_dedicated_external_disk(self.session, disk.id)
+
+        self.assertFalse(result.connected)
+        self.assertFalse(result.pbs_visible)
+        self.assertIsNone(result.pbs_device_path)
+        self.assertIsNone(result.pbs_handoff_slot)
+        self.assertEqual(result.handoff_status, "ejected")
+
 
 def _external_disk(**overrides) -> ExternalDisk:
     values = {
@@ -112,3 +162,50 @@ def _external_disk(**overrides) -> ExternalDisk:
     }
     values.update(overrides)
     return ExternalDisk(**values)
+
+
+def _external_run(disk_id: int, status: BackupRunStatus) -> ExternalBackupRun:
+    now = datetime(2026, 5, 18, 12, 0, 0)
+    return ExternalBackupRun(
+        disk_id=disk_id,
+        status=status,
+        started_at=now,
+        finished_at=None,
+        target_path="/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore",
+        datastore_name="backup-store",
+        message=None,
+        stdout_log=None,
+        stderr_log=None,
+        command_summary=None,
+        execution_cwd=None,
+        return_code=None,
+        current_step=None,
+        progress_message=None,
+        last_log_at=now,
+        mode=ExternalBackupMode.DEDICATED,
+        created_at=now,
+    )
+
+
+class _FakeEjectBridge:
+    def eject_dedicated_pbs_datastore(self, *, serial: str, datastore_name: str, mount_path: str) -> AgentCommandResult:
+        return AgentCommandResult(
+            ok=True,
+            message="ejected",
+            stdout_log="unmounted",
+            stderr_log=None,
+            command_summary="sync\numount",
+            execution_cwd="/",
+            return_code=0,
+            payload={},
+        )
+
+
+def _detach_status():
+    return type(
+        "DetachStatus",
+        (),
+        {
+            "message": "Disk detached from the PBS VM.",
+        },
+    )()

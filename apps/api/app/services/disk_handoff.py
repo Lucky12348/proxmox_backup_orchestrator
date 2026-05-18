@@ -29,8 +29,8 @@ def handoff_disk_to_pbs(db: Session, disk: ExternalDisk, *, confirmation: bool) 
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="USB handoff to PBS requires explicit confirmation.",
         )
-    if not disk.connected:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Disk must be connected on Proxmox.")
+    if disk.pbs_handoff_slot or disk.pbs_visible:
+        return get_pbs_disk_visibility(db, disk)
     if disk.mount_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -39,7 +39,10 @@ def handoff_disk_to_pbs(db: Session, disk: ExternalDisk, *, confirmation: bool) 
 
     settings = get_settings()
     client = ProxmoxClient(settings)
-    device = _find_matching_usb_device(client.list_usb_devices(settings.pve_node_name), disk)
+    try:
+        device = _find_matching_usb_device(client.list_usb_devices(settings.pve_node_name), disk)
+    except HTTPException as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="disk not connected") from exc
     vm_config = client.get_qemu_config(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id)
     slot = disk.pbs_handoff_slot or _find_free_usb_slot(vm_config)
 

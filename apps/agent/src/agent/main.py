@@ -464,6 +464,69 @@ def prepare_dedicated_pbs_datastore_result(
     )
 
 
+def eject_dedicated_pbs_datastore_result(
+    serial: str,
+    datastore_name: str,
+    mount_path: str,
+    settings: AgentSettings | None = None,
+) -> dict[str, Any]:
+    settings = settings or AgentSettings()
+    clean_serial = serial.strip()
+    requested_mount = Path(mount_path)
+    expected_mount = default_mount_base_path(None) / clean_serial / "pbs-datastore"
+    resolved_mount = requested_mount.resolve(strict=False)
+    resolved_expected_mount = expected_mount.resolve(strict=False)
+    command_summaries: list[str] = []
+    stdout_logs: list[str] = []
+    stderr_logs: list[str] = []
+
+    if not clean_serial:
+        raise RuntimeError("Dedicated datastore eject requires a disk serial number.")
+    if resolved_mount != resolved_expected_mount:
+        raise RuntimeError(
+            f"Refusing to eject `{requested_mount}` because it is not the expected PBO path `{expected_mount}`."
+        )
+    _assert_safe_eject_mount_path(resolved_mount)
+
+    manager = shutil.which("proxmox-backup-manager")
+    if manager is None:
+        raise RuntimeError("Missing required host dependency: `proxmox-backup-manager` was not found in PATH.")
+
+    if _pbs_datastore_has_running_tasks(manager, datastore_name, settings, command_summaries, stdout_logs, stderr_logs):
+        raise RuntimeError("A PBS task is currently running for this datastore.")
+    if _pbo_export_sync_job_running(manager, settings, command_summaries, stdout_logs, stderr_logs):
+        raise RuntimeError("A temporary PBO export sync job is currently running.")
+
+    sync_result = run_subprocess(["sync"], timeout_seconds=60)
+    record_command_result(sync_result, command_summaries, stdout_logs, stderr_logs)
+    if sync_result.returncode != 0:
+        raise RuntimeError(format_command_failure("Failed to sync filesystem buffers before eject.", sync_result))
+
+    mounted_source = _find_mount_source(resolved_mount)
+    if mounted_source:
+        umount_result = run_subprocess(["umount", str(resolved_mount)], timeout_seconds=settings.export_timeout_seconds)
+        record_command_result(umount_result, command_summaries, stdout_logs, stderr_logs)
+        if umount_result.returncode != 0:
+            raise RuntimeError(format_command_failure(f"Failed to unmount `{resolved_mount}`.", umount_result))
+
+    if _find_mount_source(resolved_mount):
+        raise RuntimeError(f"Refusing to eject because `{resolved_mount}` is still mounted.")
+
+    return {
+        "ok": True,
+        "success": True,
+        "message": "Dedicated PBS datastore unmounted. Disk is ready for VM detach.",
+        "serial": clean_serial,
+        "datastore_name": datastore_name,
+        "mount_path": str(resolved_mount),
+        "command_summary": "\n".join(command_summaries),
+        "stdout_log": "\n".join(stdout_logs),
+        "stderr_log": "\n".join(stderr_logs),
+        "execution_cwd": str(Path.cwd()),
+        "return_code": 0,
+    }
+
+
 def _dedicated_datastore_payload(
     *,
     device_path: str,
@@ -1823,6 +1886,64 @@ def _cleanup_stale_export_sync_objects(
         record_command_result(result, command_summaries, stdout_logs, stderr_logs)
         if result.returncode != 0:
             raise RuntimeError(format_command_failure(f"Failed to remove stale remote `{remote_name}`.", result))
+
+
+def _assert_safe_eject_mount_path(mount_path: Path) -> None:
+    dangerous_mounts = {
+        Path("/"),
+        Path("/boot"),
+        Path("/boot/efi"),
+        Path("/mnt/datastore/backup-store"),
+    }
+    if mount_path in dangerous_mounts:
+        raise RuntimeError(f"Refusing to unmount protected path `{mount_path}`.")
+    if not str(mount_path).startswith("/mnt/pbo/") or mount_path.name != "pbs-datastore":
+        raise RuntimeError(f"Refusing to unmount non-PBO datastore path `{mount_path}`.")
+
+
+def _pbs_datastore_has_running_tasks(
+    manager: str,
+    datastore_name: str,
+    settings: AgentSettings,
+    command_summaries: list[str],
+    stdout_logs: list[str],
+    stderr_logs: list[str],
+) -> bool:
+    result = run_subprocess([manager, "task", "list", "--output-format", "json"], settings.export_timeout_seconds)
+    record_command_result(result, command_summaries, stdout_logs, stderr_logs)
+    if result.returncode != 0:
+        raise RuntimeError(format_command_failure("Failed to list PBS tasks before eject.", result))
+
+    for item in parse_json_output(result.stdout, "task list"):
+        if not _pbs_task_is_running(item):
+            continue
+        if datastore_name and datastore_name in json.dumps(item, sort_keys=True):
+            return True
+    return False
+
+
+def _pbs_task_is_running(task: dict[str, Any]) -> bool:
+    status_value = task.get("status") or task.get("state")
+    if status_value is None:
+        return True
+    return str(status_value).strip().casefold() in {"running", "active", "pending"}
+
+
+def _pbo_export_sync_job_running(
+    manager: str,
+    settings: AgentSettings,
+    command_summaries: list[str],
+    stdout_logs: list[str],
+    stderr_logs: list[str],
+) -> bool:
+    sync_jobs = _list_pbs_resource_names(manager, "sync-job", settings, command_summaries, stdout_logs, stderr_logs)
+    for sync_job_name in sync_jobs:
+        if sync_job_name.startswith("pbo-export-sync-") and _is_sync_job_running(
+            sync_job_name,
+            _sync_job_lock_path(sync_job_name),
+        ):
+            return True
+    return False
 
 
 def _list_pbs_resource_names(

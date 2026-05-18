@@ -10,6 +10,7 @@ from agent.main import (
     _ensure_loop_image_mounted,
     _find_mount_source,
     bytes_to_gb,
+    eject_dedicated_pbs_datastore_result,
     is_initialized_pbs_datastore_path,
     loop_backing_file,
     prepare_dedicated_pbs_datastore_result,
@@ -134,6 +135,58 @@ class ExternalExportDatastoreCreateTests(TestCase):
                 )
 
         self.assertIn("no PBO dedicated datastore marker was found", str(raised.exception))
+
+    def test_eject_dedicated_datastore_refuses_when_export_sync_is_running(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mount = Path(temp_dir) / "WD-WXD2DA1L1E7C" / "pbs-datastore"
+            mount.mkdir(parents=True)
+            with (
+                patch("agent.main.default_mount_base_path", return_value=Path(temp_dir)),
+                patch("agent.main._assert_safe_eject_mount_path"),
+                patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
+                patch("agent.main._pbs_datastore_has_running_tasks", return_value=False),
+                patch("agent.main._pbo_export_sync_job_running", return_value=True),
+                self.assertRaises(RuntimeError) as raised,
+            ):
+                eject_dedicated_pbs_datastore_result(
+                    "WD-WXD2DA1L1E7C",
+                    "pbo-wd-wxd2da1l1e7c",
+                    str(mount),
+                    AgentSettings(),
+                )
+
+        self.assertIn("sync job", str(raised.exception))
+
+    def test_eject_dedicated_datastore_unmounts_when_idle(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            mount = base / "WD-WXD2DA1L1E7C" / "pbs-datastore"
+            mount.mkdir(parents=True)
+            commands: list[list[str]] = []
+
+            def fake_run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResult:
+                commands.append(command)
+                return SubprocessResult(command, 0, "", "")
+
+            with (
+                patch("agent.main.default_mount_base_path", return_value=base),
+                patch("agent.main._assert_safe_eject_mount_path"),
+                patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
+                patch("agent.main._pbs_datastore_has_running_tasks", return_value=False),
+                patch("agent.main._pbo_export_sync_job_running", return_value=False),
+                patch("agent.main._find_mount_source", side_effect=["/dev/sdc1", None]),
+                patch("agent.main.run_subprocess", side_effect=fake_run_subprocess),
+            ):
+                result = eject_dedicated_pbs_datastore_result(
+                    "WD-WXD2DA1L1E7C",
+                    "pbo-wd-wxd2da1l1e7c",
+                    str(mount),
+                    AgentSettings(),
+                )
+
+        self.assertTrue(result["ok"])
+        self.assertIn(["sync"], commands)
+        self.assertTrue(any(command[0] == "umount" and command[1].endswith("pbs-datastore") for command in commands))
 
     def test_exfat_coexistence_prepare_returns_loop_backed_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:

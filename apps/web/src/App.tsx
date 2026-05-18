@@ -53,6 +53,7 @@ export default function App() {
     runPBSSync,
     startExternalBackup,
     startDiskPreparation,
+    ejectDisk,
     cleanupActivityRuns,
   } = useAppData();
 
@@ -242,6 +243,23 @@ export default function App() {
     setPreparationDisk(disk);
   }
 
+  function handleDiskEjectRequest(disk: ExternalDisk) {
+    openConfirm({
+      title: t.ejectDiskTitle,
+      description: [
+        `${t.diskName}: ${disk.display_name}`,
+        t.ejectDiskConfirmation,
+      ].join(" "),
+      confirmLabel: t.ejectDiskAction,
+      cancelLabel: t.cancel,
+      tone: "warning",
+      onConfirm: () => {
+        void ejectDisk(disk.id, t.ejectDiskSuccess);
+        closeConfirm();
+      },
+    });
+  }
+
   async function handleDiskPreparationSubmit(payload: DiskPreparationSubmitPayload) {
     if (preparationDisk === null) {
       return;
@@ -327,6 +345,7 @@ export default function App() {
                 data={data}
                 language={language}
                 onDiskFieldChange={(diskId, payload) => void mutateDisk(diskId, payload)}
+                onDiskEjectRequest={handleDiskEjectRequest}
                 onExternalBackupRequest={(disk) => void handleExternalBackupRequest(disk)}
                 onDiskPreparationRequest={handleDiskPreparationRequest}
                 onDiskToggleRequest={handleDiskToggleRequest}

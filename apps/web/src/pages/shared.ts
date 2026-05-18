@@ -24,6 +24,7 @@ export interface DisksPageProps extends PageCommonProps {
   savingKey: string | null;
   onDiskToggleRequest: (request: DiskActionRequest) => void;
   onExternalBackupRequest: (disk: ExternalDisk) => void;
+  onDiskEjectRequest: (disk: ExternalDisk) => void;
   onDiskPreparationRequest: (disk: ExternalDisk) => void;
   onDiskFieldChange: (
     diskId: number,
