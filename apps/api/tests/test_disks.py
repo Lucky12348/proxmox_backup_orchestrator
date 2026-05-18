@@ -135,7 +135,7 @@ class DiskInventoryTests(TestCase):
 
         with (
             patch("app.services.disk_eject.get_external_backup_agent_bridge", return_value=_FakeEjectBridge()),
-            patch("app.services.disk_eject.detach_disk_from_pbs", return_value=_detach_status()),
+            patch("app.services.disk_eject.ProxmoxClient", return_value=_FakeProxmoxClient({})),
         ):
             result = eject_dedicated_external_disk(self.session, disk.id)
 
@@ -144,6 +144,42 @@ class DiskInventoryTests(TestCase):
         self.assertIsNone(result.pbs_device_path)
         self.assertIsNone(result.pbs_handoff_slot)
         self.assertEqual(result.handoff_status, "ejected")
+
+    def test_eject_keeps_handoff_state_when_pbs_unmount_succeeds_but_proxmox_detach_fails(self):
+        disk = _external_disk(
+            serial_number="WD-WXD2DA1L1E7C",
+            display_name="Western Digital Game Drive",
+            connected=True,
+            dedicated_backup_disk=True,
+            prepared_as_pbs_datastore=True,
+            pbs_visible=True,
+            pbs_handoff_slot="usb0",
+            pbs_device_path="/dev/sdc",
+            pbs_datastore_name="pbo-wd-wxd2da1l1e7c",
+            pbs_mount_path="/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore",
+            handoff_status="visible_on_pbs",
+        )
+        self.session.add(disk)
+        self.session.commit()
+
+        with (
+            patch("app.services.disk_eject.get_external_backup_agent_bridge", return_value=_FakeEjectBridge()),
+            patch("app.services.disk_eject.ProxmoxClient", return_value=_FakeProxmoxClient({"usb0": "host=1058:2630,usb3=1"})),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            eject_dedicated_external_disk(self.session, disk.id)
+
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertEqual(
+            raised.exception.detail,
+            "Datastore démonté, mais USB encore attaché à la VM PBS. Ne retirez pas encore le disque.",
+        )
+        refreshed = self.session.get(ExternalDisk, disk.id)
+        self.assertIsNotNone(refreshed)
+        self.assertTrue(refreshed.pbs_visible)
+        self.assertEqual(refreshed.pbs_device_path, "/dev/sdc")
+        self.assertEqual(refreshed.pbs_handoff_slot, "usb0")
+        self.assertEqual(refreshed.handoff_status, "visible_on_pbs")
 
 
 def _external_disk(**overrides) -> ExternalDisk:
@@ -201,11 +237,13 @@ class _FakeEjectBridge:
         )
 
 
-def _detach_status():
-    return type(
-        "DetachStatus",
-        (),
-        {
-            "message": "Disk detached from the PBS VM.",
-        },
-    )()
+class _FakeProxmoxClient:
+    def __init__(self, vm_config):
+        self.vm_config = vm_config
+
+    def delete_qemu_usb_device(self, node_name: str, vm_id: int, slot: str) -> None:
+        if self.vm_config.get("_delete_fails"):
+            raise RuntimeError("delete failed")
+
+    def get_qemu_config(self, node_name: str, vm_id: int) -> dict:
+        return self.vm_config

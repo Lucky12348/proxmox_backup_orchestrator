@@ -5,14 +5,20 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models import BackupRunStatus, ExternalBackupMode, ExternalBackupRun, ExternalDisk
-from app.services.disk_handoff import detach_disk_from_pbs
 from app.services.external_backup_agent import AgentCommandError, get_external_backup_agent_bridge
 from app.services.external_backup_execution import build_dedicated_datastore_name
 from app.services.external_backups import append_external_backup_run_log
+from app.services.proxmox_client import ProxmoxClient
 
 
 RUNNING_EJECT_REFUSAL = "Impossible d’éjecter le disque: une tâche PBS est en cours."
+EJECT_SUCCESS_MESSAGE = "Le disque est pr\u00eat. Vous pouvez le retirer."
+PARTIAL_DETACH_FAILURE_MESSAGE = (
+    "Datastore d\u00e9mont\u00e9, mais USB encore attach\u00e9 \u00e0 la VM PBS. "
+    "Ne retirez pas encore le disque."
+)
 
 
 def eject_dedicated_external_disk(db: Session, disk_id: int) -> ExternalDisk:
@@ -69,8 +75,7 @@ def eject_dedicated_external_disk(db: Session, disk_id: int) -> ExternalDisk:
             message="Detaching USB disk from PBS VM.",
             line=result.stdout_log,
         )
-        detach_status = detach_disk_from_pbs(db, disk)
-        db.refresh(disk)
+        detach_message = _detach_usb_passthrough_from_pbs_vm(disk)
         disk.connected = False
         disk.pbs_visible = False
         disk.pbs_device_path = None
@@ -81,8 +86,8 @@ def eject_dedicated_external_disk(db: Session, disk_id: int) -> ExternalDisk:
 
         run.status = BackupRunStatus.SUCCESS
         run.finished_at = datetime.utcnow()
-        run.message = "Le disque est prêt. Vous pouvez le retirer."
-        run.stdout_log = _merge_logs(run.stdout_log, result.stdout_log, detach_status.message)
+        run.message = EJECT_SUCCESS_MESSAGE
+        run.stdout_log = _merge_logs(run.stdout_log, result.stdout_log, detach_message)
         run.stderr_log = _merge_logs(run.stderr_log, result.stderr_log)
         run.command_summary = result.command_summary
         run.execution_cwd = result.execution_cwd
@@ -100,8 +105,40 @@ def eject_dedicated_external_disk(db: Session, disk_id: int) -> ExternalDisk:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=RUNNING_EJECT_REFUSAL) from exc
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     except HTTPException as exc:
-        _finish_eject_activity_failed(db, run, str(exc.detail), None, str(exc.detail), None, None, None)
+        message = (
+            PARTIAL_DETACH_FAILURE_MESSAGE
+            if getattr(exc, "status_code", None) == status.HTTP_502_BAD_GATEWAY
+            else str(exc.detail)
+        )
+        _finish_eject_activity_failed(db, run, message, None, str(exc.detail), None, None, None)
+        if getattr(exc, "status_code", None) == status.HTTP_502_BAD_GATEWAY:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=PARTIAL_DETACH_FAILURE_MESSAGE) from exc
         raise
+
+
+def _detach_usb_passthrough_from_pbs_vm(disk: ExternalDisk) -> str:
+    slot = disk.pbs_handoff_slot
+    if not slot:
+        return "Disk is not currently attached to the PBS VM."
+
+    settings = get_settings()
+    client = ProxmoxClient(settings)
+    try:
+        client.delete_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot)
+        vm_config = client.get_qemu_config(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to detach USB disk `{disk.serial_number}` from the PBS VM: {exc}",
+        ) from exc
+
+    if slot in vm_config:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"USB slot `{slot}` is still present in the PBS VM config after detach.",
+        )
+
+    return f"USB passthrough slot `{slot}` removed from the PBS VM."
 
 
 def _create_eject_activity(db: Session, disk: ExternalDisk, datastore_name: str, mount_path: str) -> ExternalBackupRun:
