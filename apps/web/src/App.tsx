@@ -181,6 +181,9 @@ export default function App() {
       const preserveText = preview.preserves_existing_data
         ? t.externalBackupPreservesData
         : t.externalBackupUsesDedicatedPath;
+      const preparationWarning = disk.prepared_as_pbs_datastore
+        ? t.externalBackupReuseWarning
+        : t.externalBackupDestructiveWarning;
       const loopSizeText =
         preview.mode === "coexistence" && preview.loop_image_size_gb !== null
           ? `${t.externalBackupLoopSize}: ${preview.loop_image_size_gb} GiB.`
@@ -196,7 +199,7 @@ export default function App() {
           `${t.externalBackupTargetPath}: ${preview.target_path}`,
           `${t.externalBackupPBSHandoff}`,
           `${t.externalBackupPBSExclusive}`,
-          `${t.externalBackupDestructiveWarning}`,
+          preparationWarning,
           preserveText,
           loopSizeText,
           loopWarningText,

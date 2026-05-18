@@ -47,6 +47,7 @@ class ExternalExportDatastoreCreateTests(TestCase):
                 "/dev/sdc",
                 "pbo-WD-WXD2DA1L1E7C",
                 True,
+                False,
                 AgentSettings(),
             )
 
@@ -54,6 +55,85 @@ class ExternalExportDatastoreCreateTests(TestCase):
         self.assertIn("raw size=`16M`", message)
         self.assertIn("parsed size=`0 GB`", message)
         self.assertIn("minimum=`32 GB`", message)
+
+    def test_dedicated_prepare_reuses_existing_marker_without_formatting(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            mount = base / "WD-WXD2DA1L1E7C" / "pbs-datastore"
+            mount.mkdir(parents=True)
+            (mount / ".pbo-dedicated-datastore.json").write_text(
+                json.dumps(
+                    {
+                        "serial": "WD-WXD2DA1L1E7C",
+                        "datastore_name": "pbo-wd-wxd2da1l1e7c",
+                        "created_at": "2026-05-18T00:00:00Z",
+                        "app_name": "proxmox_backup_orchestrator",
+                        "filesystem_type": "ext4",
+                        "partition_path": "/dev/sdc1",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            disk = _dedicated_test_disk()
+            commands: list[list[str]] = []
+
+            def fake_run_logged_command(command, *args, **kwargs):
+                commands.append(command)
+                return SubprocessResult(command, 0, "", "")
+
+            with (
+                patch("agent.main.resolve_disk", return_value=(disk, [disk])),
+                patch("agent.main.load_udev_properties", return_value={}),
+                patch("agent.main.default_mount_base_path", return_value=base),
+                patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
+                patch("agent.main._is_mounted_at", return_value=True),
+                patch("agent.main._find_pbs_datastore_name_for_path", return_value="pbo-wd-wxd2da1l1e7c"),
+                patch("agent.main.ensure_mountpoint"),
+                patch("agent.main.ensure_fstab_entry"),
+                patch("agent.main._run_logged_command", side_effect=fake_run_logged_command),
+            ):
+                result = prepare_dedicated_pbs_datastore_result(
+                    "/dev/sdc",
+                    "pbo-wd-wxd2da1l1e7c",
+                    True,
+                    False,
+                    AgentSettings(),
+                )
+
+        self.assertEqual(result["message"], "Existing dedicated PBS datastore reused.")
+        flattened = [" ".join(command) for command in commands]
+        self.assertFalse(any("wipefs" in command for command in flattened))
+        self.assertFalse(any("sgdisk" in command for command in flattened))
+        self.assertFalse(any("parted" in command for command in flattened))
+        self.assertFalse(any("mkfs.ext4" in command for command in flattened))
+
+    def test_dedicated_prepare_refuses_unmarked_ext4_without_force(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            mount = base / "WD-WXD2DA1L1E7C" / "pbs-datastore"
+            mount.mkdir(parents=True)
+            disk = _dedicated_test_disk()
+
+            with (
+                patch("agent.main.resolve_disk", return_value=(disk, [disk])),
+                patch("agent.main.load_udev_properties", return_value={}),
+                patch("agent.main.default_mount_base_path", return_value=base),
+                patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
+                patch("agent.main._is_mounted_at", return_value=True),
+                patch("agent.main._find_pbs_datastore_name_for_path", return_value=None),
+                patch("agent.main.ensure_mountpoint"),
+                patch("agent.main.ensure_fstab_entry"),
+                self.assertRaises(RuntimeError) as raised,
+            ):
+                prepare_dedicated_pbs_datastore_result(
+                    "/dev/sdc",
+                    "pbo-wd-wxd2da1l1e7c",
+                    True,
+                    False,
+                    AgentSettings(),
+                )
+
+        self.assertIn("no PBO dedicated datastore marker was found", str(raised.exception))
 
     def test_exfat_coexistence_prepare_returns_loop_backed_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -321,3 +401,28 @@ class ExternalExportDatastoreCreateTests(TestCase):
             if command[1:3] == ["datastore", "create"]:
                 return command, timeout
         raise AssertionError("datastore create command was not called")
+
+
+def _dedicated_test_disk() -> dict[str, object]:
+    return {
+        "name": "sdc",
+        "kname": "sdc",
+        "path": "/dev/sdc",
+        "type": "disk",
+        "serial": "WD-WXD2DA1L1E7C",
+        "size": "3.6T",
+        "mountpoint": None,
+        "children": [
+            {
+                "name": "sdc1",
+                "kname": "sdc1",
+                "path": "/dev/sdc1",
+                "type": "part",
+                "serial": None,
+                "size": "3.6T",
+                "mountpoint": None,
+                "fstype": "ext4",
+                "children": [],
+            }
+        ],
+    }

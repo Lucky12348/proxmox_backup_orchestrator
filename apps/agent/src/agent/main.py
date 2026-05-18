@@ -301,14 +301,13 @@ def prepare_dedicated_pbs_datastore_result(
     identifier: str,
     datastore_name: str,
     confirmation: bool,
+    force_format: bool,
     settings: AgentSettings,
     callback_run_id: int | None = None,
     callback_url: str | None = None,
     callback_token: str | None = None,
 ) -> dict[str, Any]:
     progress = ExternalExportProgress(settings, callback_run_id, callback_url, callback_token)
-    if not confirmation:
-        raise RuntimeError("Dedicated PBS datastore preparation requires destructive confirmation.")
 
     disk, _ = resolve_disk(identifier)
     serial = disk_serial_number(disk, load_udev_properties(device_name(disk))) or device_name(disk)
@@ -327,6 +326,53 @@ def prepare_dedicated_pbs_datastore_result(
     command_summaries: list[str] = []
     stdout_logs: list[str] = []
     stderr_logs: list[str] = []
+    manager = shutil.which("proxmox-backup-manager")
+    if manager is None:
+        raise RuntimeError("Missing required host dependency: `proxmox-backup-manager` was not found in PATH.")
+
+    existing_partition = _find_ext4_partition(disk)
+    if existing_partition is not None:
+        existing_partition_path = str(existing_partition["path"])
+        ensure_mountpoint(mount_path)
+        ensure_fstab_entry(existing_partition_path, str(mount_path), "ext4")
+        if not _is_mounted_at(mount_path):
+            _run_logged_command(
+                ["mount", existing_partition_path, str(mount_path)],
+                command_summaries,
+                stdout_logs,
+                stderr_logs,
+                f"Failed to mount existing ext4 partition `{existing_partition_path}` at `{mount_path}`.",
+                progress=progress,
+                step="mount_datastore",
+            )
+
+        marker = _read_dedicated_datastore_marker(mount_path)
+        existing_datastore = _find_pbs_datastore_name_for_path(manager, mount_path, settings)
+        if marker is not None or existing_datastore == datastore_name:
+            _ensure_dedicated_datastore_permissions(mount_path, command_summaries, stdout_logs, stderr_logs, progress)
+            _ensure_pbs_datastore(manager, datastore_name, mount_path, settings, command_summaries, stdout_logs, stderr_logs, progress)
+            _write_dedicated_datastore_marker(mount_path, serial, datastore_name, "ext4", existing_partition_path)
+            progress.post("prepare_dedicated_datastore", f"Existing dedicated PBS datastore reused at `{mount_path}`.")
+            return _dedicated_datastore_payload(
+                device_path=device_path,
+                partition_path=existing_partition_path,
+                mount_path=mount_path,
+                datastore_name=datastore_name,
+                command_summaries=command_summaries,
+                stdout_logs=stdout_logs,
+                stderr_logs=stderr_logs,
+                message="Existing dedicated PBS datastore reused.",
+            )
+
+        if not force_format:
+            raise RuntimeError(
+                f"Refusing to format `{device_path}`. The disk has an ext4 partition mounted or mountable at "
+                f"`{mount_path}`, but no PBO dedicated datastore marker was found. "
+                "Use force_format=true only after verifying this disk can be erased."
+            )
+
+    if not confirmation:
+        raise RuntimeError("Dedicated PBS datastore preparation requires destructive confirmation.")
 
     progress.post("destructive_format", f"Preparing `{device_path}` as dedicated PBS datastore `{datastore_name}`.")
     for partition in list_partition_nodes(disk):
@@ -398,10 +444,34 @@ def prepare_dedicated_pbs_datastore_result(
         progress=progress,
         step="mount_datastore",
     )
-    _run_logged_command(["chown", "backup:backup", str(mount_path)], command_summaries, stdout_logs, stderr_logs, f"Failed to chown `{mount_path}`.", progress=progress, step="permissions")
-    _run_logged_command(["chmod", "750", str(mount_path)], command_summaries, stdout_logs, stderr_logs, f"Failed to chmod `{mount_path}`.", progress=progress, step="permissions")
+    _ensure_dedicated_datastore_permissions(mount_path, command_summaries, stdout_logs, stderr_logs, progress)
+    _ensure_pbs_datastore(manager, datastore_name, mount_path, settings, command_summaries, stdout_logs, stderr_logs, progress)
+    _write_dedicated_datastore_marker(mount_path, serial, datastore_name, "ext4", partition_path)
     progress.post("prepare_dedicated_datastore", f"Dedicated PBS datastore mount is ready at `{mount_path}`.")
 
+    return _dedicated_datastore_payload(
+        device_path=device_path,
+        partition_path=partition_path,
+        mount_path=mount_path,
+        datastore_name=datastore_name,
+        command_summaries=command_summaries,
+        stdout_logs=stdout_logs,
+        stderr_logs=stderr_logs,
+        message="Dedicated PBS datastore disk formatted and mounted.",
+    )
+
+
+def _dedicated_datastore_payload(
+    *,
+    device_path: str,
+    partition_path: str,
+    mount_path: Path,
+    datastore_name: str,
+    command_summaries: list[str],
+    stdout_logs: list[str],
+    stderr_logs: list[str],
+    message: str,
+) -> dict[str, Any]:
     return {
         "ok": True,
         "success": True,
@@ -416,7 +486,7 @@ def prepare_dedicated_pbs_datastore_result(
         "execution_cwd": str(Path.cwd()),
         "stdout_log": "\n\n".join(chunk for chunk in stdout_logs if chunk) or None,
         "stderr_log": "\n\n".join(chunk for chunk in stderr_logs if chunk) or None,
-        "message": "Dedicated PBS datastore disk formatted and mounted.",
+        "message": message,
         "return_code": 0,
     }
 
@@ -1038,6 +1108,126 @@ def _assert_safe_dedicated_disk(disk: dict[str, Any]) -> None:
             except ValueError:
                 continue
             raise RuntimeError(f"Refusing to format disk because it contains source datastore `{datastore_path}`.")
+
+
+def _find_ext4_partition(disk: dict[str, Any]) -> dict[str, Any] | None:
+    for partition in list_partition_nodes(disk):
+        filesystem_type = partition.get("fstype") or get_blkid_info(str(partition["path"])).get("TYPE")
+        if isinstance(filesystem_type, str) and filesystem_type.lower() == "ext4":
+            return partition
+    return None
+
+
+def _is_mounted_at(path: Path) -> bool:
+    try:
+        run_command(["mountpoint", "-q", str(path)])
+        return True
+    except (RuntimeError, subprocess.CalledProcessError):
+        return False
+
+
+def _read_dedicated_datastore_marker(mount_path: Path) -> dict[str, Any] | None:
+    marker_path = _dedicated_datastore_marker_path(mount_path)
+    if not marker_path.exists():
+        return None
+    try:
+        payload = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _write_dedicated_datastore_marker(
+    mount_path: Path,
+    serial: str,
+    datastore_name: str,
+    filesystem_type: str,
+    partition_path: str,
+) -> None:
+    marker = {
+        "serial": serial,
+        "datastore_name": datastore_name,
+        "created_at": current_timestamp(),
+        "app_name": "proxmox_backup_orchestrator",
+        "filesystem_type": filesystem_type,
+        "partition_path": partition_path,
+    }
+    _dedicated_datastore_marker_path(mount_path).write_text(
+        json.dumps(marker, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _dedicated_datastore_marker_path(mount_path: Path) -> Path:
+    return mount_path / ".pbo-dedicated-datastore.json"
+
+
+def _find_pbs_datastore_name_for_path(
+    manager: str,
+    datastore_path: Path,
+    settings: AgentSettings,
+) -> str | None:
+    result = run_subprocess([manager, "datastore", "list", "--output-format", "json"], settings.export_timeout_seconds)
+    if result.returncode != 0:
+        raise RuntimeError(format_command_failure("Unable to inspect PBS datastores.", result))
+    return find_datastore_by_path(parse_json_output(result.stdout, "datastore list"), datastore_path)
+
+
+def _ensure_pbs_datastore(
+    manager: str,
+    datastore_name: str,
+    datastore_path: Path,
+    settings: AgentSettings,
+    command_summaries: list[str],
+    stdout_logs: list[str],
+    stderr_logs: list[str],
+    progress: ExternalExportProgress | None,
+) -> None:
+    existing_name = _find_pbs_datastore_name_for_path(manager, datastore_path, settings)
+    if existing_name == datastore_name:
+        stdout_logs.append(f"Reusing existing PBS datastore `{datastore_name}` at {datastore_path}")
+        return
+    if existing_name and existing_name != datastore_name:
+        raise RuntimeError(
+            f"Datastore path `{datastore_path}` is already registered as `{existing_name}`, not `{datastore_name}`."
+        )
+    _run_logged_command(
+        [manager, "datastore", "create", datastore_name, str(datastore_path), "--reuse-datastore", "true"],
+        command_summaries,
+        stdout_logs,
+        stderr_logs,
+        f"Failed to create/reuse PBS datastore `{datastore_name}` at `{datastore_path}`.",
+        timeout_seconds=max(settings.export_timeout_seconds, settings.datastore_create_timeout_seconds),
+        progress=progress,
+        step="target_datastore",
+    )
+
+
+def _ensure_dedicated_datastore_permissions(
+    mount_path: Path,
+    command_summaries: list[str],
+    stdout_logs: list[str],
+    stderr_logs: list[str],
+    progress: ExternalExportProgress | None,
+) -> None:
+    _run_logged_command(
+        ["chown", "backup:backup", str(mount_path)],
+        command_summaries,
+        stdout_logs,
+        stderr_logs,
+        f"Failed to chown `{mount_path}`.",
+        progress=progress,
+        step="permissions",
+    )
+    _run_logged_command(
+        ["chmod", "750", str(mount_path)],
+        command_summaries,
+        stdout_logs,
+        stderr_logs,
+        f"Failed to chmod `{mount_path}`.",
+        progress=progress,
+        step="permissions",
+    )
 
 
 def get_blkid_info(path: str) -> dict[str, str]:

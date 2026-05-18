@@ -57,6 +57,7 @@ class PrepareDedicatedPbsDatastoreRequest(BaseModel):
     disk: str = Field(min_length=1)
     datastore_name: str = Field(min_length=1)
     confirmation: bool = False
+    force_format: bool = False
     callback_run_id: int | None = Field(default=None, gt=0)
     callback_url: str | None = Field(default=None, min_length=1)
     callback_token: str | None = Field(default=None, min_length=1)
@@ -144,6 +145,7 @@ def prepare_dedicated_pbs_datastore(
             payload.disk,
             payload.datastore_name,
             payload.confirmation,
+            payload.force_format,
             settings,
             callback_run_id=payload.callback_run_id,
             callback_url=payload.callback_url,

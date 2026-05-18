@@ -72,7 +72,7 @@ export function ActivityPage({
                         {t.status[run.status]}
                       </StatusBadge>
                     </td>
-                    <td>{t.externalBackupModeLabel[run.mode]}</td>
+                    <td>{formatExternalBackupMode(run, t)}</td>
                     <td>
                       <strong>{run.current_step ?? t.notAvailable}</strong>
                       <br />
@@ -139,6 +139,18 @@ export function ActivityPage({
       </section>
     </div>
   );
+}
+
+function formatExternalBackupMode(run: ExternalBackupRun, t: ActivityPageProps["t"]) {
+  if (
+    run.mode === "dedicated" &&
+    [run.message, run.progress_message, run.stdout_log].some((value) =>
+      value?.includes("Existing dedicated PBS datastore reused"),
+    )
+  ) {
+    return t.externalBackupDedicatedReuseMode;
+  }
+  return t.externalBackupModeLabel[run.mode];
 }
 
 function ExternalBackupRunDetails({
