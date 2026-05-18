@@ -9,6 +9,7 @@ description = "FastAPI backend for proxmox_backup_orchestrator"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "bcrypt>=4.0.1,<5",
   "fastapi>=0.115,<1.0",
   "httpx>=0.27,<1.0",
   "passlib[bcrypt]>=1.7.4",

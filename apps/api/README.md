@@ -8,6 +8,26 @@ FastAPI backend for orchestration, state tracking, and integrations.
 2. Install the package with `pip install -e .`
 3. Start the server with `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 
+## Authentication
+
+When `AUTH_ENABLED=true`, configure a single admin user:
+
+```env
+AUTH_ENABLED=true
+AUTH_USERNAME=admin
+AUTH_PASSWORD_HASH=$2b$12$replace-with-generated-bcrypt-hash
+AUTH_SECRET_KEY=replace-with-random-secret
+AUTH_TOKEN_EXPIRE_MINUTES=480
+```
+
+Generate the hash from the repository root:
+
+```powershell
+py scripts/generate_password_hash.py
+```
+
+Bcrypt passwords are limited to 72 bytes after UTF-8 encoding. The API pins `bcrypt<5` because `passlib==1.7.4` is not compatible with bcrypt 5.x.
+
 ## Current scope
 
 - health endpoint

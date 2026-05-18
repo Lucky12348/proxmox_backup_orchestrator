@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.api.routes.health import router as health_router
+from app.auth import validate_auth_settings
 from app.core.config import get_settings
 from app.db.init import create_tables, seed_database
 
@@ -14,6 +15,7 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    validate_auth_settings()
     if settings.app_env != "production":
         create_tables()
         seed_database()

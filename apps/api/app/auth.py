@@ -43,6 +43,15 @@ class TokenData(BaseModel):
     username: str | None = None
 
 
+def validate_auth_settings() -> None:
+    """Fail startup early when authentication is enabled but incomplete."""
+    if AUTH_ENABLED and not AUTH_PASSWORD_HASH.strip():
+        raise RuntimeError(
+            "AUTH_ENABLED=true but AUTH_PASSWORD_HASH is empty. "
+            "Generate one with: py scripts/generate_password_hash.py"
+        )
+
+
 def _verify_password(plain: str, hashed: str) -> bool:
     """Verify a plain password against a bcrypt hash."""
     if not hashed:
