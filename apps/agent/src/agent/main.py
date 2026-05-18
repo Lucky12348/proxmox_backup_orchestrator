@@ -8,10 +8,11 @@ import shutil
 import socket
 import stat
 import subprocess
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 import httpx
@@ -62,6 +63,40 @@ class AgentSettings:
     server_token: str = os.getenv("AGENT_SERVER_TOKEN", "")
 
 
+class ExternalExportProgress:
+    def __init__(self, settings: AgentSettings, run_id: int | None) -> None:
+        self.settings = settings
+        self.run_id = run_id
+
+    def post(
+        self,
+        step: str,
+        message: str,
+        *,
+        stdout_line: str | None = None,
+        stderr_line: str | None = None,
+        command: str | None = None,
+    ) -> None:
+        if self.run_id is None:
+            return
+        payload = {
+            "step": step,
+            "message": message,
+            "stdout_line": stdout_line,
+            "stderr_line": stderr_line,
+            "command": command,
+        }
+        try:
+            post_json(
+                self.settings,
+                f"/external-backups/runs/{self.run_id}/log",
+                {key: value for key, value in payload.items() if value is not None},
+                token=self.settings.server_token,
+            )
+        except Exception as exc:
+            logger.warning("Unable to post external export progress callback: %s", exc)
+
+
 def post_heartbeat(settings: AgentSettings) -> None:
     payload = {
         "hostname": settings.hostname,
@@ -103,8 +138,10 @@ def prepare_external_datastore_result(
     target_path: str,
     mode: str,
     settings: AgentSettings | None = None,
+    callback_run_id: int | None = None,
 ) -> dict[str, Any]:
     settings = settings or AgentSettings()
+    progress = ExternalExportProgress(settings, callback_run_id)
     mount = Path(mount_path).resolve()
     requested_target = Path(target_path).resolve()
     _validate_external_target(mount, requested_target, mode)
@@ -118,6 +155,10 @@ def prepare_external_datastore_result(
     stderr_logs: list[str] = []
 
     if mode == "coexistence" and _requires_loop_backed_datastore(filesystem_type):
+        progress.post(
+            "prepare_external_datastore",
+            f"Preparing coexistence mode loop-backed ext4 datastore on filesystem `{filesystem_type or 'unknown'}`.",
+        )
         serial = _extract_serial_from_external_target(mount, requested_target)
         image_dir = mount / "proxmox-backup-orchestrator" / serial / "images"
         image_path = image_dir / "pbs-export.ext4"
@@ -129,6 +170,10 @@ def prepare_external_datastore_result(
         image_needs_format = not image_path.exists() or image_path.stat().st_size == 0
         if image_needs_format:
             image_created = True
+            progress.post(
+                "loop_image",
+                f"Creating loop-backed ext4 image `{image_path}` sized {settings.loop_datastore_size_gb} GiB.",
+            )
             _run_logged_command(
                 ["truncate", "-s", f"{settings.loop_datastore_size_gb}G", str(image_path)],
                 command_summaries,
@@ -143,7 +188,10 @@ def prepare_external_datastore_result(
                 stderr_logs,
                 f"Failed to format new loop-backed datastore image `{image_path}` as ext4.",
             )
+        else:
+            progress.post("loop_image", f"Reusing existing loop-backed ext4 image `{image_path}`.")
 
+        progress.post("loop_mount", f"Mounting or reusing loop-backed datastore mount `{loop_mount_path}`.")
         loop_mounted = _ensure_loop_image_mounted(
             image_path,
             loop_mount_path,
@@ -169,6 +217,10 @@ def prepare_external_datastore_result(
         stdout_logs.append(
             f"Prepared loop-backed ext4 datastore at {actual_target} for requested target {requested_target}"
         )
+        progress.post(
+            "prepare_external_datastore",
+            f"Loop-backed ext4 datastore target is ready at `{actual_target}`.",
+        )
         logger.info("Prepared loop-backed external datastore target %s via image %s", actual_target, image_path)
 
         return {
@@ -192,8 +244,10 @@ def prepare_external_datastore_result(
             "return_code": 0,
         }
 
+    progress.post("prepare_external_datastore", f"Preparing dedicated datastore target `{requested_target}`.")
     requested_target.mkdir(parents=True, exist_ok=True)
     _ensure_directory_permissions(requested_target)
+    progress.post("prepare_external_datastore", f"Dedicated datastore target is ready at `{requested_target}`.")
 
     payload = {
         "ok": True,
@@ -224,8 +278,11 @@ def run_external_export_result(
     datastore_name: str,
     mode: str,
     settings: AgentSettings,
+    callback_run_id: int | None = None,
 ) -> dict[str, Any]:
+    progress = ExternalExportProgress(settings, callback_run_id)
     target = Path(target_path).resolve()
+    progress.post("prepare_external_datastore", f"Validating target path `{target}`.")
     if not target.is_dir():
         raise FileNotFoundError(f"Target path does not exist: {target_path}")
 
@@ -241,6 +298,7 @@ def run_external_export_result(
         raise RuntimeError("PBS_TOKEN_ID and PBS_TOKEN_SECRET must be configured on the host agent.")
 
     api = parse_pbs_api_url(settings.pbs_api_url)
+    progress.post("inspect_datastores", "Inspecting PBS source datastores.")
     datastores_result = run_subprocess(
         [manager, "datastore", "list", "--output-format", "json"],
         timeout_seconds=settings.export_timeout_seconds,
@@ -276,6 +334,7 @@ def run_external_export_result(
 
     try:
         if created_datastore:
+            progress.post("target_datastore", f"Creating or reusing target PBS datastore `{target_store_name}`.")
             create_store_command = [
                 manager,
                 "datastore",
@@ -324,7 +383,10 @@ def run_external_export_result(
                     )
                 )
             created_temp_datastore = True
+        else:
+            progress.post("target_datastore", f"Reusing target PBS datastore `{target_store_name}`.")
 
+        progress.post("remote", f"Creating temporary PBS remote `{remote_name}`.")
         remote_create = [
             manager,
             "remote",
@@ -350,6 +412,7 @@ def run_external_export_result(
             )
         created_remote = True
 
+        progress.post("sync_job", f"Creating temporary PBS sync job `{sync_job_name}`.")
         sync_create = [
             manager,
             "sync-job",
@@ -377,9 +440,16 @@ def run_external_export_result(
             )
         created_sync_job = True
 
-        sync_run_result = run_subprocess(
+        progress.post(
+            "sync_run",
+            f"Starting PBS sync job `{sync_job_name}` from `{datastore_name}` to `{target_store_name}`.",
+            command=redact_command([manager, "sync-job", "run", sync_job_name]),
+        )
+        sync_run_result = run_subprocess_streaming(
             [manager, "sync-job", "run", sync_job_name],
             timeout_seconds=settings.export_timeout_seconds,
+            on_stdout=lambda line: progress.post("sync_stdout", line, stdout_line=line),
+            on_stderr=lambda line: progress.post("sync_stderr", line, stderr_line=line),
         )
         record_command_result(sync_run_result, command_summaries, stdout_logs, stderr_logs)
         if sync_run_result.returncode != 0:
@@ -392,14 +462,17 @@ def run_external_export_result(
         sync_completed = True
     finally:
         if created_sync_job:
+            progress.post("cleanup", f"Removing temporary PBS sync job `{sync_job_name}`.")
             cleanup_errors.extend(
                 cleanup_resource([manager, "sync-job", "remove", sync_job_name], settings.export_timeout_seconds)
             )
         if created_remote:
+            progress.post("cleanup", f"Removing temporary PBS remote `{remote_name}`.")
             cleanup_errors.extend(
                 cleanup_resource([manager, "remote", "remove", remote_name], settings.export_timeout_seconds)
             )
         if created_temp_datastore:
+            progress.post("cleanup", f"Removing temporary target PBS datastore `{target_store_name}`.")
             cleanup_errors.extend(
                 cleanup_resource([manager, "datastore", "remove", target_store_name], settings.export_timeout_seconds)
             )
@@ -414,6 +487,7 @@ def run_external_export_result(
     )
     if cleanup_errors and sync_completed:
         message = f"{message} Cleanup reported warnings."
+    progress.post("success" if sync_completed else "failure", message)
 
     payload = {
         "ok": sync_completed,
@@ -1197,6 +1271,69 @@ def run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResu
     )
 
 
+def run_subprocess_streaming(
+    command: list[str],
+    timeout_seconds: float,
+    *,
+    on_stdout: Callable[[str], None] | None = None,
+    on_stderr: Callable[[str], None] | None = None,
+) -> SubprocessResult:
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+    except FileNotFoundError as exc:
+        missing = command[0] if command else "<unknown>"
+        raise RuntimeError(f"Required command `{missing}` was not found in PATH.") from exc
+
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+
+    def read_stream(stream, lines: list[str], callback: Callable[[str], None] | None) -> None:
+        if stream is None:
+            return
+        for raw_line in iter(stream.readline, ""):
+            line = raw_line.rstrip("\n")
+            if line:
+                lines.append(line)
+                if callback is not None:
+                    callback(line)
+        stream.close()
+
+    stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, stdout_lines, on_stdout), daemon=True)
+    stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, stderr_lines, on_stderr), daemon=True)
+    stdout_thread.start()
+    stderr_thread.start()
+
+    try:
+        return_code = process.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
+        stdout = "\n".join(stdout_lines).strip()
+        stderr = "\n".join(stderr_lines).strip()
+        details = [f"Command timed out after {timeout_seconds} seconds: {redact_command(command)}"]
+        if stderr:
+            details.append(f"stderr: {_tail_text(stderr)}")
+        if stdout:
+            details.append(f"stdout: {_tail_text(stdout)}")
+        raise RuntimeError(" ".join(details)) from exc
+
+    stdout_thread.join(timeout=5)
+    stderr_thread.join(timeout=5)
+    return SubprocessResult(
+        command=command,
+        returncode=return_code,
+        stdout="\n".join(stdout_lines).strip(),
+        stderr="\n".join(stderr_lines).strip(),
+    )
+
+
 def record_command_result(
     result: SubprocessResult,
     command_summaries: list[str],
@@ -1213,10 +1350,16 @@ def record_command_result(
 def format_command_failure(prefix: str, result: SubprocessResult) -> str:
     details = [prefix, f"Command: {redact_command(result.command)}", f"exit={result.returncode}"]
     if result.stderr:
-        details.append(f"stderr: {result.stderr[:500]}")
+        details.append(f"stderr: {_tail_text(result.stderr)}")
     if result.stdout:
-        details.append(f"stdout: {result.stdout[:500]}")
+        details.append(f"stdout: {_tail_text(result.stdout)}")
     return " ".join(details)
+
+
+def _tail_text(value: str, max_length: int = 2000) -> str:
+    if len(value) <= max_length:
+        return value
+    return f"...[truncated]\n{value[-max_length:]}"
 
 
 def cleanup_resource(command: list[str], timeout_seconds: float) -> list[str]:
@@ -1280,10 +1423,11 @@ def mock_disks() -> list[dict[str, Any]]:
     ]
 
 
-def post_json(settings: AgentSettings, path: str, payload: dict[str, Any]) -> None:
+def post_json(settings: AgentSettings, path: str, payload: dict[str, Any], token: str | None = None) -> None:
     base_url = settings.api_base_url.rstrip("/")
+    headers = {"X-Agent-Token": token} if token else None
     with httpx.Client(timeout=settings.timeout_seconds) as client:
-        response = client.post(f"{base_url}{path}", json=payload)
+        response = client.post(f"{base_url}{path}", json=payload, headers=headers)
         response.raise_for_status()
 
 

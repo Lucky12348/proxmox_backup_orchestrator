@@ -184,6 +184,11 @@ export default function App() {
       const preserveText = preview.preserves_existing_data
         ? t.externalBackupPreservesData
         : t.externalBackupUsesDedicatedPath;
+      const loopSizeText =
+        preview.mode === "coexistence" && preview.loop_image_size_gb !== null
+          ? `${t.externalBackupLoopSize}: ${preview.loop_image_size_gb} GiB.`
+          : null;
+      const loopWarningText = preview.loop_image_size_warning ? t.externalBackupLoopSizeWarning : null;
 
       openConfirm({
         title: t.confirmExternalBackupTitle,
@@ -195,7 +200,11 @@ export default function App() {
           `${t.externalBackupPBSHandoff}`,
           `${t.externalBackupPBSExclusive}`,
           preserveText,
-        ].join(" "),
+          loopSizeText,
+          loopWarningText,
+        ]
+          .filter(Boolean)
+          .join(" "),
         confirmLabel: t.externalBackupAction,
         cancelLabel: t.cancel,
         tone: "info",

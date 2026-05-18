@@ -1,10 +1,20 @@
-from fastapi import APIRouter
+import secrets
+
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status
 from sqlalchemy import select
 
 from app.api.dependencies import DbSession
+from app.core.config import get_settings
 from app.models import ExternalDisk
-from app.schemas import ExternalBackupRunRead, ExternalBackupRunRequest, ExternalBackupRunSummaryRead
+from app.schemas import (
+    ExternalBackupRunLogRequest,
+    ExternalBackupRunRead,
+    ExternalBackupRunRequest,
+    ExternalBackupRunSummaryRead,
+)
 from app.services.external_backups import (
+    append_external_backup_run_log,
+    execute_external_backup_run,
     get_external_backup_preview,
     get_external_backup_run,
     list_external_backup_runs,
@@ -16,13 +26,18 @@ router = APIRouter(prefix="/external-backups", tags=["external-backups"])
 
 
 @router.get("/preview/{disk_id}")
-def get_preview(disk_id: int, db: DbSession) -> dict[str, str | bool]:
+def get_preview(disk_id: int, db: DbSession) -> dict[str, str | bool | int | None]:
     return get_external_backup_preview(db, disk_id)
 
 
 @router.post("/run", response_model=ExternalBackupRunSummaryRead)
-def start_run(payload: ExternalBackupRunRequest, db: DbSession) -> ExternalBackupRunSummaryRead:
+def start_run(
+    payload: ExternalBackupRunRequest,
+    background_tasks: BackgroundTasks,
+    db: DbSession,
+) -> ExternalBackupRunSummaryRead:
     run = run_external_backup(db, payload.disk_id, payload.confirmation)
+    background_tasks.add_task(execute_external_backup_run, run.id)
     disk = db.get(ExternalDisk, run.disk_id)
     return _build_summary(run, disk.display_name if disk is not None else f"Disk {run.disk_id}")
 
@@ -46,6 +61,35 @@ def get_run(run_id: int, db: DbSession) -> ExternalBackupRunRead:
     return ExternalBackupRunRead.model_validate(run)
 
 
+@router.post("/runs/{run_id}/log", response_model=ExternalBackupRunRead)
+def append_run_log(
+    run_id: int,
+    payload: ExternalBackupRunLogRequest,
+    db: DbSession,
+    x_agent_token: str | None = Header(default=None),
+) -> ExternalBackupRunRead:
+    settings = get_settings()
+    if not settings.pbs_agent_token:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="PBS_AGENT_TOKEN is not configured.",
+        )
+    if x_agent_token is None or not secrets.compare_digest(x_agent_token, settings.pbs_agent_token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token.")
+
+    stream = "stderr" if payload.stderr_line else "stdout"
+    run = append_external_backup_run_log(
+        db,
+        run_id,
+        step=payload.step,
+        message=payload.message,
+        stream=stream,
+        line=payload.stderr_line or payload.stdout_line,
+        command=payload.command,
+    )
+    return ExternalBackupRunRead.model_validate(run)
+
+
 def _build_summary(run, disk_name: str) -> ExternalBackupRunSummaryRead:
     return ExternalBackupRunSummaryRead(
         id=run.id,
@@ -62,6 +106,9 @@ def _build_summary(run, disk_name: str) -> ExternalBackupRunSummaryRead:
         command_summary=run.command_summary,
         execution_cwd=run.execution_cwd,
         return_code=run.return_code,
+        current_step=run.current_step,
+        progress_message=run.progress_message,
+        last_log_at=run.last_log_at,
         mode=run.mode,
         created_at=run.created_at,
     )

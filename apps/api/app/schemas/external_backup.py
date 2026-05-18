@@ -26,6 +26,9 @@ class ExternalBackupRunRead(BaseModel):
     command_summary: str | None
     execution_cwd: str | None
     return_code: int | None
+    current_step: str | None
+    progress_message: str | None
+    last_log_at: datetime | None
     mode: ExternalBackupMode
     created_at: datetime
 
@@ -45,5 +48,16 @@ class ExternalBackupRunSummaryRead(BaseModel):
     command_summary: str | None
     execution_cwd: str | None
     return_code: int | None
+    current_step: str | None
+    progress_message: str | None
+    last_log_at: datetime | None
     mode: ExternalBackupMode
     created_at: datetime
+
+
+class ExternalBackupRunLogRequest(BaseModel):
+    step: str | None = Field(default=None, max_length=128)
+    message: str | None = None
+    stdout_line: str | None = None
+    stderr_line: str | None = None
+    command: str | None = None

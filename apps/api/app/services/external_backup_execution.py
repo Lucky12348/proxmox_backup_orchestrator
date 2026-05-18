@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from app.models import DiskPreparationMode, ExternalBackupMode, ExternalDisk
 from app.services.external_backup_agent import AgentCommandError
@@ -33,12 +33,20 @@ class ExternalBackupExecutionService:
         disk: ExternalDisk,
         datastore_name: str,
         mode: ExternalBackupMode,
+        run_id: int | None = None,
+        progress: Callable[[str, str, str | None], None] | None = None,
     ) -> ExternalBackupExecutionResult:
         disk_prepare_mode = (
             DiskPreparationMode.DEDICATED_BACKUP
             if mode == ExternalBackupMode.DEDICATED
             else DiskPreparationMode.PRESERVE_EXISTING_DATA
         )
+        _report(progress, "inspect_disk", "Inspecting disk on PBS agent.")
+        disk_inspect = self._bridge.inspect_disk_on_pbs(disk)
+        if not disk_inspect.ok:
+            raise RuntimeError(disk_inspect.message)
+
+        _report(progress, "prepare_disk", "Preparing disk on PBS agent.")
         disk_prepare = self._bridge.prepare_disk_on_pbs(disk, disk_prepare_mode)
         if not disk_prepare.ok:
             raise RuntimeError(disk_prepare.message)
@@ -48,12 +56,14 @@ class ExternalBackupExecutionService:
             raise RuntimeError("PBS agent did not return a mount path after disk preparation.")
 
         target_path = build_export_target_path(mount_path, disk.serial_number, mode)
-        prepare = self._bridge.prepare_external_datastore(mount_path, target_path, mode)
+        _report(progress, "prepare_external_datastore", "Preparing external datastore target.")
+        prepare = self._bridge.prepare_external_datastore(mount_path, target_path, mode, run_id=run_id)
         if not prepare.ok:
             raise RuntimeError(prepare.message)
 
         actual_target_path = _extract_actual_target_path(prepare.payload) or target_path
-        export = self._bridge.run_external_export(actual_target_path, datastore_name, mode)
+        _report(progress, "run_export", "Starting PBS datastore export.")
+        export = self._bridge.run_external_export(actual_target_path, datastore_name, mode, run_id=run_id)
         if not export.ok:
             raise AgentCommandError(
                 export.message,
@@ -67,13 +77,18 @@ class ExternalBackupExecutionService:
             prepare=ExternalBackupExecutionStep(
                 message=f"{disk_prepare.message} {prepare.message}".strip(),
                 stdout_log=_merge_logs(
+                    disk_inspect.stdout_log,
                     disk_prepare.stdout_log,
                     _format_prepare_target_details(prepare.payload, target_path, actual_target_path),
                     prepare.stdout_log,
                 ),
-                stderr_log=_merge_logs(disk_prepare.stderr_log, prepare.stderr_log),
-                command_summary=_merge_logs(disk_prepare.command_summary, prepare.command_summary) or "",
-                execution_cwd=_merge_logs(disk_prepare.execution_cwd, prepare.execution_cwd) or "",
+                stderr_log=_merge_logs(disk_inspect.stderr_log, disk_prepare.stderr_log, prepare.stderr_log),
+                command_summary=_merge_logs(
+                    disk_inspect.command_summary,
+                    disk_prepare.command_summary,
+                    prepare.command_summary,
+                ) or "",
+                execution_cwd=_merge_logs(disk_inspect.execution_cwd, disk_prepare.execution_cwd, prepare.execution_cwd) or "",
                 return_code=prepare.return_code,
             ),
             export=ExternalBackupExecutionStep(
@@ -134,6 +149,16 @@ def _format_prepare_target_details(
 def _merge_logs(*values: str | None) -> str | None:
     merged = "\n\n".join(value for value in values if value)
     return merged or None
+
+
+def _report(
+    progress: Callable[[str, str, str | None], None] | None,
+    step: str,
+    message: str,
+    log_line: str | None = None,
+) -> None:
+    if progress is not None:
+        progress(step, message, log_line or message)
 
 
 def get_external_backup_execution_service() -> ExternalBackupExecutionService:

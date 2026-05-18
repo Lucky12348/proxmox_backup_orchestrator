@@ -98,6 +98,9 @@ def ensure_external_backup_run_schema() -> None:
         "command_summary": "ALTER TABLE external_backup_runs ADD COLUMN command_summary TEXT",
         "execution_cwd": "ALTER TABLE external_backup_runs ADD COLUMN execution_cwd VARCHAR(512)",
         "return_code": "ALTER TABLE external_backup_runs ADD COLUMN return_code INTEGER",
+        "current_step": "ALTER TABLE external_backup_runs ADD COLUMN current_step VARCHAR(128)",
+        "progress_message": "ALTER TABLE external_backup_runs ADD COLUMN progress_message TEXT",
+        "last_log_at": "ALTER TABLE external_backup_runs ADD COLUMN last_log_at TIMESTAMP",
     }
 
     with engine.begin() as connection:

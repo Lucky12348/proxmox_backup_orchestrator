@@ -159,6 +159,8 @@ export interface ExternalBackupPreview {
   target_path: string;
   mode: ExternalBackupMode;
   preserves_existing_data: boolean;
+  loop_image_size_gb: number | null;
+  loop_image_size_warning: boolean;
 }
 
 export interface ExternalBackupRun {
@@ -176,6 +178,9 @@ export interface ExternalBackupRun {
   command_summary: string | null;
   execution_cwd: string | null;
   return_code: number | null;
+  current_step: string | null;
+  progress_message: string | null;
+  last_log_at: string | null;
   mode: ExternalBackupMode;
   created_at: string;
 }

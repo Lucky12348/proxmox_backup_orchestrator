@@ -32,6 +32,9 @@ class ExternalBackupRun(Base):
     command_summary: Mapped[str | None] = mapped_column(Text)
     execution_cwd: Mapped[str | None] = mapped_column(String(512))
     return_code: Mapped[int | None]
+    current_step: Mapped[str | None] = mapped_column(String(128))
+    progress_message: Mapped[str | None] = mapped_column(Text)
+    last_log_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
     mode: Mapped[ExternalBackupMode] = mapped_column(
         SqlEnum(ExternalBackupMode, name="external_backup_mode", native_enum=False),
         nullable=False,

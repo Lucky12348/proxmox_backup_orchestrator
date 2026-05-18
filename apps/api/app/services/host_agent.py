@@ -140,7 +140,8 @@ def _truncate_log(value: str | None) -> str | None:
         return None
     if len(value) <= MAX_LOG_LENGTH:
         return value
-    return f"{value[:MAX_LOG_LENGTH]}\n...[truncated]"
+    half_length = MAX_LOG_LENGTH // 2
+    return f"{value[:half_length]}\n...[truncated]\n{value[-half_length:]}"
 
 
 def get_host_agent_client() -> HostAgentClient:

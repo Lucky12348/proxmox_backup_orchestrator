@@ -5,6 +5,7 @@ from app.schemas.disk_handoff import DiskHandoffRequest, DiskHandoffStatusRead
 from app.schemas.external_disk import ExternalDiskRead, ExternalDiskUpdate
 from app.schemas.external_backup import (
     ExternalBackupRunRead,
+    ExternalBackupRunLogRequest,
     ExternalBackupRunRequest,
     ExternalBackupRunSummaryRead,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "DiskHandoffRequest",
     "DiskHandoffStatusRead",
     "ExternalBackupRunRead",
+    "ExternalBackupRunLogRequest",
     "ExternalBackupRunRequest",
     "ExternalBackupRunSummaryRead",
     "ExternalDiskRead",

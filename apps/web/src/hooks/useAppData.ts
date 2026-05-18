@@ -135,6 +135,26 @@ export function useAppData() {
     void load();
   }, []);
 
+  const hasRunningExternalBackup = data?.externalBackupRuns.some((run) => run.status === "running") ?? false;
+
+  useEffect(() => {
+    if (!hasRunningExternalBackup) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void getExternalBackupRuns()
+        .then((externalBackupRuns) => {
+          setData((current) => (current ? { ...current, externalBackupRuns } : current));
+        })
+        .catch((pollError) => {
+          setBannerError(pollError instanceof Error ? pollError.message : "Unknown error");
+        });
+    }, 2000);
+
+    return () => window.clearInterval(intervalId);
+  }, [hasRunningExternalBackup]);
+
   async function mutateVmCritical(vmId: number, critical: boolean) {
     setSavingKey(`vm-${vmId}`);
     setBannerError(null);
@@ -228,9 +248,16 @@ export function useAppData() {
     setSyncMessage(null);
 
     try {
-      setSyncMessage("USB handoff to PBS in progress...");
+      setSyncMessage("External backup run started. Live progress is available on the Activity page.");
       const run = await runExternalBackup(diskId);
-      await refresh();
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              externalBackupRuns: [run, ...current.externalBackupRuns.filter((item) => item.id !== run.id)],
+            }
+          : current,
+      );
       setSyncMessage(`${successMessage}: ${run.disk_name}`);
       return run;
     } catch (runError) {

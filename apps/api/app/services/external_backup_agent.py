@@ -45,11 +45,15 @@ class ExternalBackupAgentBridge:
         mount_path: str,
         target_path: str,
         mode: ExternalBackupMode,
+        run_id: int | None = None,
     ) -> AgentCommandResult:
+        payload: dict[str, object] = {"mount_path": mount_path, "target_path": target_path, "mode": mode.value}
+        if run_id is not None:
+            payload["callback_run_id"] = run_id
         return self._run_command(
             self.pbs_client,
             "/prepare-external-datastore",
-            {"mount_path": mount_path, "target_path": target_path, "mode": mode.value},
+            payload,
         )
 
     def prepare_disk_on_pbs(
@@ -72,11 +76,22 @@ class ExternalBackupAgentBridge:
         target_path: str,
         datastore_name: str,
         mode: ExternalBackupMode,
+        run_id: int | None = None,
     ) -> AgentCommandResult:
+        payload: dict[str, object] = {
+            "target_path": target_path,
+            "datastore_name": datastore_name,
+            "mode": mode.value,
+        }
+        if run_id is not None:
+            payload["callback_run_id"] = run_id
+        return self._run_command(self.pbs_client, "/run-external-export", payload)
+
+    def inspect_disk_on_pbs(self, disk: ExternalDisk) -> AgentCommandResult:
         return self._run_command(
             self.pbs_client,
-            "/run-external-export",
-            {"target_path": target_path, "datastore_name": datastore_name, "mode": mode.value},
+            "/inspect-disk",
+            {"disk": disk.serial_number},
         )
 
     def _run_command(self, client, path: str, payload: dict[str, object]) -> AgentCommandResult:

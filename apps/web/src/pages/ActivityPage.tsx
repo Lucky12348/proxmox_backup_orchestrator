@@ -32,6 +32,7 @@ export function ActivityPage({ data, externalBackupRuns, language, t }: Activity
                   <th>{t.diskName}</th>
                   <th>{t.backupStatus}</th>
                   <th>{t.externalBackupMode}</th>
+                  <th>{t.externalBackupProgress}</th>
                   <th>{t.externalBackupTargetPath}</th>
                   <th>{t.backupStarted}</th>
                   <th>{t.backupFinished}</th>
@@ -49,6 +50,11 @@ export function ActivityPage({ data, externalBackupRuns, language, t }: Activity
                       </StatusBadge>
                     </td>
                     <td>{t.externalBackupModeLabel[run.mode]}</td>
+                    <td>
+                      <strong>{run.current_step ?? t.notAvailable}</strong>
+                      <br />
+                      {run.progress_message ?? run.message ?? t.notAvailable}
+                    </td>
                     <td>{run.target_path}</td>
                     <td>{formatDateTime(run.started_at, language, t.notAvailable)}</td>
                     <td>{formatDateTime(run.finished_at, language, t.notAvailable)}</td>
@@ -65,6 +71,15 @@ export function ActivityPage({ data, externalBackupRuns, language, t }: Activity
                           </p>
                           <p>
                             <strong>{t.externalBackupResult}:</strong> {run.message ?? t.notAvailable}
+                          </p>
+                          <p>
+                            <strong>{t.externalBackupProgress}:</strong>{" "}
+                            {run.current_step ?? t.notAvailable} -{" "}
+                            {run.progress_message ?? t.notAvailable}
+                          </p>
+                          <p>
+                            <strong>{t.externalBackupLastLogAt}:</strong>{" "}
+                            {formatDateTime(run.last_log_at, language, t.notAvailable)}
                           </p>
                           <p>
                             <strong>{t.externalBackupTargetPath}:</strong> {run.target_path}

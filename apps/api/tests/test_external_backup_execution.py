@@ -47,7 +47,19 @@ class FakeBridge:
             payload={"mount_path": "/mnt/pbo/WD-WXD2DA1L1E7C"},
         )
 
-    def prepare_external_datastore(self, mount_path, target_path, mode):
+    def inspect_disk_on_pbs(self, disk):
+        return AgentCommandResult(
+            ok=True,
+            message="disk inspected",
+            stdout_log="disk visible",
+            stderr_log=None,
+            command_summary="inspect disk",
+            execution_cwd="/",
+            return_code=0,
+            payload={"mount_path": "/mnt/pbo/WD-WXD2DA1L1E7C"},
+        )
+
+    def prepare_external_datastore(self, mount_path, target_path, mode, run_id=None):
         return AgentCommandResult(
             ok=True,
             message="datastore prepared",
@@ -65,7 +77,7 @@ class FakeBridge:
             },
         )
 
-    def run_external_export(self, target_path, datastore_name, mode):
+    def run_external_export(self, target_path, datastore_name, mode, run_id=None):
         self.export_target_path = target_path
         return AgentCommandResult(
             ok=True,

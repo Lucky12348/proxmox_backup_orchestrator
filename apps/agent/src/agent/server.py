@@ -35,12 +35,14 @@ class PrepareExternalDatastoreRequest(BaseModel):
     mount_path: str = Field(min_length=1)
     target_path: str = Field(min_length=1)
     mode: str
+    callback_run_id: int | None = Field(default=None, gt=0)
 
 
 class RunExternalExportRequest(BaseModel):
     target_path: str = Field(min_length=1)
     datastore_name: str = Field(min_length=1)
     mode: str
+    callback_run_id: int | None = Field(default=None, gt=0)
 
 
 class InspectDiskRequest(BaseModel):
@@ -101,7 +103,13 @@ def prepare_external_datastore(
 ) -> Response:
     return _run_endpoint(
         "prepare-external-datastore",
-        lambda: prepare_external_datastore_result(payload.mount_path, payload.target_path, payload.mode, settings),
+        lambda: prepare_external_datastore_result(
+            payload.mount_path,
+            payload.target_path,
+            payload.mode,
+            settings,
+            callback_run_id=payload.callback_run_id,
+        ),
     )
 
 
@@ -124,7 +132,13 @@ def run_external_export(
 ) -> Response:
     return _run_endpoint(
         "run-external-export",
-        lambda: run_external_export_result(payload.target_path, payload.datastore_name, payload.mode, settings),
+        lambda: run_external_export_result(
+            payload.target_path,
+            payload.datastore_name,
+            payload.mode,
+            settings,
+            callback_run_id=payload.callback_run_id,
+        ),
     )
 
 
