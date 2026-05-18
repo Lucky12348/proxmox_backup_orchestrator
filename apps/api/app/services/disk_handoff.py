@@ -66,7 +66,19 @@ def handoff_disk_to_pbs(
     last_error: str | None = None
     for index, candidate in enumerate(_handoff_candidates(device), start=1):
         _report(progress, "handoff_disk", f"Selected USB mapping `{candidate['mapping']}` for `{disk.serial_number}`.")
-        _attach_usb_candidate(client, settings, disk, slot, candidate, progress)
+        try:
+            _attach_usb_candidate(client, settings, disk, slot, candidate, progress)
+        except HTTPException as exc:
+            last_error = str(exc.detail)
+            _report(progress, "handoff_disk", last_error)
+            if index < len(_handoff_candidates(device)):
+                try:
+                    client.delete_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot)
+                    _report(progress, "handoff_disk", f"Removed USB slot `{slot}` before next mapping retry.")
+                except Exception as cleanup_exc:
+                    _report(progress, "handoff_disk", f"Failed to remove USB slot `{slot}` before retry: {cleanup_exc}")
+                continue
+            break
         disk.handoff_status = "attached_to_pbs"
         disk.proxmox_usb_mapping = candidate["mapping"]
         disk.pbs_handoff_slot = slot
@@ -213,7 +225,6 @@ def _attach_usb_candidate(
     _report(progress, "handoff_disk", f"Attach payload: `{payload}`.")
     try:
         client.set_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot, mapping, usb3=usb3)
-        vm_config = client.get_qemu_config(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -225,13 +236,37 @@ def _attach_usb_candidate(
             ),
         ) from exc
 
-    config_value = str(vm_config.get(slot) or "")
-    _report(progress, "handoff_disk", f"VM config verification for `{slot}`: `{config_value or 'missing'}`.")
-    if not config_value or f"host={mapping}" not in config_value:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"USB attach failed: VM config does not contain `{slot}=host={mapping}` after Proxmox API update.",
+    for attempt in range(1, 16):
+        vm_config = client.get_qemu_config(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id)
+        config_value = str(vm_config.get(slot) or "")
+        _report(
+            progress,
+            "handoff_disk",
+            f"VM config verification attempt {attempt}/15 for `{slot}`: `{config_value or 'missing'}`.",
         )
+        if _vm_config_value_matches_mapping(config_value, mapping):
+            return
+        sleep(1)
+
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail=(
+            f"USB attach failed: VM config does not contain `{slot}=host={mapping}` after Proxmox API update. "
+            f"USB config: {_vm_usb_config_summary(vm_config)}"
+        ),
+    )
+
+
+def _vm_config_value_matches_mapping(config_value: str, mapping: str) -> bool:
+    if not config_value:
+        return False
+    parts = {part.strip() for part in config_value.split(",") if part.strip()}
+    return f"host={mapping}" in parts or mapping in parts or f"host={mapping}" in config_value or mapping in parts
+
+
+def _vm_usb_config_summary(vm_config: dict[str, Any]) -> str:
+    items = [f"{key}={value}" for key, value in sorted(vm_config.items()) if str(key).startswith("usb")]
+    return ", ".join(items) or "none"
 
 
 def _handoff_candidates(device: dict[str, str]) -> list[dict[str, str]]:

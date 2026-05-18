@@ -1,9 +1,15 @@
 from types import SimpleNamespace
 from unittest import TestCase
+from unittest.mock import patch
 
 from fastapi import HTTPException
 
-from app.services.disk_handoff import _find_matching_usb_device, _qemu_usb_host_mapping
+from app.services.disk_handoff import (
+    _attach_usb_candidate,
+    _find_matching_usb_device,
+    _handoff_candidates,
+    _qemu_usb_host_mapping,
+)
 
 
 def _disk(**overrides):
@@ -15,6 +21,26 @@ def _disk(**overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+def _settings():
+    return SimpleNamespace(pbs_execution_vm_node="pve", pbs_execution_vm_id=100)
+
+
+class _FakeProxmoxClient:
+    def __init__(self, configs):
+        self.configs = list(configs)
+        self.get_calls = 0
+        self.set_calls = []
+
+    def set_qemu_usb_device(self, node_name, vm_id, slot, host_mapping, *, usb3=None):
+        self.set_calls.append((slot, host_mapping, usb3))
+
+    def get_qemu_config(self, node_name, vm_id):
+        self.get_calls += 1
+        if self.configs:
+            return self.configs.pop(0)
+        return {}
 
 
 class DiskHandoffUsbMatchTests(TestCase):
@@ -149,3 +175,48 @@ class DiskHandoffUsbMatchTests(TestCase):
         self.assertIn("Ambiguous Proxmox USB passthrough candidates", raised.exception.detail)
         self.assertIn("usbpath=5", raised.exception.detail)
         self.assertIn("usbpath=6", raised.exception.detail)
+
+    def test_attach_verification_accepts_config_after_three_polls(self):
+        client = _FakeProxmoxClient([{}, {}, {"usb0": "host=1-9,usb3=0"}])
+        progress: list[str] = []
+
+        with patch("app.services.disk_handoff.sleep"):
+            _attach_usb_candidate(
+                client,
+                _settings(),
+                _disk(),
+                "usb0",
+                {"mapping": "1-9", "speed": "480", "summary": "Western Digital"},
+                lambda step, message, line=None: progress.append(message),
+            )
+
+        self.assertEqual(client.set_calls, [("usb0", "1-9", False)])
+        self.assertEqual(client.get_calls, 3)
+        self.assertTrue(any("attempt 3/15" in message for message in progress))
+
+    def test_attach_verification_accepts_raw_mapping_config_value(self):
+        client = _FakeProxmoxClient([{"usb0": "1-9,usb3=0"}])
+
+        with patch("app.services.disk_handoff.sleep"):
+            _attach_usb_candidate(
+                client,
+                _settings(),
+                _disk(),
+                "usb0",
+                {"mapping": "1-9", "speed": "480", "summary": "Western Digital"},
+                None,
+            )
+
+        self.assertEqual(client.get_calls, 1)
+
+    def test_handoff_candidates_include_vendor_product_fallback_after_bus_port_mapping(self):
+        candidates = _handoff_candidates(
+            {
+                "mapping": "1-9",
+                "vendid": "1058",
+                "prodid": "2630",
+                "summary": "Western Digital",
+            }
+        )
+
+        self.assertEqual([candidate["mapping"] for candidate in candidates], ["1-9", "1058:2630"])
