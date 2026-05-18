@@ -12,6 +12,7 @@ from app.db.session import SessionLocal
 from app.models import BackupRunStatus, ExternalBackupMode, ExternalBackupRun, ExternalDisk
 from app.services.disk_handoff import handoff_disk_to_pbs
 from app.services.external_backup_agent import AgentCommandError
+from app.services.external_backup_agent import get_external_backup_agent_bridge
 from app.services.external_backup_execution import build_export_target_path, get_external_backup_execution_service
 
 
@@ -28,15 +29,16 @@ def _expected_pbs_mount_path(serial_number: str) -> PurePosixPath:
 
 def build_external_backup_plan(disk: ExternalDisk) -> ExternalBackupPlan:
     base_path = _expected_pbs_mount_path(disk.serial_number)
+    settings = get_settings()
 
-    if disk.dedicated_backup_disk:
+    if disk.dedicated_backup_disk or not settings.external_backup_legacy_coexistence_enabled:
         return ExternalBackupPlan(
             target_path=build_export_target_path(str(base_path), disk.serial_number, ExternalBackupMode.DEDICATED),
             mode=ExternalBackupMode.DEDICATED,
             preserves_existing_data=False,
         )
 
-    if disk.allow_existing_data:
+    if settings.external_backup_legacy_coexistence_enabled and disk.allow_existing_data:
         return ExternalBackupPlan(
             target_path=build_export_target_path(str(base_path), disk.serial_number, ExternalBackupMode.COEXISTENCE),
             mode=ExternalBackupMode.COEXISTENCE,
@@ -45,7 +47,7 @@ def build_external_backup_plan(disk: ExternalDisk) -> ExternalBackupPlan:
 
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Disk must be dedicated or allow existing data before an external backup can run.",
+        detail="Disk must be dedicated before an external backup can run.",
     )
 
 
@@ -117,6 +119,15 @@ def cleanup_external_backup_runs(db: Session, keep_last: int = 10) -> int:
         db.delete(run)
     db.commit()
     return len(deletable)
+
+
+def cleanup_legacy_external_export_objects() -> dict[str, object]:
+    result = get_external_backup_agent_bridge().cleanup_legacy_external_export_objects()
+    return {
+        "ok": result.ok,
+        "message": result.message,
+        "return_code": result.return_code,
+    }
 
 
 def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> ExternalBackupRun:
@@ -235,6 +246,12 @@ def execute_external_backup_run(run_id: int) -> None:
             prepare_result = execution_result.prepare
             export_result = execution_result.export
             run.target_path = execution_result.target_path
+            if execution_result.target_datastore_name:
+                disk.pbs_datastore_name = execution_result.target_datastore_name
+                disk.pbs_mount_path = execution_result.target_path
+                disk.pbs_filesystem_type = "ext4"
+                disk.prepared_as_pbs_datastore = True
+                db.add(disk)
 
             run.status = BackupRunStatus.SUCCESS
             run.finished_at = datetime.utcnow()

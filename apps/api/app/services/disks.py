@@ -66,7 +66,7 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
         report_marker = ExternalDisk(
             serial_number=f"agent-report::{payload.hostname}",
             display_name=f"Agent report marker {payload.hostname}",
-            dedicated_backup_disk=False,
+            dedicated_backup_disk=True,
             allow_existing_data=False,
             source="agent",
             active=False,
@@ -99,7 +99,7 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
         if disk is None:
             disk = ExternalDisk(
                 serial_number=item.serial_number,
-                dedicated_backup_disk=False,
+                dedicated_backup_disk=True,
                 allow_existing_data=False,
                 source="agent",
                 active=True,

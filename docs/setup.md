@@ -44,7 +44,7 @@ For read-only PBS backup sync, configure these variables in `.env`:
 - `PBS_TOKEN_SECRET`
 - `PBS_VERIFY_SSL`
 - `PBS_FINGERPRINT` when the host-side sync remote needs an explicit certificate fingerprint
-- `PBS_DATASTORE`
+- `PBS_DATASTORE` (recommended default: `backup-store`)
 
 For backend-to-host-agent execution, these variables are also relevant:
 
@@ -117,7 +117,7 @@ Configure:
 1. `PBS_API_URL` with your PBS API base URL ending in `/api2/json`
 2. `PBS_TOKEN_ID` with a PBS API token id such as `root@pam!pbo-pbs`
 3. `PBS_TOKEN_SECRET` with the generated token secret
-4. `PBS_DATASTORE` with the datastore name to inspect
+4. `PBS_DATASTORE` with the source datastore name to inspect and export, usually `backup-store`
 5. `PBS_VERIFY_SSL=false` for self-signed local setups, or `true` for trusted certificates
 
 After the stack starts, use the dashboard's PBS section to check connectivity and trigger a manual backup sync.
@@ -195,19 +195,20 @@ Planning in this MVP is intentionally simple:
 - subtract `reserved_capacity_gb`
 - ignore real PBS dedup/chunk behavior for now
 
-The first external PBS export MVP builds on that disk model:
+The recommended external PBS export workflow uses a dedicated PBS datastore disk:
 
-- if a disk is marked as dedicated, the app uses a clean `pbs-datastore` target directory
-- if a disk allows existing data, the app writes into an isolated application subdirectory:
-  `proxmox-backup-orchestrator/<serial>/pbs-datastore`
-- coexistence mode never writes directly to the disk root
+- the selected USB disk is handed from the Proxmox host to the PBS VM
+- the PBS agent destructively formats the disk and creates one ext4 partition
+- the disk is mounted at `/mnt/pbo/<serial>/pbs-datastore`
+- PBS creates or reuses a datastore directly at that path
+- PBS sync copies from the configured source datastore, usually `backup-store`, to the dedicated disk datastore
+- coexistence loop-backed mode remains an advanced legacy mode behind `EXTERNAL_BACKUP_LEGACY_COEXISTENCE_ENABLED=true`
 - this phase replaces the earlier stub with a real split-agent PBS-native sync attempt
-- the backend now calls the Proxmox host agent over HTTP for disk-side preparation
 - the backend uses the Proxmox API to attach the selected USB disk to the PBS VM
 - the backend calls a separate PBS agent over HTTP for PBS-native export execution
 - the backend verifies that PBS can see the disk before continuing
 - the PBS agent uses `proxmox-backup-manager` to create a local datastore, a temporary remote, and a temporary sync job before running the sync
-- full restore workflow comes later
+- restore idea: reinstall PBS, attach the disk, mount `/mnt/pbo/<serial>/pbs-datastore`, then add that datastore path again
 
 Host-side dependencies for that execution path:
 

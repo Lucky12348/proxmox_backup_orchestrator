@@ -49,7 +49,7 @@ class Settings:
     pbs_token_id: str = os.getenv("PBS_TOKEN_ID", "")
     pbs_token_secret: str = os.getenv("PBS_TOKEN_SECRET", "")
     pbs_verify_ssl: bool = parse_bool(os.getenv("PBS_VERIFY_SSL"), default=False)
-    pbs_datastore: str = os.getenv("PBS_DATASTORE", "backup")
+    pbs_datastore: str = os.getenv("PBS_DATASTORE", "backup-store")
     host_agent_base_url: str = os.getenv("HOST_AGENT_BASE_URL", "http://proxmox-host:8081")
     host_agent_token: str = os.getenv("HOST_AGENT_TOKEN", "")
     host_agent_timeout_seconds: float = float(os.getenv("HOST_AGENT_TIMEOUT_SECONDS", "7200"))
@@ -59,6 +59,10 @@ class Settings:
     external_backup_callback_base_url: str = os.getenv(
         "EXTERNAL_BACKUP_CALLBACK_BASE_URL",
         "http://api:8000/api/v1",
+    )
+    external_backup_legacy_coexistence_enabled: bool = parse_bool(
+        os.getenv("EXTERNAL_BACKUP_LEGACY_COEXISTENCE_ENABLED"),
+        default=False,
     )
     external_loop_datastore_size_gb: int = int(os.getenv("AGENT_LOOP_DATASTORE_SIZE_GB", "500"))
     agent_stale_after_minutes: int = int(os.getenv("AGENT_STALE_AFTER_MINUTES", "10"))

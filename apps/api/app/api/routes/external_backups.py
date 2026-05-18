@@ -15,6 +15,7 @@ from app.schemas import (
 from app.services.external_backups import (
     append_external_backup_run_log,
     cleanup_external_backup_runs,
+    cleanup_legacy_external_export_objects,
     delete_external_backup_run,
     execute_external_backup_run,
     get_external_backup_preview,
@@ -61,6 +62,11 @@ def get_runs(db: DbSession) -> list[ExternalBackupRunSummaryRead]:
 def cleanup_runs(db: DbSession, keep_last: int = 10) -> dict[str, int]:
     deleted = cleanup_external_backup_runs(db, keep_last=keep_last)
     return {"deleted": deleted, "keep_last": keep_last}
+
+
+@router.post("/legacy-objects/cleanup")
+def cleanup_legacy_objects() -> dict[str, object]:
+    return cleanup_legacy_external_export_objects()
 
 
 @router.get("/runs/{run_id}", response_model=ExternalBackupRunRead)

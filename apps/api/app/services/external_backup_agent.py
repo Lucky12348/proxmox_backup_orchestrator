@@ -73,12 +73,29 @@ class ExternalBackupAgentBridge:
             },
         )
 
+    def prepare_dedicated_pbs_datastore(
+        self,
+        disk: ExternalDisk,
+        datastore_name: str,
+        run_id: int | None = None,
+    ) -> AgentCommandResult:
+        payload: dict[str, object] = {
+            "disk": disk.serial_number,
+            "datastore_name": datastore_name,
+            "confirmation": True,
+        }
+        if run_id is not None:
+            payload.update(self._callback_payload(run_id))
+        return self._run_command(self.pbs_client, "/prepare-dedicated-pbs-datastore", payload)
+
     def run_external_export(
         self,
         target_path: str,
         datastore_name: str,
         mode: ExternalBackupMode,
         run_id: int | None = None,
+        target_datastore_name: str | None = None,
+        persist_target_datastore: bool = False,
     ) -> AgentCommandResult:
         payload: dict[str, object] = {
             "target_path": target_path,
@@ -87,6 +104,9 @@ class ExternalBackupAgentBridge:
         }
         if run_id is not None:
             payload.update(self._callback_payload(run_id))
+        if target_datastore_name:
+            payload["target_datastore_name"] = target_datastore_name
+        payload["persist_target_datastore"] = persist_target_datastore
         return self._run_command(self.pbs_client, "/run-external-export", payload)
 
     def inspect_disk_on_pbs(self, disk: ExternalDisk) -> AgentCommandResult:
@@ -95,6 +115,9 @@ class ExternalBackupAgentBridge:
             "/inspect-disk",
             {"disk": disk.serial_number},
         )
+
+    def cleanup_legacy_external_export_objects(self) -> AgentCommandResult:
+        return self._run_command(self.pbs_client, "/cleanup-legacy-external-export-objects", {})
 
     def _run_command(self, client, path: str, payload: dict[str, object]) -> AgentCommandResult:
         try:

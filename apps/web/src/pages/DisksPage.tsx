@@ -39,7 +39,7 @@ export function DisksPage({
                 <th>{t.diskHandoffStatus}</th>
                 <th>{t.diskPbsVisible}</th>
                 <th>{t.diskDedicated}</th>
-                <th>{t.diskAllowExistingData}</th>
+                <th>{t.pbsDatastore}</th>
                 <th>{t.diskUsableCapacity}</th>
                 <th>{t.diskReservedCapacity}</th>
                 <th>{t.diskPlanningNotes}</th>
@@ -98,38 +98,12 @@ export function DisksPage({
                     </StatusBadge>
                   </td>
                   <td>
-                    <label className="checkbox-cell">
-                      <input
-                        checked={disk.dedicated_backup_disk}
-                        disabled={savingKey === `disk-${disk.id}`}
-                        onChange={(event) =>
-                          onDiskToggleRequest({
-                            disk,
-                            field: "dedicated_backup_disk",
-                            value: event.target.checked,
-                          })
-                        }
-                        type="checkbox"
-                      />
-                      <span>{disk.dedicated_backup_disk ? t.yes : t.no}</span>
-                    </label>
+                    <StatusBadge tone={disk.dedicated_backup_disk ? "success" : "warning"}>
+                      {disk.dedicated_backup_disk ? t.yes : t.no}
+                    </StatusBadge>
                   </td>
                   <td>
-                    <label className="checkbox-cell">
-                      <input
-                        checked={disk.allow_existing_data}
-                        disabled={savingKey === `disk-${disk.id}`}
-                        onChange={(event) =>
-                          onDiskToggleRequest({
-                            disk,
-                            field: "allow_existing_data",
-                            value: event.target.checked,
-                          })
-                        }
-                        type="checkbox"
-                      />
-                      <span>{disk.allow_existing_data ? t.yes : t.no}</span>
-                    </label>
+                    {disk.pbs_datastore_name ?? disk.pbs_mount_path ?? t.notAvailable}
                   </td>
                   <td>
                     <input

@@ -14,6 +14,8 @@ from agent.main import (
     inspect_disk_result,
     prepare_disk_result,
     prepare_external_datastore_result,
+    prepare_dedicated_pbs_datastore_result,
+    cleanup_legacy_external_export_objects,
     run_external_export_result,
 )
 
@@ -44,6 +46,17 @@ class RunExternalExportRequest(BaseModel):
     target_path: str = Field(min_length=1)
     datastore_name: str = Field(min_length=1)
     mode: str
+    callback_run_id: int | None = Field(default=None, gt=0)
+    callback_url: str | None = Field(default=None, min_length=1)
+    callback_token: str | None = Field(default=None, min_length=1)
+    target_datastore_name: str | None = Field(default=None, min_length=1)
+    persist_target_datastore: bool = False
+
+
+class PrepareDedicatedPbsDatastoreRequest(BaseModel):
+    disk: str = Field(min_length=1)
+    datastore_name: str = Field(min_length=1)
+    confirmation: bool = False
     callback_run_id: int | None = Field(default=None, gt=0)
     callback_url: str | None = Field(default=None, min_length=1)
     callback_token: str | None = Field(default=None, min_length=1)
@@ -119,6 +132,26 @@ def prepare_external_datastore(
     )
 
 
+@app.post("/prepare-dedicated-pbs-datastore", response_model=None)
+def prepare_dedicated_pbs_datastore(
+    payload: PrepareDedicatedPbsDatastoreRequest,
+    _: None = Depends(require_agent_token),
+    settings: AgentSettings = Depends(get_settings),
+) -> Response:
+    return _run_endpoint(
+        "prepare-dedicated-pbs-datastore",
+        lambda: prepare_dedicated_pbs_datastore_result(
+            payload.disk,
+            payload.datastore_name,
+            payload.confirmation,
+            settings,
+            callback_run_id=payload.callback_run_id,
+            callback_url=payload.callback_url,
+            callback_token=payload.callback_token,
+        ),
+    )
+
+
 @app.post("/inspect-disk", response_model=None)
 def inspect_disk(
     payload: InspectDiskRequest,
@@ -146,7 +179,20 @@ def run_external_export(
             callback_run_id=payload.callback_run_id,
             callback_url=payload.callback_url,
             callback_token=payload.callback_token,
+            target_datastore_name=payload.target_datastore_name,
+            persist_target_datastore=payload.persist_target_datastore,
         ),
+    )
+
+
+@app.post("/cleanup-legacy-external-export-objects", response_model=None)
+def cleanup_legacy_external_export(
+    _: None = Depends(require_agent_token),
+    settings: AgentSettings = Depends(get_settings),
+) -> Response:
+    return _run_endpoint(
+        "cleanup-legacy-external-export-objects",
+        lambda: cleanup_legacy_external_export_objects(settings),
     )
 
 

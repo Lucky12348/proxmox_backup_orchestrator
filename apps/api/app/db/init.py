@@ -74,6 +74,12 @@ def ensure_external_disk_schema() -> None:
         "pbs_handoff_slot": "ALTER TABLE external_disks ADD COLUMN pbs_handoff_slot VARCHAR(32)",
         "pbs_visible": "ALTER TABLE external_disks ADD COLUMN pbs_visible BOOLEAN NOT NULL DEFAULT FALSE",
         "pbs_device_path": "ALTER TABLE external_disks ADD COLUMN pbs_device_path VARCHAR(255)",
+        "pbs_datastore_name": "ALTER TABLE external_disks ADD COLUMN pbs_datastore_name VARCHAR(255)",
+        "pbs_mount_path": "ALTER TABLE external_disks ADD COLUMN pbs_mount_path VARCHAR(512)",
+        "pbs_filesystem_type": "ALTER TABLE external_disks ADD COLUMN pbs_filesystem_type VARCHAR(64)",
+        "prepared_as_pbs_datastore": (
+            "ALTER TABLE external_disks ADD COLUMN prepared_as_pbs_datastore BOOLEAN NOT NULL DEFAULT FALSE"
+        ),
     }
 
     with engine.begin() as connection:
@@ -198,7 +204,7 @@ def seed_database() -> None:
             capacity_gb=4000,
             connected=False,
             dedicated_backup_disk=True,
-            allow_existing_data=True,
+            allow_existing_data=False,
             preferred_root_path="/mnt/pbs-beta",
             notes="Off-site disk currently disconnected.",
             filesystem_type="ext4",
@@ -219,8 +225,8 @@ def seed_database() -> None:
             display_name="Shared Utility Disk",
             capacity_gb=1000,
             connected=True,
-            dedicated_backup_disk=False,
-            allow_existing_data=True,
+            dedicated_backup_disk=True,
+            allow_existing_data=False,
             preferred_root_path=None,
             notes="General-purpose external storage.",
             filesystem_type="exfat",

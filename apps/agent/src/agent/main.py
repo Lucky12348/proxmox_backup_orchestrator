@@ -293,6 +293,126 @@ def prepare_external_datastore_result(
     return payload
 
 
+def prepare_dedicated_pbs_datastore_result(
+    identifier: str,
+    datastore_name: str,
+    confirmation: bool,
+    settings: AgentSettings,
+    callback_run_id: int | None = None,
+    callback_url: str | None = None,
+    callback_token: str | None = None,
+) -> dict[str, Any]:
+    progress = ExternalExportProgress(settings, callback_run_id, callback_url, callback_token)
+    if not confirmation:
+        raise RuntimeError("Dedicated PBS datastore preparation requires destructive confirmation.")
+
+    disk, _ = resolve_disk(identifier)
+    serial = disk_serial_number(disk, load_udev_properties(device_name(disk))) or device_name(disk)
+    device_path = str(disk["path"])
+    size_gb = bytes_to_gb(disk.get("size"))
+    if size_gb < 32:
+        raise RuntimeError(f"Refusing to prepare `{device_path}` because it is below the 32 GB minimum.")
+    _assert_safe_dedicated_disk(disk)
+
+    mount_path = default_mount_base_path(None) / serial / "pbs-datastore"
+    partition_path = _first_partition_path(device_path)
+    command_summaries: list[str] = []
+    stdout_logs: list[str] = []
+    stderr_logs: list[str] = []
+
+    progress.post("destructive_format", f"Preparing `{device_path}` as dedicated PBS datastore `{datastore_name}`.")
+    for partition in list_partition_nodes(disk):
+        mountpoint = partition.get("mountpoint")
+        if mountpoint:
+            _run_logged_command(
+                ["umount", str(partition["path"])],
+                command_summaries,
+                stdout_logs,
+                stderr_logs,
+                f"Failed to unmount `{partition['path']}`.",
+                progress=progress,
+                step="unmount",
+            )
+
+    _run_logged_command(
+        ["wipefs", "--all", "--force", device_path],
+        command_summaries,
+        stdout_logs,
+        stderr_logs,
+        f"Failed to wipe filesystem signatures on `{device_path}`.",
+        progress=progress,
+        step="wipe_disk",
+    )
+    _run_logged_command(
+        ["sgdisk", "--zap-all", device_path],
+        command_summaries,
+        stdout_logs,
+        stderr_logs,
+        f"Failed to wipe partition table on `{device_path}`.",
+        progress=progress,
+        step="wipe_partition_table",
+    )
+    _run_logged_command(
+        ["parted", "-s", device_path, "mklabel", "gpt", "mkpart", "primary", "ext4", "0%", "100%"],
+        command_summaries,
+        stdout_logs,
+        stderr_logs,
+        f"Failed to create GPT partition on `{device_path}`.",
+        progress=progress,
+        step="partition_disk",
+    )
+    _run_logged_command(
+        ["partprobe", device_path],
+        command_summaries,
+        stdout_logs,
+        stderr_logs,
+        f"Failed to refresh partition table for `{device_path}`.",
+        progress=progress,
+        step="partition_disk",
+    )
+    _run_logged_command(
+        ["mkfs.ext4", "-F", partition_path],
+        command_summaries,
+        stdout_logs,
+        stderr_logs,
+        f"Failed to format `{partition_path}` as ext4.",
+        progress=progress,
+        step="format_ext4",
+    )
+    ensure_mountpoint(mount_path)
+    ensure_fstab_entry(partition_path, str(mount_path), "ext4")
+    _run_logged_command(
+        ["mount", partition_path, str(mount_path)],
+        command_summaries,
+        stdout_logs,
+        stderr_logs,
+        f"Failed to mount `{partition_path}` at `{mount_path}`.",
+        progress=progress,
+        step="mount_datastore",
+    )
+    _run_logged_command(["chown", "backup:backup", str(mount_path)], command_summaries, stdout_logs, stderr_logs, f"Failed to chown `{mount_path}`.", progress=progress, step="permissions")
+    _run_logged_command(["chmod", "750", str(mount_path)], command_summaries, stdout_logs, stderr_logs, f"Failed to chmod `{mount_path}`.", progress=progress, step="permissions")
+    progress.post("prepare_dedicated_datastore", f"Dedicated PBS datastore mount is ready at `{mount_path}`.")
+
+    return {
+        "ok": True,
+        "success": True,
+        "device_path": device_path,
+        "partition_path": partition_path,
+        "mount_path": str(mount_path),
+        "target_path": str(mount_path),
+        "actual_target_path": str(mount_path),
+        "filesystem_type": "ext4",
+        "datastore_name": datastore_name,
+        "command_summary": "\n".join(command_summaries),
+        "execution_cwd": str(Path.cwd()),
+        "stdout_log": "\n\n".join(chunk for chunk in stdout_logs if chunk) or None,
+        "stderr_log": "\n\n".join(chunk for chunk in stderr_logs if chunk) or None,
+        "message": "Dedicated PBS datastore disk formatted and mounted.",
+        "return_code": 0,
+    }
+
+
 def run_external_export_result(
     target_path: str,
     datastore_name: str,
@@ -301,6 +421,8 @@ def run_external_export_result(
     callback_run_id: int | None = None,
     callback_url: str | None = None,
     callback_token: str | None = None,
+    target_datastore_name: str | None = None,
+    persist_target_datastore: bool = False,
 ) -> dict[str, Any]:
     progress = ExternalExportProgress(settings, callback_run_id, callback_url, callback_token)
     target = Path(target_path).resolve()
@@ -335,7 +457,7 @@ def run_external_export_result(
 
     existing_target_store = find_datastore_by_path(datastores, target)
     created_datastore = existing_target_store is None
-    target_store_name = existing_target_store or build_resource_name("pbo-export-store", str(target))
+    target_store_name = existing_target_store or target_datastore_name or build_resource_name("pbo-export-store", str(target))
     remote_name = build_resource_name("pbo-export-remote", f"{api['host']}:{datastore_name}:{target}")
     sync_job_name = build_resource_name("pbo-export-sync", f"{datastore_name}:{target}")
 
@@ -501,7 +623,7 @@ def run_external_export_result(
             cleanup_errors.extend(
                 cleanup_resource([manager, "remote", "remove", remote_name], settings.export_timeout_seconds)
             )
-        if created_temp_datastore:
+        if created_temp_datastore and not persist_target_datastore:
             progress.post("cleanup", f"Removing temporary target PBS datastore `{target_store_name}`.")
             cleanup_errors.extend(
                 cleanup_resource([manager, "datastore", "remove", target_store_name], settings.export_timeout_seconds)
@@ -869,6 +991,31 @@ def find_format_target(disk: dict[str, Any]) -> dict[str, Any]:
         return partitions[0]
 
     return disk
+
+
+def _first_partition_path(device_path: str) -> str:
+    if device_path.startswith("/dev/nvme") or device_path.startswith("/dev/mmcblk"):
+        return f"{device_path}p1"
+    return f"{device_path}1"
+
+
+def _assert_safe_dedicated_disk(disk: dict[str, Any]) -> None:
+    nodes = [disk, *list_partition_nodes(disk)]
+    dangerous_mounts = {"/", "/boot", "/boot/efi", "/mnt/datastore/backup-store"}
+    for node in nodes:
+        mountpoint = node.get("mountpoint")
+        if isinstance(mountpoint, str) and mountpoint:
+            if mountpoint in dangerous_mounts or mountpoint.startswith("/mnt/datastore/backup-store/"):
+                raise RuntimeError(f"Refusing to format disk because `{node['path']}` is mounted at `{mountpoint}`.")
+    datastore_path = Path("/mnt/datastore/backup-store")
+    for node in nodes:
+        mountpoint = node.get("mountpoint")
+        if isinstance(mountpoint, str) and mountpoint:
+            try:
+                datastore_path.relative_to(Path(mountpoint))
+            except ValueError:
+                continue
+            raise RuntimeError(f"Refusing to format disk because it contains source datastore `{datastore_path}`.")
 
 
 def get_blkid_info(path: str) -> dict[str, str]:
@@ -1417,6 +1564,47 @@ def cleanup_resource(command: list[str], timeout_seconds: float) -> list[str]:
     if result.returncode == 0:
         return []
     return [format_command_failure("Cleanup command failed.", result)]
+
+
+def cleanup_legacy_external_export_objects(settings: AgentSettings | None = None) -> dict[str, Any]:
+    settings = settings or AgentSettings()
+    manager = shutil.which("proxmox-backup-manager")
+    if manager is None:
+        raise RuntimeError("Missing required host dependency: `proxmox-backup-manager` was not found in PATH.")
+    command_summaries: list[str] = []
+    stdout_logs: list[str] = []
+    stderr_logs: list[str] = []
+    errors: list[str] = []
+    for resource, list_command, remove_prefix in [
+        ("sync-job", [manager, "sync-job", "list", "--output-format", "json"], [manager, "sync-job", "remove"]),
+        ("remote", [manager, "remote", "list", "--output-format", "json"], [manager, "remote", "remove"]),
+        ("datastore", [manager, "datastore", "list", "--output-format", "json"], [manager, "datastore", "remove"]),
+    ]:
+        result = run_subprocess(list_command, settings.export_timeout_seconds)
+        record_command_result(result, command_summaries, stdout_logs, stderr_logs)
+        if result.returncode != 0:
+            errors.append(format_command_failure(f"Failed to list PBS {resource}.", result))
+            continue
+        for item in parse_json_output(result.stdout, f"{resource} list"):
+            name = item.get("id") or item.get("name") or item.get("store")
+            if not isinstance(name, str) or not name.startswith("pbo-export-"):
+                continue
+            if name == settings.pbs_auth_id or name == "backup-store":
+                continue
+            remove_result = run_subprocess([*remove_prefix, name], settings.export_timeout_seconds)
+            record_command_result(remove_result, command_summaries, stdout_logs, stderr_logs)
+            if remove_result.returncode != 0:
+                errors.append(format_command_failure(f"Failed to remove legacy PBS {resource} `{name}`.", remove_result))
+    return {
+        "ok": not errors,
+        "success": not errors,
+        "message": "Legacy external export cleanup completed." if not errors else "Legacy cleanup completed with errors.",
+        "command_summary": "\n".join(command_summaries),
+        "execution_cwd": str(Path.cwd()),
+        "stdout_log": "\n\n".join(stdout_logs) or None,
+        "stderr_log": "\n\n".join([*stderr_logs, *errors]) or None,
+        "return_code": 0 if not errors else 1,
+    }
 
 
 def redact_command(command: list[str]) -> str:

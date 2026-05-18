@@ -77,7 +77,15 @@ class FakeBridge:
             },
         )
 
-    def run_external_export(self, target_path, datastore_name, mode, run_id=None):
+    def run_external_export(
+        self,
+        target_path,
+        datastore_name,
+        mode,
+        run_id=None,
+        target_datastore_name=None,
+        persist_target_datastore=False,
+    ):
         self.export_target_path = target_path
         return AgentCommandResult(
             ok=True,

@@ -30,6 +30,20 @@ This repository is intended to orchestrate backups around a small Proxmox enviro
 - Proxmox Backup Server as the backup engine
 - `ntfy` for notifications
 
+## External Backup Workflow
+
+The recommended external backup workflow uses a dedicated PBS datastore disk:
+
+1. The Proxmox host agent detects a trusted USB disk.
+2. The API hands the USB device to the PBS VM.
+3. The PBS agent destructively formats the disk as ext4.
+4. The disk is mounted at `/mnt/pbo/<serial>/pbs-datastore`.
+5. PBS sync copies backups from the configured source datastore, usually `backup-store`, into the dedicated disk datastore.
+
+This path is intentionally destructive: existing data on the selected disk is removed. The old coexistence loop-backed mode remains as an advanced legacy path behind `EXTERNAL_BACKUP_LEGACY_COEXISTENCE_ENABLED=true`.
+
+Restore concept: reinstall PBS if needed, attach the disk, mount `/mnt/pbo/<serial>/pbs-datastore`, then add that path back as a PBS datastore.
+
 ## Quick Start
 
 1. Copy `.env.example` to `.env` and adjust values, or run `make bootstrap`.

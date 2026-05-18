@@ -32,6 +32,10 @@ class ExternalDiskRead(BaseModel):
     pbs_handoff_slot: str | None
     pbs_visible: bool
     pbs_device_path: str | None
+    pbs_datastore_name: str | None
+    pbs_mount_path: str | None
+    pbs_filesystem_type: str | None
+    prepared_as_pbs_datastore: bool
 
 
 class ExternalDiskUpdate(BaseModel):

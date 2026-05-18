@@ -185,7 +185,6 @@ export function useAppData() {
       Pick<
         ExternalDisk,
         | "dedicated_backup_disk"
-        | "allow_existing_data"
         | "display_name"
         | "preferred_root_path"
         | "notes"

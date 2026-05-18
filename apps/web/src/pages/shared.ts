@@ -16,7 +16,7 @@ export interface AssetPageProps extends PageCommonProps {
 
 export interface DiskActionRequest {
   disk: ExternalDisk;
-  field: "trusted" | "dedicated_backup_disk" | "allow_existing_data";
+  field: "trusted" | "dedicated_backup_disk";
   value: boolean;
 }
 

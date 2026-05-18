@@ -84,10 +84,6 @@ export default function App() {
         title: t.confirmDedicatedTitle,
         description: request.value ? t.confirmDedicatedEnable : t.confirmDedicatedDisable,
       },
-      allow_existing_data: {
-        title: t.confirmExistingDataTitle,
-        description: request.value ? t.confirmExistingDataEnable : t.confirmExistingDataDisable,
-      },
     } as const;
 
     const descriptor = descriptors[request.field];
@@ -103,8 +99,6 @@ export default function App() {
           void mutateDisk(request.disk.id, { trusted: request.value });
         } else if (request.field === "dedicated_backup_disk") {
           void mutateDisk(request.disk.id, { dedicated_backup_disk: request.value });
-        } else {
-          void mutateDisk(request.disk.id, { allow_existing_data: request.value });
         }
         closeConfirm();
       },
@@ -178,18 +172,6 @@ export default function App() {
       return;
     }
 
-    if (!disk.dedicated_backup_disk && !disk.allow_existing_data) {
-      openConfirm({
-        title: t.confirmExternalBackupTitle,
-        description: t.externalBackupBlockedMode,
-        confirmLabel: t.dismiss,
-        cancelLabel: t.cancel,
-        tone: "warning",
-        onConfirm: closeConfirm,
-      });
-      return;
-    }
-
     try {
       const preview = await getExternalBackupPreview(disk.id);
       const modeLabel =
@@ -214,6 +196,7 @@ export default function App() {
           `${t.externalBackupTargetPath}: ${preview.target_path}`,
           `${t.externalBackupPBSHandoff}`,
           `${t.externalBackupPBSExclusive}`,
+          `${t.externalBackupDestructiveWarning}`,
           preserveText,
           loopSizeText,
           loopWarningText,

@@ -46,6 +46,10 @@ export interface ExternalDisk {
   pbs_handoff_slot: string | null;
   pbs_visible: boolean;
   pbs_device_path: string | null;
+  pbs_datastore_name: string | null;
+  pbs_mount_path: string | null;
+  pbs_filesystem_type: string | null;
+  prepared_as_pbs_datastore: boolean;
 }
 
 export interface DiskHandoffStatus {
