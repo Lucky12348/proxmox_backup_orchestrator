@@ -536,8 +536,9 @@ def run_external_export_result(
     existing_target_store = find_datastore_by_path(datastores, target)
     created_datastore = existing_target_store is None
     target_store_name = existing_target_store or target_datastore_name or build_resource_name("pbo-export-store", str(target))
-    remote_name = build_resource_name("pbo-export-remote", f"{api['host']}:{datastore_name}:{target}")
-    sync_job_name = build_resource_name("pbo-export-sync", f"{datastore_name}:{target}")
+    run_suffix = str(callback_run_id or int(datetime.now(timezone.utc).timestamp() * 1000))
+    remote_name = build_resource_name("pbo-export-remote", f"{api['host']}:{datastore_name}:{target}:{run_suffix}")
+    sync_job_name = build_resource_name("pbo-export-sync", f"{datastore_name}:{target}:{run_suffix}")
 
     command_summaries: list[str] = []
     stdout_logs: list[str] = []
@@ -555,6 +556,15 @@ def run_external_export_result(
     target_filesystem_type = filesystem_type_for_path(target)
 
     try:
+        _cleanup_stale_export_sync_objects(
+            manager,
+            settings,
+            command_summaries,
+            stdout_logs,
+            stderr_logs,
+            progress,
+        )
+
         if created_datastore:
             progress.post("target_datastore", f"Creating or reusing target PBS datastore `{target_store_name}`.")
             create_store_command = [
@@ -1776,6 +1786,94 @@ def cleanup_resource(command: list[str], timeout_seconds: float) -> list[str]:
     if result.returncode == 0:
         return []
     return [format_command_failure("Cleanup command failed.", result)]
+
+
+def _cleanup_stale_export_sync_objects(
+    manager: str,
+    settings: AgentSettings,
+    command_summaries: list[str],
+    stdout_logs: list[str],
+    stderr_logs: list[str],
+    progress: ExternalExportProgress,
+) -> None:
+    progress.post("cleanup", "Checking for stale PBO temporary sync jobs and remotes.")
+    sync_jobs = _list_pbs_resource_names(manager, "sync-job", settings, command_summaries, stdout_logs, stderr_logs)
+    stale_sync_jobs = [name for name in sync_jobs if name.startswith("pbo-export-sync-")]
+    for sync_job_name in stale_sync_jobs:
+        lock_path = _sync_job_lock_path(sync_job_name)
+        if _is_sync_job_running(sync_job_name, lock_path):
+            raise RuntimeError(
+                f"Refusing cleanup because temporary sync job `{sync_job_name}` appears to be running. "
+                f"Lock path: `{lock_path}`."
+            )
+        progress.post("cleanup", f"Removing stale temporary sync job `{sync_job_name}`.")
+        result = run_subprocess([manager, "sync-job", "remove", sync_job_name], settings.export_timeout_seconds)
+        record_command_result(result, command_summaries, stdout_logs, stderr_logs)
+        if result.returncode != 0:
+            raise RuntimeError(format_command_failure(f"Failed to remove stale sync job `{sync_job_name}`.", result))
+        _remove_stale_sync_job_lock(sync_job_name, stdout_logs, progress)
+
+    remotes = _list_pbs_resource_names(manager, "remote", settings, command_summaries, stdout_logs, stderr_logs)
+    for remote_name in [name for name in remotes if name.startswith("pbo-export-remote-")]:
+        progress.post("cleanup", f"Removing stale temporary remote `{remote_name}`.")
+        result = run_subprocess([manager, "remote", "remove", remote_name], settings.export_timeout_seconds)
+        record_command_result(result, command_summaries, stdout_logs, stderr_logs)
+        if result.returncode != 0:
+            raise RuntimeError(format_command_failure(f"Failed to remove stale remote `{remote_name}`.", result))
+
+
+def _list_pbs_resource_names(
+    manager: str,
+    resource: str,
+    settings: AgentSettings,
+    command_summaries: list[str],
+    stdout_logs: list[str],
+    stderr_logs: list[str],
+) -> list[str]:
+    result = run_subprocess([manager, resource, "list", "--output-format", "json"], settings.export_timeout_seconds)
+    record_command_result(result, command_summaries, stdout_logs, stderr_logs)
+    if result.returncode != 0:
+        raise RuntimeError(format_command_failure(f"Failed to list PBS {resource} resources.", result))
+    names: list[str] = []
+    for item in parse_json_output(result.stdout, f"{resource} list"):
+        name = item.get("id") or item.get("name") or item.get("store")
+        if isinstance(name, str) and name:
+            names.append(name)
+    return names
+
+
+def _sync_job_lock_path(sync_job_name: str) -> Path:
+    return Path("/var/lib/proxmox-backup/jobstates") / f"syncjob-{sync_job_name}.lck"
+
+
+def _is_sync_job_running(sync_job_name: str, lock_path: Path) -> bool:
+    fuser = shutil.which("fuser")
+    if fuser and lock_path.exists():
+        result = run_subprocess([fuser, str(lock_path)], timeout_seconds=5)
+        if result.returncode == 0:
+            return True
+
+    pgrep = shutil.which("pgrep")
+    if pgrep:
+        result = run_subprocess([pgrep, "-f", sync_job_name], timeout_seconds=5)
+        if result.returncode == 0 and result.stdout:
+            return True
+
+    return False
+
+
+def _remove_stale_sync_job_lock(
+    sync_job_name: str,
+    stdout_logs: list[str],
+    progress: ExternalExportProgress,
+) -> None:
+    lock_path = _sync_job_lock_path(sync_job_name)
+    if not lock_path.exists():
+        return
+    lock_path.unlink()
+    message = f"Removed stale sync job lock `{lock_path}`."
+    stdout_logs.append(message)
+    progress.post("cleanup", message)
 
 
 def cleanup_legacy_external_export_objects(settings: AgentSettings | None = None) -> dict[str, Any]:

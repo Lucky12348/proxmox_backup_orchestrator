@@ -360,6 +360,94 @@ class ExternalExportDatastoreCreateTests(TestCase):
         ):
             self.assertIsNone(loop_backing_file("/dev/loop0"))
 
+    def test_export_cleans_stale_temp_sync_jobs_and_remotes_before_retry(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir).resolve()
+            calls: list[list[str]] = []
+
+            def fake_run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResult:
+                calls.append(command)
+                if command[1:3] == ["datastore", "list"]:
+                    stdout = json.dumps(
+                        [
+                            {"name": "source-store", "path": "/srv/source-store"},
+                            {"name": "pbo-wd-wxd2da1l1e7c", "path": str(target)},
+                        ]
+                    )
+                    return SubprocessResult(command, 0, stdout, "")
+                if command[1:3] == ["sync-job", "list"]:
+                    return SubprocessResult(command, 0, json.dumps([{"id": "pbo-export-sync-old"}]), "")
+                if command[1:3] == ["remote", "list"]:
+                    return SubprocessResult(command, 0, json.dumps([{"name": "pbo-export-remote-old"}]), "")
+                return SubprocessResult(command, 0, "", "")
+
+            settings = AgentSettings(
+                pbs_api_url="https://pbs.example.test:8007",
+                pbs_auth_id="root@pam!token",
+                pbs_auth_secret="secret",
+            )
+
+            with (
+                patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
+                patch("agent.main.filesystem_type_for_path", return_value="ext4"),
+                patch("agent.main._is_sync_job_running", return_value=False),
+                patch("agent.main.run_subprocess", side_effect=fake_run_subprocess),
+            ):
+                result = run_external_export_result(
+                    str(target),
+                    "source-store",
+                    "dedicated",
+                    settings,
+                    target_datastore_name="pbo-wd-wxd2da1l1e7c",
+                    persist_target_datastore=True,
+                )
+
+        self.assertTrue(result["success"])
+        self.assertIn(["/usr/sbin/proxmox-backup-manager", "sync-job", "remove", "pbo-export-sync-old"], calls)
+        self.assertIn(["/usr/sbin/proxmox-backup-manager", "remote", "remove", "pbo-export-remote-old"], calls)
+        self.assertNotIn(["/usr/sbin/proxmox-backup-manager", "datastore", "remove", "pbo-wd-wxd2da1l1e7c"], calls)
+
+    def test_export_refuses_cleanup_when_old_temp_sync_job_is_running(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir).resolve()
+
+            def fake_run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResult:
+                if command[1:3] == ["datastore", "list"]:
+                    stdout = json.dumps(
+                        [
+                            {"name": "source-store", "path": "/srv/source-store"},
+                            {"name": "pbo-wd-wxd2da1l1e7c", "path": str(target)},
+                        ]
+                    )
+                    return SubprocessResult(command, 0, stdout, "")
+                if command[1:3] == ["sync-job", "list"]:
+                    return SubprocessResult(command, 0, json.dumps([{"id": "pbo-export-sync-old"}]), "")
+                return SubprocessResult(command, 0, "", "")
+
+            settings = AgentSettings(
+                pbs_api_url="https://pbs.example.test:8007",
+                pbs_auth_id="root@pam!token",
+                pbs_auth_secret="secret",
+            )
+
+            with (
+                patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
+                patch("agent.main.filesystem_type_for_path", return_value="ext4"),
+                patch("agent.main._is_sync_job_running", return_value=True),
+                patch("agent.main.run_subprocess", side_effect=fake_run_subprocess),
+                self.assertRaises(RuntimeError) as raised,
+            ):
+                run_external_export_result(
+                    str(target),
+                    "source-store",
+                    "dedicated",
+                    settings,
+                    target_datastore_name="pbo-wd-wxd2da1l1e7c",
+                    persist_target_datastore=True,
+                )
+
+        self.assertIn("appears to be running", str(raised.exception))
+
     def _run_export_and_capture_calls(
         self,
         target: Path,
