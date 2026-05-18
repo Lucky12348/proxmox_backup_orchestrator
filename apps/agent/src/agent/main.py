@@ -64,9 +64,17 @@ class AgentSettings:
 
 
 class ExternalExportProgress:
-    def __init__(self, settings: AgentSettings, run_id: int | None) -> None:
+    def __init__(
+        self,
+        settings: AgentSettings,
+        run_id: int | None,
+        callback_url: str | None = None,
+        callback_token: str | None = None,
+    ) -> None:
         self.settings = settings
         self.run_id = run_id
+        self.callback_url = callback_url
+        self.callback_token = callback_token or settings.server_token
 
     def post(
         self,
@@ -87,11 +95,12 @@ class ExternalExportProgress:
             "command": command,
         }
         try:
-            post_json(
+            post_progress_callback(
                 self.settings,
+                self.callback_url,
                 f"/external-backups/runs/{self.run_id}/log",
                 {key: value for key, value in payload.items() if value is not None},
-                token=self.settings.server_token,
+                token=self.callback_token,
             )
         except Exception as exc:
             logger.warning("Unable to post external export progress callback: %s", exc)
@@ -139,9 +148,11 @@ def prepare_external_datastore_result(
     mode: str,
     settings: AgentSettings | None = None,
     callback_run_id: int | None = None,
+    callback_url: str | None = None,
+    callback_token: str | None = None,
 ) -> dict[str, Any]:
     settings = settings or AgentSettings()
-    progress = ExternalExportProgress(settings, callback_run_id)
+    progress = ExternalExportProgress(settings, callback_run_id, callback_url, callback_token)
     mount = Path(mount_path).resolve()
     requested_target = Path(target_path).resolve()
     _validate_external_target(mount, requested_target, mode)
@@ -173,6 +184,7 @@ def prepare_external_datastore_result(
             progress.post(
                 "loop_image",
                 f"Creating loop-backed ext4 image `{image_path}` sized {settings.loop_datastore_size_gb} GiB.",
+                command=redact_command(["truncate", "-s", f"{settings.loop_datastore_size_gb}G", str(image_path)]),
             )
             _run_logged_command(
                 ["truncate", "-s", f"{settings.loop_datastore_size_gb}G", str(image_path)],
@@ -180,14 +192,21 @@ def prepare_external_datastore_result(
                 stdout_logs,
                 stderr_logs,
                 f"Failed to create loop-backed datastore image `{image_path}`.",
+                progress=progress,
+                step="loop_image",
             )
+            progress.post("loop_image", f"Loop-backed image `{image_path}` created.")
+            progress.post("loop_image_format", f"Formatting loop-backed image `{image_path}` as ext4.")
             _run_logged_command(
                 ["mkfs.ext4", "-F", str(image_path)],
                 command_summaries,
                 stdout_logs,
                 stderr_logs,
                 f"Failed to format new loop-backed datastore image `{image_path}` as ext4.",
+                progress=progress,
+                step="loop_image_format",
             )
+            progress.post("loop_image_format", f"Loop-backed image `{image_path}` formatted.")
         else:
             progress.post("loop_image", f"Reusing existing loop-backed ext4 image `{image_path}`.")
 
@@ -198,6 +217,7 @@ def prepare_external_datastore_result(
             command_summaries,
             stdout_logs,
             stderr_logs,
+            progress=progress,
         )
         _run_logged_command(
             ["chown", "backup:backup", str(loop_mount_path)],
@@ -279,8 +299,10 @@ def run_external_export_result(
     mode: str,
     settings: AgentSettings,
     callback_run_id: int | None = None,
+    callback_url: str | None = None,
+    callback_token: str | None = None,
 ) -> dict[str, Any]:
-    progress = ExternalExportProgress(settings, callback_run_id)
+    progress = ExternalExportProgress(settings, callback_run_id, callback_url, callback_token)
     target = Path(target_path).resolve()
     progress.post("prepare_external_datastore", f"Validating target path `{target}`.")
     if not target.is_dir():
@@ -359,9 +381,16 @@ def run_external_export_result(
             logger.info(detection_message)
 
             try:
-                create_store_result = run_subprocess(
+                create_store_result = run_subprocess_streaming(
                     create_store_command,
                     timeout_seconds=datastore_create_timeout,
+                    on_stdout=lambda line: progress.post("target_datastore_stdout", line, stdout_line=line),
+                    on_stderr=lambda line: progress.post("target_datastore_stderr", line, stderr_line=line),
+                )
+                progress.post(
+                    "target_datastore",
+                    f"Target PBS datastore command finished with exit {create_store_result.returncode}.",
+                    command=redact_command(create_store_command),
                 )
             except RuntimeError as exc:
                 raise RuntimeError(
@@ -460,6 +489,7 @@ def run_external_export_result(
                 )
             )
         sync_completed = True
+        progress.post("sync_run", f"PBS sync job `{sync_job_name}` finished.")
     finally:
         if created_sync_job:
             progress.post("cleanup", f"Removing temporary PBS sync job `{sync_job_name}`.")
@@ -1066,6 +1096,7 @@ def _ensure_loop_image_mounted(
     command_summaries: list[str],
     stdout_logs: list[str],
     stderr_logs: list[str],
+    progress: ExternalExportProgress | None = None,
 ) -> bool:
     mounted_source = _find_mount_source(loop_mount_path)
     if mounted_source:
@@ -1085,6 +1116,8 @@ def _ensure_loop_image_mounted(
             resolved_backing_file is not None and _same_path(resolved_backing_file, image_path)
         ):
             stdout_logs.append(f"Reusing existing loop-backed datastore mount at {loop_mount_path}")
+            if progress is not None:
+                progress.post("loop_mount", f"Reusing existing loop-backed datastore mount at `{loop_mount_path}`.")
             logger.info("Reusing existing loop-backed datastore mount at %s", loop_mount_path)
             return True
         raise RuntimeError(
@@ -1100,7 +1133,11 @@ def _ensure_loop_image_mounted(
         stdout_logs,
         stderr_logs,
         f"Failed to mount loop-backed datastore image `{image_path}` at `{loop_mount_path}`.",
+        progress=progress,
+        step="loop_mount",
     )
+    if progress is not None:
+        progress.post("loop_mount", f"Loop-backed datastore image mounted at `{loop_mount_path}`.")
     return True
 
 
@@ -1172,9 +1209,22 @@ def _run_logged_command(
     stderr_logs: list[str],
     failure_prefix: str,
     timeout_seconds: float = 7200,
+    progress: ExternalExportProgress | None = None,
+    step: str | None = None,
 ) -> SubprocessResult:
     try:
-        result = run_subprocess(command, timeout_seconds=timeout_seconds)
+        command_text = redact_command(command)
+        if progress is not None:
+            progress.post(step or "command", f"Starting `{command_text}`.", command=command_text)
+            result = run_subprocess_streaming(
+                command,
+                timeout_seconds=timeout_seconds,
+                on_stdout=lambda line: progress.post(step or "command_stdout", line, stdout_line=line, command=command_text),
+                on_stderr=lambda line: progress.post(step or "command_stderr", line, stderr_line=line, command=command_text),
+            )
+            progress.post(step or "command", f"Finished `{command_text}` with exit {result.returncode}.", command=command_text)
+        else:
+            result = run_subprocess(command, timeout_seconds=timeout_seconds)
     except RuntimeError as exc:
         raise RuntimeError(f"{failure_prefix} {exc}") from exc
     record_command_result(result, command_summaries, stdout_logs, stderr_logs)
@@ -1428,6 +1478,21 @@ def post_json(settings: AgentSettings, path: str, payload: dict[str, Any], token
     headers = {"X-Agent-Token": token} if token else None
     with httpx.Client(timeout=settings.timeout_seconds) as client:
         response = client.post(f"{base_url}{path}", json=payload, headers=headers)
+        response.raise_for_status()
+
+
+def post_progress_callback(
+    settings: AgentSettings,
+    callback_url: str | None,
+    fallback_path: str,
+    payload: dict[str, Any],
+    *,
+    token: str | None,
+) -> None:
+    headers = {"X-Agent-Token": token} if token else None
+    url = callback_url or f"{settings.api_base_url.rstrip('/')}{fallback_path}"
+    with httpx.Client(timeout=settings.timeout_seconds) as client:
+        response = client.post(url, json=payload, headers=headers)
         response.raise_for_status()
 
 

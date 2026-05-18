@@ -15,6 +15,19 @@ function formatHeartbeatAge(value: number | null, t: IntegrationsPageProps["t"])
   return `${value} ${t.secondsShort}`;
 }
 
+function formatAgeInMinutes(value: string | null, t: IntegrationsPageProps["t"]) {
+  if (!value) {
+    return t.notAvailable;
+  }
+
+  const ageMs = Date.now() - new Date(value).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < 0) {
+    return t.notAvailable;
+  }
+
+  return `${Math.floor(ageMs / 60000)} ${t.minutesShort}`;
+}
+
 export function IntegrationsPage({
   data,
   language,
@@ -109,6 +122,21 @@ export function IntegrationsPage({
               <span>{t.agentLastSeenAge}</span>
               <strong>{formatHeartbeatAge(data.agentStatus.last_seen_age_seconds, t)}</strong>
             </div>
+            <div className="summary-row">
+              <span>{t.agentHeartbeatAgeMinutes}</span>
+              <strong>{formatAgeInMinutes(data.agentStatus.last_heartbeat_at, t)}</strong>
+            </div>
+            <div className="summary-row">
+              <span>{t.agentReportAgeMinutes}</span>
+              <strong>{formatAgeInMinutes(data.agentStatus.last_report_at, t)}</strong>
+            </div>
+            {data.agentStatus.status === "degraded" ? (
+              <p className="integration-message">
+                {t.agentDegradedTroubleshooting}{" "}
+                <code>proxmox-backup-orchestrator-agent.timer</code>,{" "}
+                <code>proxmox-backup-orchestrator-agent.service</code>
+              </p>
+            ) : null}
             <p className="integration-message">{t.agentDescription}</p>
           </div>
         </article>

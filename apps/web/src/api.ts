@@ -158,6 +158,10 @@ export function getExternalBackupRuns() {
   return request<ExternalBackupRun[]>("/external-backups/runs");
 }
 
+export function getExternalBackupRun(runId: number) {
+  return request<ExternalBackupRun>(`/external-backups/runs/${runId}`);
+}
+
 export function prepareDisk(
   diskId: number,
   payload: {

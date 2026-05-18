@@ -1,16 +1,24 @@
+import { useEffect, useRef, useState } from "react";
+
+import { getExternalBackupRun } from "../api";
 import { DataTable } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatDateTime, getBackupStatusTone } from "../utils";
+import type { ExternalBackupRun } from "../types";
 import type { ActivityPageProps } from "./shared";
 
-function excerptLog(value: string | null, maxLength = 2000) {
+function isActiveRun(run: ExternalBackupRun) {
+  return run.status === "pending" || run.status === "running";
+}
+
+function excerptLog(value: string | null, maxLength = 32000) {
   if (!value) {
     return null;
   }
 
-  return value.length <= maxLength ? value : `${value.slice(0, maxLength)}\n...[truncated]`;
+  return value.length <= maxLength ? value : `...[truncated]\n${value.slice(-maxLength)}`;
 }
 
 export function ActivityPage({ data, externalBackupRuns, language, t }: ActivityPageProps) {
@@ -54,60 +62,17 @@ export function ActivityPage({ data, externalBackupRuns, language, t }: Activity
                       <strong>{run.current_step ?? t.notAvailable}</strong>
                       <br />
                       {run.progress_message ?? run.message ?? t.notAvailable}
+                      <br />
+                      <span className="muted-text">
+                        {t.externalBackupLastLogAt}: {formatDateTime(run.last_log_at, language, t.notAvailable)}
+                      </span>
                     </td>
                     <td>{run.target_path}</td>
                     <td>{formatDateTime(run.started_at, language, t.notAvailable)}</td>
                     <td>{formatDateTime(run.finished_at, language, t.notAvailable)}</td>
                     <td>{run.message ?? t.notAvailable}</td>
                     <td>
-                      <details className="log-details">
-                        <summary>{t.viewDetails}</summary>
-                        <div className="log-details-body">
-                          <p>
-                            <strong>{t.backupStatus}:</strong>{" "}
-                            <StatusBadge tone={getBackupStatusTone(run.status)}>
-                              {t.status[run.status]}
-                            </StatusBadge>
-                          </p>
-                          <p>
-                            <strong>{t.externalBackupResult}:</strong> {run.message ?? t.notAvailable}
-                          </p>
-                          <p>
-                            <strong>{t.externalBackupProgress}:</strong>{" "}
-                            {run.current_step ?? t.notAvailable} -{" "}
-                            {run.progress_message ?? t.notAvailable}
-                          </p>
-                          <p>
-                            <strong>{t.externalBackupLastLogAt}:</strong>{" "}
-                            {formatDateTime(run.last_log_at, language, t.notAvailable)}
-                          </p>
-                          <p>
-                            <strong>{t.externalBackupTargetPath}:</strong> {run.target_path}
-                          </p>
-                          <p>
-                            <strong>{t.pbsDatastore}:</strong> {run.datastore_name}
-                          </p>
-                          <p>
-                            <strong>{t.externalBackupReturnCode}:</strong>{" "}
-                            {run.return_code ?? t.notAvailable}
-                          </p>
-                          <p>
-                            <strong>{t.externalBackupCommand}:</strong>{" "}
-                            {run.command_summary ?? t.notAvailable}
-                          </p>
-                          <p>
-                            <strong>cwd:</strong> {run.execution_cwd ?? t.notAvailable}
-                          </p>
-                          <p>
-                            <strong>{t.externalBackupStdout}:</strong>
-                          </p>
-                          <pre>{excerptLog(run.stdout_log) ?? t.externalBackupNoLogs}</pre>
-                          <p>
-                            <strong>{t.externalBackupStderr}:</strong>
-                          </p>
-                          <pre>{excerptLog(run.stderr_log) ?? t.externalBackupNoLogs}</pre>
-                        </div>
-                      </details>
+                      <ExternalBackupRunDetails run={run} language={language} t={t} />
                     </td>
                   </tr>
                 ))}
@@ -159,4 +124,117 @@ export function ActivityPage({ data, externalBackupRuns, language, t }: Activity
       </section>
     </div>
   );
+}
+
+function ExternalBackupRunDetails({
+  run,
+  language,
+  t,
+}: {
+  run: ExternalBackupRun;
+  language: ActivityPageProps["language"];
+  t: ActivityPageProps["t"];
+}) {
+  const [open, setOpen] = useState(false);
+  const [liveRun, setLiveRun] = useState(run);
+  const stdoutRef = useRef<HTMLPreElement | null>(null);
+  const stderrRef = useRef<HTMLPreElement | null>(null);
+  const shouldStickStdout = useRef(true);
+  const shouldStickStderr = useRef(true);
+
+  useEffect(() => {
+    setLiveRun(run);
+  }, [run]);
+
+  useEffect(() => {
+    if (!open || !isActiveRun(liveRun)) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void getExternalBackupRun(liveRun.id).then(setLiveRun).catch(() => undefined);
+    }, 2000);
+
+    return () => window.clearInterval(intervalId);
+  }, [liveRun.id, liveRun.status, open]);
+
+  useEffect(() => {
+    scrollLogToBottom(stdoutRef.current, shouldStickStdout.current);
+    scrollLogToBottom(stderrRef.current, shouldStickStderr.current);
+  }, [liveRun.stdout_log, liveRun.stderr_log]);
+
+  return (
+    <details className="log-details" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>{t.viewDetails}</summary>
+      <div className="log-details-body">
+        <p>
+          <strong>{t.backupStatus}:</strong>{" "}
+          <StatusBadge tone={getBackupStatusTone(liveRun.status)}>
+            {t.status[liveRun.status]}
+          </StatusBadge>
+        </p>
+        <p>
+          <strong>{t.externalBackupResult}:</strong> {liveRun.message ?? t.notAvailable}
+        </p>
+        <p>
+          <strong>{t.externalBackupProgress}:</strong> {liveRun.current_step ?? t.notAvailable} -{" "}
+          {liveRun.progress_message ?? t.notAvailable}
+        </p>
+        <p>
+          <strong>{t.externalBackupLastLogAt}:</strong>{" "}
+          {formatDateTime(liveRun.last_log_at, language, t.notAvailable)}
+        </p>
+        <p>
+          <strong>{t.externalBackupTargetPath}:</strong> {liveRun.target_path}
+        </p>
+        <p>
+          <strong>{t.pbsDatastore}:</strong> {liveRun.datastore_name}
+        </p>
+        <p>
+          <strong>{t.externalBackupReturnCode}:</strong> {liveRun.return_code ?? t.notAvailable}
+        </p>
+        <p>
+          <strong>{t.externalBackupCommand}:</strong> {liveRun.command_summary ?? t.notAvailable}
+        </p>
+        <p>
+          <strong>cwd:</strong> {liveRun.execution_cwd ?? t.notAvailable}
+        </p>
+        <p>
+          <strong>{t.externalBackupStdout}:</strong>
+        </p>
+        <pre
+          className="log-pre"
+          onScroll={(event) => {
+            shouldStickStdout.current = isScrolledNearBottom(event.currentTarget);
+          }}
+          ref={stdoutRef}
+        >
+          {excerptLog(liveRun.stdout_log) ?? t.externalBackupNoLogs}
+        </pre>
+        <p>
+          <strong>{t.externalBackupStderr}:</strong>
+        </p>
+        <pre
+          className="log-pre"
+          onScroll={(event) => {
+            shouldStickStderr.current = isScrolledNearBottom(event.currentTarget);
+          }}
+          ref={stderrRef}
+        >
+          {excerptLog(liveRun.stderr_log) ?? t.externalBackupNoLogs}
+        </pre>
+      </div>
+    </details>
+  );
+}
+
+function isScrolledNearBottom(element: HTMLElement) {
+  return element.scrollHeight - element.scrollTop - element.clientHeight < 32;
+}
+
+function scrollLogToBottom(element: HTMLElement | null, shouldScroll: boolean) {
+  if (!element || !shouldScroll) {
+    return;
+  }
+  element.scrollTop = element.scrollHeight;
 }

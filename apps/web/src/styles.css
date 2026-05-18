@@ -305,6 +305,11 @@ select {
   text-decoration: underline;
 }
 
+.muted-text {
+  color: #6b7f90;
+  font-size: 0.84rem;
+}
+
 .filters-bar {
   display: grid;
   grid-template-columns: minmax(220px, 1.4fr) repeat(2, minmax(160px, 0.8fr));

@@ -56,6 +56,10 @@ class Settings:
     pbs_agent_base_url: str = os.getenv("PBS_AGENT_BASE_URL", "http://pbs-host:8081")
     pbs_agent_token: str = os.getenv("PBS_AGENT_TOKEN", "")
     pbs_agent_timeout_seconds: float = float(os.getenv("PBS_AGENT_TIMEOUT_SECONDS", "7200"))
+    external_backup_callback_base_url: str = os.getenv(
+        "EXTERNAL_BACKUP_CALLBACK_BASE_URL",
+        "http://api:8000/api/v1",
+    )
     external_loop_datastore_size_gb: int = int(os.getenv("AGENT_LOOP_DATASTORE_SIZE_GB", "500"))
     agent_stale_after_minutes: int = int(os.getenv("AGENT_STALE_AFTER_MINUTES", "10"))
 

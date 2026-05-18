@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from app.core.config import get_settings
 from app.models import DiskPreparationMode, ExternalBackupMode, ExternalDisk
 from app.services.host_agent import HostAgentError, get_host_agent_client, get_pbs_agent_client
 
@@ -39,6 +40,7 @@ class ExternalBackupAgentBridge:
     def __init__(self) -> None:
         self.host_client = get_host_agent_client()
         self.pbs_client = get_pbs_agent_client()
+        self.settings = get_settings()
 
     def prepare_external_datastore(
         self,
@@ -49,7 +51,7 @@ class ExternalBackupAgentBridge:
     ) -> AgentCommandResult:
         payload: dict[str, object] = {"mount_path": mount_path, "target_path": target_path, "mode": mode.value}
         if run_id is not None:
-            payload["callback_run_id"] = run_id
+            payload.update(self._callback_payload(run_id))
         return self._run_command(
             self.pbs_client,
             "/prepare-external-datastore",
@@ -84,7 +86,7 @@ class ExternalBackupAgentBridge:
             "mode": mode.value,
         }
         if run_id is not None:
-            payload["callback_run_id"] = run_id
+            payload.update(self._callback_payload(run_id))
         return self._run_command(self.pbs_client, "/run-external-export", payload)
 
     def inspect_disk_on_pbs(self, disk: ExternalDisk) -> AgentCommandResult:
@@ -117,6 +119,14 @@ class ExternalBackupAgentBridge:
             return_code=result.return_code,
             payload=result.payload,
         )
+
+    def _callback_payload(self, run_id: int) -> dict[str, object]:
+        base_url = self.settings.external_backup_callback_base_url.rstrip("/")
+        return {
+            "callback_run_id": run_id,
+            "callback_url": f"{base_url}/external-backups/runs/{run_id}/log",
+            "callback_token": self.settings.pbs_agent_token,
+        }
 
 
 def get_external_backup_agent_bridge() -> ExternalBackupAgentBridge:

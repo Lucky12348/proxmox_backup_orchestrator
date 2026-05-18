@@ -135,10 +135,11 @@ export function useAppData() {
     void load();
   }, []);
 
-  const hasRunningExternalBackup = data?.externalBackupRuns.some((run) => run.status === "running") ?? false;
+  const hasActiveExternalBackup =
+    data?.externalBackupRuns.some((run) => run.status === "pending" || run.status === "running") ?? false;
 
   useEffect(() => {
-    if (!hasRunningExternalBackup) {
+    if (!hasActiveExternalBackup) {
       return;
     }
 
@@ -153,7 +154,7 @@ export function useAppData() {
     }, 2000);
 
     return () => window.clearInterval(intervalId);
-  }, [hasRunningExternalBackup]);
+  }, [hasActiveExternalBackup]);
 
   async function mutateVmCritical(vmId: number, critical: boolean) {
     setSavingKey(`vm-${vmId}`);
