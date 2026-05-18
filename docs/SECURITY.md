@@ -83,7 +83,25 @@ No browser, LAN client, or internet host should be able to call the agent ports.
 
 ## Proxmox Firewall `host.fw` for Port 8090
 
-Example `/etc/pve/firewall/host.fw`:
+The node-local host firewall file is:
+
+```text
+/etc/pve/nodes/<node-name>/host.fw
+```
+
+Example:
+
+```text
+/etc/pve/nodes/promox/host.fw
+```
+
+Cluster-wide firewall configuration is separate and lives in:
+
+```text
+/etc/pve/firewall/cluster.fw
+```
+
+Example host rule file:
 
 ```ini
 [OPTIONS]
@@ -105,7 +123,23 @@ Keep any existing management rules required for your environment.
 
 ## PBS `nftables` for Port 8091
 
-Example `/etc/nftables.conf`:
+Simple deployed variant with default accept policy:
+
+```nft
+table inet filter {
+  chain input {
+    type filter hook input priority 0;
+    policy accept;
+
+    ip saddr <app-vm-ip> tcp dport 8091 accept
+    tcp dport 8091 drop
+  }
+}
+```
+
+This keeps the rest of the PBS VM networking unchanged while restricting the PBS agent port to the app VM.
+
+Stricter default-drop example `/etc/nftables.conf`:
 
 ```nft
 #!/usr/sbin/nft -f

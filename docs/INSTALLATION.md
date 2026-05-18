@@ -111,17 +111,24 @@ docker compose -f infra/docker/docker-compose.yml up -d --build
 docker compose -f infra/docker/docker-compose.yml ps
 ```
 
-Health check:
+Login and protected API check:
 
 ```bash
-curl http://127.0.0.1:8000/api/v1/health
+TOKEN="$(
+  curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/token \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --data-urlencode "username=<admin-username>" \
+    --data-urlencode "password=<admin-password>" \
+  | jq -r .access_token
+)"
+
+curl -H "Authorization: Bearer ${TOKEN}" \
+  http://127.0.0.1:8000/api/v1/disks/preferred
 ```
 
-Expected response:
+Expected result: the login request returns an access token, and the preferred disks request returns a JSON array. An empty array is valid before any preferred disk has been saved.
 
-```json
-{"status":"ok"}
-```
+Install `jq` first if it is not available, or copy the `access_token` from the login response manually.
 
 ## 3. Install the Proxmox Host Agent
 
@@ -238,7 +245,16 @@ On PBS, configure `nftables` to allow TCP `8091` from `<app-vm-ip>` only. See [S
 From the app VM:
 
 ```bash
-curl http://127.0.0.1:8000/api/v1/health
+TOKEN="$(
+  curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/token \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --data-urlencode "username=<admin-username>" \
+    --data-urlencode "password=<admin-password>" \
+  | jq -r .access_token
+)"
+
+curl -H "Authorization: Bearer ${TOKEN}" \
+  http://127.0.0.1:8000/api/v1/disks/preferred
 curl -H "X-Agent-Token: <host-agent-token>" http://<proxmox-host>:8090/health
 curl -H "X-Agent-Token: <pbs-agent-token>" http://<pbs-vm>:8091/health
 ```
