@@ -515,6 +515,7 @@ def eject_dedicated_pbs_datastore_result(
                 manager,
                 datastore_name,
                 settings,
+                umount_result,
                 command_summaries,
                 stdout_logs,
                 stderr_logs,
@@ -1922,6 +1923,7 @@ def _handle_busy_dedicated_datastore_unmount(
     manager: str,
     datastore_name: str,
     settings: AgentSettings,
+    original_umount_result: SubprocessResult,
     command_summaries: list[str],
     stdout_logs: list[str],
     stderr_logs: list[str],
@@ -1929,11 +1931,6 @@ def _handle_busy_dedicated_datastore_unmount(
     fuser_result = _run_fuser_verbose(mount_path)
     record_command_result(fuser_result, command_summaries, stdout_logs, stderr_logs)
     fuser_output = _combined_command_output(fuser_result)
-    if not _only_pbs_services_block_mount(fuser_output):
-        raise RuntimeError(
-            f"Refusing to eject because `{mount_path}` is busy with non-PBS blocker processes.\n"
-            f"fuser output:\n{fuser_output or '(no fuser output)'}"
-        )
 
     if _pbs_datastore_has_running_tasks(manager, datastore_name, settings, command_summaries, stdout_logs, stderr_logs):
         raise RuntimeError(
@@ -1952,6 +1949,7 @@ def _handle_busy_dedicated_datastore_unmount(
         raise RuntimeError(format_command_failure("Failed to sync filesystem buffers before stopping PBS services.", sync_result))
 
     stopped_services: list[str] = []
+    retry_result: SubprocessResult | None = None
     try:
         for service in ("proxmox-backup-proxy.service", "proxmox-backup.service"):
             result = run_subprocess(["systemctl", "stop", service], timeout_seconds=60)
@@ -1961,23 +1959,31 @@ def _handle_busy_dedicated_datastore_unmount(
             stopped_services.append(service)
 
         time.sleep(3)
+        sync_result = run_subprocess(["sync"], timeout_seconds=60)
+        record_command_result(sync_result, command_summaries, stdout_logs, stderr_logs)
+        if sync_result.returncode != 0:
+            raise RuntimeError(format_command_failure("Failed to sync filesystem buffers before retrying unmount.", sync_result))
+
         retry_result = run_subprocess(["umount", str(mount_path)], timeout_seconds=settings.export_timeout_seconds)
         record_command_result(retry_result, command_summaries, stdout_logs, stderr_logs)
-        if retry_result.returncode != 0:
-            raise RuntimeError(
-                format_command_failure(
-                    f"Failed to unmount `{mount_path}` after stopping PBS services. fuser output:\n{fuser_output}",
-                    retry_result,
-                )
-            )
     finally:
         for service in ("proxmox-backup.service", "proxmox-backup-proxy.service"):
             if service not in stopped_services:
                 continue
-            result = run_subprocess(["systemctl", "restart", service], timeout_seconds=60)
+            result = run_subprocess(["systemctl", "start", service], timeout_seconds=60)
             record_command_result(result, command_summaries, stdout_logs, stderr_logs)
             if result.returncode != 0:
-                stderr_logs.append(format_command_failure(f"Failed to restart `{service}` after eject attempt.", result))
+                stderr_logs.append(format_command_failure(f"Failed to start `{service}` after eject attempt.", result))
+
+    if (retry_result is not None and retry_result.returncode != 0) or _find_mount_source(mount_path):
+        details = [
+            f"Refusing to eject because `{mount_path}` is still mounted after stopping PBS services.",
+            format_command_failure("Original unmount attempt failed.", original_umount_result),
+            f"fuser output:\n{fuser_output or '(no fuser output)'}",
+        ]
+        if retry_result is not None:
+            details.append(format_command_failure("Second unmount attempt failed.", retry_result))
+        raise RuntimeError("\n".join(details))
 
 
 def _run_fuser_verbose(mount_path: Path) -> SubprocessResult:
