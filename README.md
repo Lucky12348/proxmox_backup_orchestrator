@@ -1,81 +1,85 @@
-# proxmox_backup_orchestrator
+# Proxmox Backup Orchestrator
 
-Production-oriented monorepo scaffold for a personal Proxmox / Proxmox Backup Server backup orchestration application.
+Proxmox Backup Orchestrator coordinates removable-disk backups for a small Proxmox and Proxmox Backup Server environment. The application runs in a VM named `backupOrchestrator`; privileged disk and VM operations stay on purpose-built root agents running on the Proxmox host and the PBS VM.
 
-## Structure
+The normal production flow is:
+
+1. Detect an external USB disk on the Proxmox host.
+2. Pass that USB disk through to the PBS VM.
+3. Prepare or reuse a dedicated PBS datastore on the external disk.
+4. Sync backups from the main PBS datastore to the external datastore.
+5. Safely eject the disk from the UI by unmounting it in PBS and removing USB passthrough from the PBS VM.
+
+**Safety warning:** dedicated disk mode can format the selected disk on first preparation. Use a disk dedicated to external PBS backups and verify the selected USB device before confirming destructive preparation.
+
+## Architecture
 
 ```text
-proxmox_backup_orchestrator/
-|- apps/
-|  |- agent/    # Host-side Python agent placeholder
-|  |- api/      # FastAPI backend
-|  `- web/      # React + Vite frontend
-|- docs/        # Architecture and setup documentation
-|- infra/
-|  |- docker/   # Docker Compose and container files
-|  `- scripts/  # Helper scripts
-`- packages/
-   |- types/    # Shared schemas / contracts
-   `- utils/    # Shared utilities
+Browser
+  |
+  v
+backupOrchestrator VM
+  Docker Compose
+    - Web UI
+    - FastAPI API
+    - Postgres
+  |
+  | HOST_AGENT_BASE_URL + HOST_AGENT_TOKEN
+  v
+Proxmox host
+  /opt/proxmox-backup-orchestrator-agent
+  proxmox-backup-orchestrator-agent-http.service
+  HTTP port 8090
+  root operations:
+    - inspect USB disks
+    - attach/remove USB passthrough on PBS VM
+  |
+  | USB passthrough
+  v
+PBS VM
+  /opt/proxmox-backup-orchestrator-pbs-agent
+  proxmox-backup-orchestrator-pbs-agent-http.service
+  HTTP port 8091
+  root operations:
+    - prepare/reuse external datastore
+    - run PBS datastore sync
+    - unmount datastore for safe eject
 ```
 
-## Purpose
+Ports `8090` and `8091` must not be exposed broadly. The Proxmox firewall should allow port `8090` only from the app VM IP, and PBS `nftables` should allow port `8091` only from the app VM IP.
 
-This repository is intended to orchestrate backups around a small Proxmox environment:
+## Main Features
 
-- a backend API to coordinate state and workflows
-- a frontend dashboard to monitor coverage and removable media
-- a lightweight agent running on a Proxmox host
-- PostgreSQL for application state
-- Proxmox Backup Server as the backup engine
-- `ntfy` for notifications
+- Single-user web authentication with bcrypt password hashing.
+- Proxmox and PBS API integration through API tokens.
+- Host root agent for USB discovery and QEMU USB passthrough.
+- PBS root agent for dedicated external datastore preparation, sync, and unmount.
+- Dedicated external datastore reuse after the first preparation.
+- Safe eject workflow that unmounts the datastore and detaches the USB device from the PBS VM.
+- Activity tracking and cleanup for external backup operations.
+- Security-first deployment model with random shared tokens and firewall isolation.
 
-## External Backup Workflow
+## Production Documentation
 
-The recommended external backup workflow uses a dedicated PBS datastore disk:
+- [Installation](docs/INSTALLATION.md)
+- [Operations](docs/OPERATIONS.md)
+- [Disaster Recovery](docs/DISASTER_RECOVERY.md)
+- [Security](docs/SECURITY.md)
 
-1. The Proxmox host agent detects a trusted USB disk.
-2. The API hands the USB device to the PBS VM.
-3. The PBS agent destructively formats the disk as ext4.
-4. The disk is mounted at `/mnt/pbo/<serial>/pbs-datastore`.
-5. PBS sync copies backups from the configured source datastore, usually `backup-store`, into the dedicated disk datastore.
+Older architecture notes remain available in [docs/architecture.md](docs/architecture.md).
 
-This path is intentionally destructive: existing data on the selected disk is removed. The old coexistence loop-backed mode remains as an advanced legacy path behind `EXTERNAL_BACKUP_LEGACY_COEXISTENCE_ENABLED=true`.
+## Secrets
 
-Restore concept: reinstall PBS if needed, attach the disk, mount `/mnt/pbo/<serial>/pbs-datastore`, then add that path back as a PBS datastore.
+Do not commit `.env`. It contains application credentials, Proxmox/PBS API tokens, JWT signing material, and agent shared tokens. Generate strong random secrets with:
 
-## Quick Start
+```bash
+openssl rand -hex 32
+```
 
-1. Copy `.env.example` to `.env` and adjust values, or run `make bootstrap`.
-2. Start local services with `make up`.
-3. Run development commands from each app directory as needed.
-
-See [docs/setup.md](docs/setup.md) for details.
-
-## Authentication
-
-The API uses a single local admin account when `AUTH_ENABLED=true`.
+For Docker Compose `.env` files, bcrypt hashes must escape every `$` as `$$`:
 
 ```env
-AUTH_ENABLED=true
-AUTH_USERNAME=admin
 AUTH_PASSWORD_HASH=$$2b$$12$$replace-with-generated-bcrypt-hash
-AUTH_SECRET_KEY=replace-with-random-secret
-AUTH_TOKEN_EXPIRE_MINUTES=480
 ```
 
-Generate the password hash from the repository root:
-
-```powershell
-py scripts/generate_password_hash.py
-```
-
-The script prints a Docker Compose-safe `AUTH_PASSWORD_HASH=<hash>` line. In a docker-compose `.env` file, bcrypt hashes must escape every `$` as `$$`; otherwise Compose interpolates the value and the API may receive a truncated hash such as `$2b$12`.
-
-Bcrypt only accepts passwords up to 72 bytes after UTF-8 encoding, so long passphrases with non-ASCII characters can hit the limit sooner than expected.
-
-To debug hash verification inside the API environment:
-
-```powershell
-py -c "from passlib.hash import bcrypt; print(bcrypt.verify('your-password', '$2b$12$paste_the_runtime_hash_here'))"
-```
+Never use `code_secret`.
