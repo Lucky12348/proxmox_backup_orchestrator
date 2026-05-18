@@ -74,6 +74,18 @@ class DiskHandoffUsbMatchTests(TestCase):
         self.assertEqual(mapping, "2-5")
         self.assertNotEqual(mapping, "2-2")
 
+    def test_qemu_mapping_uses_busnum_and_port_plus_one_when_usbpath_missing(self):
+        mapping = _qemu_usb_host_mapping(
+            {
+                "busnum": 1,
+                "port": 8,
+                "vendid": "1058",
+                "prodid": "2630",
+            }
+        )
+
+        self.assertEqual(mapping, "1-9")
+
     def test_qemu_mapping_falls_back_to_vendor_product_id(self):
         result = _find_matching_usb_device(
             [
@@ -82,7 +94,6 @@ class DiskHandoffUsbMatchTests(TestCase):
                     "product": "Game Drive",
                     "vendid": "1058",
                     "prodid": "2630",
-                    "usbpath": "5",
                 }
             ],
             _disk(),

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from time import sleep
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -23,14 +23,21 @@ class DiskHandoffStatus:
     message: str
 
 
-def handoff_disk_to_pbs(db: Session, disk: ExternalDisk, *, confirmation: bool) -> DiskHandoffStatus:
+ProgressCallback = Callable[[str, str, str | None], None]
+
+
+def handoff_disk_to_pbs(
+    db: Session,
+    disk: ExternalDisk,
+    *,
+    confirmation: bool,
+    progress: ProgressCallback | None = None,
+) -> DiskHandoffStatus:
     if not confirmation:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="USB handoff to PBS requires explicit confirmation.",
         )
-    if disk.pbs_handoff_slot or disk.pbs_visible:
-        return get_pbs_disk_visibility(db, disk)
     if disk.mount_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -44,23 +51,10 @@ def handoff_disk_to_pbs(db: Session, disk: ExternalDisk, *, confirmation: bool) 
     except HTTPException as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="disk not connected") from exc
     vm_config = client.get_qemu_config(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id)
-    slot = disk.pbs_handoff_slot or _find_free_usb_slot(vm_config)
-
-    try:
-        client.set_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot, device["mapping"])
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=(
-                f"Failed to attach USB disk `{disk.serial_number}` to the PBS VM "
-                f"on node `{settings.pbs_execution_vm_node}` VM `{settings.pbs_execution_vm_id}` "
-                f"slot `{slot}` using Proxmox USB mapping `{device['mapping']}`"
-                f"{_selected_usb_detail(device)}: {exc}"
-            ),
-        ) from exc
+    slot = disk.pbs_handoff_slot if disk.pbs_handoff_slot and vm_config.get(disk.pbs_handoff_slot) else _find_free_usb_slot(vm_config)
 
     disk.handoff_status = "attached_to_pbs"
-    disk.proxmox_usb_mapping = device["mapping"]
+    disk.proxmox_usb_mapping = None
     disk.pbs_handoff_slot = slot
     disk.pbs_visible = False
     disk.pbs_device_path = None
@@ -68,7 +62,49 @@ def handoff_disk_to_pbs(db: Session, disk: ExternalDisk, *, confirmation: bool) 
     db.commit()
     db.refresh(disk)
 
-    return wait_for_pbs_disk_visibility(db, disk, attempts=8, delay_seconds=2.0)
+    attempts = max(1, int(120 / 2))
+    last_error: str | None = None
+    for index, candidate in enumerate(_handoff_candidates(device), start=1):
+        _report(progress, "handoff_disk", f"Selected USB mapping `{candidate['mapping']}` for `{disk.serial_number}`.")
+        _attach_usb_candidate(client, settings, disk, slot, candidate, progress)
+        disk.handoff_status = "attached_to_pbs"
+        disk.proxmox_usb_mapping = candidate["mapping"]
+        disk.pbs_handoff_slot = slot
+        disk.pbs_visible = False
+        disk.pbs_device_path = None
+        db.add(disk)
+        db.commit()
+        db.refresh(disk)
+        try:
+            return wait_for_pbs_disk_visibility(
+                db,
+                disk,
+                attempts=attempts,
+                delay_seconds=2.0,
+                progress=progress,
+            )
+        except HTTPException as exc:
+            last_error = str(exc.detail)
+            if index >= 2 or not _has_vendor_product_mapping(device):
+                break
+            _report(progress, "handoff_disk", f"PBS did not see disk after `{candidate['mapping']}`. Retrying with vendor/product mapping.")
+            client.delete_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot)
+            _report(progress, "handoff_disk", f"Removed USB slot `{slot}` before fallback retry.")
+            disk.pbs_visible = False
+            disk.pbs_device_path = None
+            disk.handoff_status = "attached_to_pbs"
+            db.add(disk)
+            db.commit()
+
+    try:
+        client.delete_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot)
+        _report(progress, "handoff_disk", f"Removed USB slot `{slot}` after failed PBS visibility checks.")
+    except Exception as exc:
+        _report(progress, "handoff_disk", f"Failed to remove USB slot `{slot}` after failed handoff: {exc}")
+    raise HTTPException(
+        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+        detail=last_error or "The disk was attached to the PBS VM, but the PBS agent could not see it yet.",
+    )
 
 
 def detach_disk_from_pbs(db: Session, disk: ExternalDisk) -> DiskHandoffStatus:
@@ -101,19 +137,22 @@ def wait_for_pbs_disk_visibility(
     *,
     attempts: int = 5,
     delay_seconds: float = 1.5,
+    progress: ProgressCallback | None = None,
 ) -> DiskHandoffStatus:
     pbs_agent = get_pbs_agent_client()
     last_error: str | None = None
 
-    for _ in range(attempts):
+    for attempt in range(1, attempts + 1):
         try:
             result = pbs_agent.post("/inspect-disk", {"disk": disk.serial_number})
         except HostAgentError as exc:
             last_error = str(exc)
+            _report(progress, "inspect_disk", f"PBS inspect retry {attempt}/{attempts} failed: {last_error}")
             sleep(delay_seconds)
             continue
 
         device_path = _extract_pbs_device_path(result.payload)
+        _report(progress, "inspect_disk", f"PBS inspect retry {attempt}/{attempts} succeeded: {device_path or disk.serial_number}.")
         disk.pbs_visible = True
         disk.pbs_device_path = device_path
         disk.handoff_status = "visible_on_pbs"
@@ -158,6 +197,56 @@ def get_pbs_disk_visibility(db: Session, disk: ExternalDisk) -> DiskHandoffStatu
     db.commit()
     db.refresh(disk)
     return _build_status(disk, "Disk is not yet visible on PBS.")
+
+
+def _attach_usb_candidate(
+    client: ProxmoxClient,
+    settings,
+    disk: ExternalDisk,
+    slot: str,
+    device: dict[str, str],
+    progress: ProgressCallback | None,
+) -> None:
+    mapping = device["mapping"]
+    usb3 = _usb3_enabled(device)
+    payload = f"{slot}=host={mapping}" + (f",usb3={1 if usb3 else 0}" if usb3 is not None else "")
+    _report(progress, "handoff_disk", f"Attach payload: `{payload}`.")
+    try:
+        client.set_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot, mapping, usb3=usb3)
+        vm_config = client.get_qemu_config(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                f"Failed to attach USB disk `{disk.serial_number}` to the PBS VM "
+                f"on node `{settings.pbs_execution_vm_node}` VM `{settings.pbs_execution_vm_id}` "
+                f"slot `{slot}` using Proxmox USB mapping `{mapping}`"
+                f"{_selected_usb_detail(device)}: {exc}"
+            ),
+        ) from exc
+
+    config_value = str(vm_config.get(slot) or "")
+    _report(progress, "handoff_disk", f"VM config verification for `{slot}`: `{config_value or 'missing'}`.")
+    if not config_value or f"host={mapping}" not in config_value:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"USB attach failed: VM config does not contain `{slot}=host={mapping}` after Proxmox API update.",
+        )
+
+
+def _handoff_candidates(device: dict[str, str]) -> list[dict[str, str]]:
+    candidates = [device]
+    vendor_product_mapping = _vendor_product_mapping(device)
+    if vendor_product_mapping and vendor_product_mapping != device["mapping"]:
+        fallback = dict(device)
+        fallback["mapping"] = vendor_product_mapping
+        fallback["mapping_source"] = "vendor_product"
+        candidates.append(fallback)
+    return candidates
+
+
+def _has_vendor_product_mapping(device: dict[str, str]) -> bool:
+    return _vendor_product_mapping(device) is not None
 
 
 def _find_matching_usb_device(devices: list[dict[str, Any]], disk: ExternalDisk) -> dict[str, str]:
@@ -261,20 +350,50 @@ def _qemu_usb_host_mapping(device: dict[str, Any]) -> str | None:
     if busnum and usbpath:
         return f"{busnum}-{usbpath}"
 
+    port = _candidate_value(device, "port")
+    if busnum and port is not None:
+        try:
+            return f"{busnum}-{int(port) + 1}"
+        except ValueError:
+            pass
+
+    return _vendor_product_mapping(device)
+
+
+def _vendor_product_mapping(device: dict[str, Any]) -> str | None:
     vendid = _candidate_value(device, "vendid", "vendorid", "vendor_id")
     prodid = _candidate_value(device, "prodid", "productid", "product_id")
     if vendid and prodid:
         return f"{vendid}:{prodid}"
+    return None
 
+
+def _usb3_enabled(device: dict[str, Any]) -> bool | None:
+    speed = _candidate_value(device, "speed", "speed_mbps")
+    if speed is None:
+        return None
+    try:
+        speed_value = int(float(speed))
+    except ValueError:
+        return None
+    if speed_value >= 5000:
+        return True
+    if speed_value <= 480:
+        return False
     return None
 
 
 def _usb_debug_path(device: dict[str, Any]) -> str | None:
-    return _candidate_value(device, "usbpath", "path", "port", "busport", "id")
+    return _candidate_value(device, "usbpath", "path", "busport", "id")
 
 
 def _build_usb_match(device: dict[str, Any], mapping: str) -> dict[str, str]:
-    return {"mapping": mapping, "summary": _summarize_usb_devices([device])}
+    result = {"mapping": mapping, "summary": _summarize_usb_devices([device])}
+    for key in ("vendid", "vendorid", "vendor_id", "prodid", "productid", "product_id", "speed", "speed_mbps"):
+        value = _candidate_value(device, key)
+        if value:
+            result[key] = value
+    return result
 
 
 def _selected_usb_detail(device: dict[str, str]) -> str:
@@ -441,3 +560,8 @@ def _build_status(disk: ExternalDisk, message: str) -> DiskHandoffStatus:
         pbs_device_path=disk.pbs_device_path,
         message=message,
     )
+
+
+def _report(progress: ProgressCallback | None, step: str, message: str) -> None:
+    if progress is not None:
+        progress(step, message, message)

@@ -223,7 +223,18 @@ def execute_external_backup_run(run_id: int) -> None:
                 step="handoff_disk",
                 message="Handing off USB disk to PBS VM.",
             )
-            handoff_status = handoff_disk_to_pbs(db, disk, confirmation=True)
+            handoff_status = handoff_disk_to_pbs(
+                db,
+                disk,
+                confirmation=True,
+                progress=lambda step, message, line=None: append_external_backup_run_log(
+                    db,
+                    run.id,
+                    step=step,
+                    message=message,
+                    line=line,
+                ),
+            )
             append_external_backup_run_log(
                 db,
                 run.id,

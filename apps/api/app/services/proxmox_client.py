@@ -61,10 +61,13 @@ class ProxmoxClient:
         data = self._get(f"nodes/{node_name}/qemu/{vm_id}/config")
         return data if isinstance(data, dict) else {}
 
-    def set_qemu_usb_device(self, node_name: str, vm_id: int, slot: str, host_mapping: str) -> None:
+    def set_qemu_usb_device(self, node_name: str, vm_id: int, slot: str, host_mapping: str, *, usb3: bool | None = None) -> None:
+        value = f"host={host_mapping}"
+        if usb3 is not None:
+            value = f"{value},usb3={1 if usb3 else 0}"
         self._post(
             f"nodes/{node_name}/qemu/{vm_id}/config",
-            data={slot: f"host={host_mapping}"},
+            data={slot: value},
         )
 
     def delete_qemu_usb_device(self, node_name: str, vm_id: int, slot: str) -> None:
