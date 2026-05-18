@@ -19,10 +19,48 @@ from agent.main import (
     prepare_dedicated_pbs_datastore_result,
     prepare_external_datastore_result,
     run_external_export_result,
+    qemu_config_result,
+    qemu_usb_attach_result,
+    qemu_usb_detach_result,
 )
 
 
 class ExternalExportDatastoreCreateTests(TestCase):
+    def test_qemu_usb_attach_runs_qm_set(self):
+        commands: list[list[str]] = []
+
+        def fake_run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResult:
+            commands.append(command)
+            return SubprocessResult(command, 0, "updated", "")
+
+        with patch("agent.main.run_subprocess", side_effect=fake_run_subprocess):
+            result = qemu_usb_attach_result(100, "usb0", "1-9", False)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(commands, [["qm", "set", "100", "-usb0", "host=1-9,usb3=0"]])
+
+    def test_qemu_usb_detach_runs_qm_delete(self):
+        commands: list[list[str]] = []
+
+        def fake_run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResult:
+            commands.append(command)
+            return SubprocessResult(command, 0, "updated", "")
+
+        with patch("agent.main.run_subprocess", side_effect=fake_run_subprocess):
+            result = qemu_usb_detach_result(100, "usb0")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(commands, [["qm", "set", "100", "-delete", "usb0"]])
+
+    def test_qemu_config_returns_qm_config_output(self):
+        with patch(
+            "agent.main.run_subprocess",
+            return_value=SubprocessResult(["qm", "config", "100"], 0, "usb0: host=1-9,usb3=0", ""),
+        ):
+            result = qemu_config_result(100)
+
+        self.assertEqual(result["config"], "usb0: host=1-9,usb3=0")
+
     def test_bytes_to_gb_parses_human_readable_sizes(self):
         self.assertGreater(bytes_to_gb("3.6T"), 3000)
         self.assertGreaterEqual(bytes_to_gb("750G"), 749)

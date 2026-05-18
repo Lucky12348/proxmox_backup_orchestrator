@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 
+from app.services.host_agent import HostAgentResult
 from app.services.disk_handoff import (
     _attach_usb_candidate,
     _find_matching_usb_device,
@@ -27,14 +28,24 @@ def _settings():
     return SimpleNamespace(pbs_execution_vm_node="pve", pbs_execution_vm_id=100)
 
 
+def _host_agent_result(command: str, stdout: str = ""):
+    return HostAgentResult(
+        ok=True,
+        message="ok",
+        stdout_log=stdout,
+        stderr_log=None,
+        command_summary=command,
+        execution_cwd="/",
+        return_code=0,
+        payload={"config": stdout} if stdout else {},
+    )
+
+
 class _FakeProxmoxClient:
     def __init__(self, configs):
         self.configs = list(configs)
         self.get_calls = 0
         self.set_calls = []
-
-    def set_qemu_usb_device(self, node_name, vm_id, slot, host_mapping, *, usb3=None):
-        self.set_calls.append((slot, host_mapping, usb3))
 
     def get_qemu_config(self, node_name, vm_id):
         self.get_calls += 1
@@ -180,7 +191,11 @@ class DiskHandoffUsbMatchTests(TestCase):
         client = _FakeProxmoxClient([{}, {}, {"usb0": "host=1-9,usb3=0"}])
         progress: list[str] = []
 
-        with patch("app.services.disk_handoff.sleep"):
+        with (
+            patch("app.services.disk_handoff.sleep"),
+            patch("app.services.disk_handoff._attach_usb_slot_via_host_agent", return_value=_host_agent_result("qm set 100 -usb0 host=1-9,usb3=0")) as attach,
+            patch("app.services.disk_handoff._get_qemu_config_usb_map", side_effect=[{}, {}, {"usb0": "host=1-9,usb3=0"}]),
+        ):
             _attach_usb_candidate(
                 client,
                 _settings(),
@@ -190,14 +205,17 @@ class DiskHandoffUsbMatchTests(TestCase):
                 lambda step, message, line=None: progress.append(message),
             )
 
-        self.assertEqual(client.set_calls, [("usb0", "1-9", False)])
-        self.assertEqual(client.get_calls, 3)
+        attach.assert_called_once()
         self.assertTrue(any("attempt 3/15" in message for message in progress))
 
     def test_attach_verification_accepts_raw_mapping_config_value(self):
         client = _FakeProxmoxClient([{"usb0": "1-9,usb3=0"}])
 
-        with patch("app.services.disk_handoff.sleep"):
+        with (
+            patch("app.services.disk_handoff.sleep"),
+            patch("app.services.disk_handoff._attach_usb_slot_via_host_agent", return_value=_host_agent_result("qm set 100 -usb0 host=1-9,usb3=0")),
+            patch("app.services.disk_handoff._get_qemu_config_usb_map", return_value={"usb0": "1-9,usb3=0"}),
+        ):
             _attach_usb_candidate(
                 client,
                 _settings(),
@@ -206,8 +224,6 @@ class DiskHandoffUsbMatchTests(TestCase):
                 {"mapping": "1-9", "speed": "480", "summary": "Western Digital"},
                 None,
             )
-
-        self.assertEqual(client.get_calls, 1)
 
     def test_handoff_candidates_include_vendor_product_fallback_after_bus_port_mapping(self):
         candidates = _handoff_candidates(

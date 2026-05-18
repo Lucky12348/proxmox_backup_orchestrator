@@ -539,6 +539,79 @@ def eject_dedicated_pbs_datastore_result(
     }
 
 
+def qemu_usb_attach_result(vmid: int, slot: str, host: str, usb3: bool | None = None) -> dict[str, Any]:
+    _validate_qemu_usb_request(vmid, slot, host)
+    value = f"host={host}" + (f",usb3={1 if usb3 else 0}" if usb3 is not None else "")
+    command = ["qm", "set", str(vmid), f"-{slot}", value]
+    result = run_subprocess(command, timeout_seconds=60)
+    if result.returncode != 0:
+        raise RuntimeError(format_command_failure("Failed to attach QEMU USB passthrough.", result))
+    return {
+        "ok": True,
+        "success": True,
+        "message": "QEMU USB passthrough attached.",
+        "command_summary": redact_command(command),
+        "stdout_log": result.stdout,
+        "stderr_log": result.stderr,
+        "execution_cwd": str(Path.cwd()),
+        "return_code": result.returncode,
+        "vmid": vmid,
+        "slot": slot,
+        "host": host,
+        "usb3": usb3,
+    }
+
+
+def qemu_usb_detach_result(vmid: int, slot: str) -> dict[str, Any]:
+    _validate_qemu_usb_request(vmid, slot, "placeholder")
+    command = ["qm", "set", str(vmid), "-delete", slot]
+    result = run_subprocess(command, timeout_seconds=60)
+    if result.returncode != 0:
+        raise RuntimeError(format_command_failure("Failed to detach QEMU USB passthrough.", result))
+    return {
+        "ok": True,
+        "success": True,
+        "message": "QEMU USB passthrough detached.",
+        "command_summary": redact_command(command),
+        "stdout_log": result.stdout,
+        "stderr_log": result.stderr,
+        "execution_cwd": str(Path.cwd()),
+        "return_code": result.returncode,
+        "vmid": vmid,
+        "slot": slot,
+    }
+
+
+def qemu_config_result(vmid: int) -> dict[str, Any]:
+    if vmid <= 0:
+        raise RuntimeError("VMID must be positive.")
+    command = ["qm", "config", str(vmid)]
+    result = run_subprocess(command, timeout_seconds=30)
+    if result.returncode != 0:
+        raise RuntimeError(format_command_failure("Failed to read QEMU VM config.", result))
+    return {
+        "ok": True,
+        "success": True,
+        "message": "QEMU VM config read.",
+        "command_summary": redact_command(command),
+        "stdout_log": result.stdout,
+        "stderr_log": result.stderr,
+        "execution_cwd": str(Path.cwd()),
+        "return_code": result.returncode,
+        "vmid": vmid,
+        "config": result.stdout,
+    }
+
+
+def _validate_qemu_usb_request(vmid: int, slot: str, host: str) -> None:
+    if vmid <= 0:
+        raise RuntimeError("VMID must be positive.")
+    if not slot.startswith("usb") or not slot[3:].isdigit():
+        raise RuntimeError(f"Invalid QEMU USB slot `{slot}`.")
+    if not host.strip():
+        raise RuntimeError("QEMU USB host mapping is required.")
+
+
 def _dedicated_datastore_payload(
     *,
     device_path: str,

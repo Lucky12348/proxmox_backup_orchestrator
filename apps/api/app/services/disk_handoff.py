@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models import ExternalDisk
-from app.services.host_agent import HostAgentError, get_pbs_agent_client
+from app.services.host_agent import HostAgentError, HostAgentResult, get_host_agent_client, get_pbs_agent_client
 from app.services.proxmox_client import ProxmoxClient
 
 
@@ -50,7 +50,7 @@ def handoff_disk_to_pbs(
         device = _find_matching_usb_device(client.list_usb_devices(settings.pve_node_name), disk)
     except HTTPException as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="disk not connected") from exc
-    vm_config = client.get_qemu_config(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id)
+    vm_config = _get_qemu_config_usb_map(settings)
     slot = disk.pbs_handoff_slot if disk.pbs_handoff_slot and vm_config.get(disk.pbs_handoff_slot) else _find_free_usb_slot(vm_config)
 
     disk.handoff_status = "attached_to_pbs"
@@ -73,7 +73,7 @@ def handoff_disk_to_pbs(
             _report(progress, "handoff_disk", last_error)
             if index < len(_handoff_candidates(device)):
                 try:
-                    client.delete_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot)
+                    _detach_usb_slot_via_host_agent(settings, slot)
                     _report(progress, "handoff_disk", f"Removed USB slot `{slot}` before next mapping retry.")
                 except Exception as cleanup_exc:
                     _report(progress, "handoff_disk", f"Failed to remove USB slot `{slot}` before retry: {cleanup_exc}")
@@ -100,7 +100,7 @@ def handoff_disk_to_pbs(
             if index >= 2 or not _has_vendor_product_mapping(device):
                 break
             _report(progress, "handoff_disk", f"PBS did not see disk after `{candidate['mapping']}`. Retrying with vendor/product mapping.")
-            client.delete_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot)
+            _detach_usb_slot_via_host_agent(settings, slot)
             _report(progress, "handoff_disk", f"Removed USB slot `{slot}` before fallback retry.")
             disk.pbs_visible = False
             disk.pbs_device_path = None
@@ -109,7 +109,7 @@ def handoff_disk_to_pbs(
             db.commit()
 
     try:
-        client.delete_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot)
+        _detach_usb_slot_via_host_agent(settings, slot)
         _report(progress, "handoff_disk", f"Removed USB slot `{slot}` after failed PBS visibility checks.")
     except Exception as exc:
         _report(progress, "handoff_disk", f"Failed to remove USB slot `{slot}` after failed handoff: {exc}")
@@ -124,14 +124,19 @@ def detach_disk_from_pbs(db: Session, disk: ExternalDisk) -> DiskHandoffStatus:
     if not disk.pbs_handoff_slot:
         return _build_status(disk, "Disk is not currently attached to the PBS VM.")
 
-    client = ProxmoxClient(settings)
     try:
-        client.delete_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, disk.pbs_handoff_slot)
+        _detach_usb_slot_via_host_agent(settings, disk.pbs_handoff_slot)
+        vm_config = _get_qemu_config_usb_map(settings)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Failed to detach USB disk `{disk.serial_number}` from the PBS VM: {exc}",
         ) from exc
+    if disk.pbs_handoff_slot in vm_config:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to detach USB disk `{disk.serial_number}` from the PBS VM: slot `{disk.pbs_handoff_slot}` still exists.",
+        )
 
     disk.handoff_status = "detected_on_proxmox"
     disk.pbs_visible = False
@@ -225,8 +230,8 @@ def _attach_usb_candidate(
     _report(progress, "handoff_disk", f"Attach payload: `{payload}`.")
     api_response: Any = None
     try:
-        api_response = client.set_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot, mapping, usb3=usb3)
-        _report(progress, "handoff_disk", f"Proxmox USB attach API response: `{api_response}`.")
+        api_response = _attach_usb_slot_via_host_agent(settings, slot, mapping, usb3)
+        _report(progress, "handoff_disk", f"Host agent USB attach response: `{_agent_result_summary(api_response)}`.")
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -239,7 +244,7 @@ def _attach_usb_candidate(
         ) from exc
 
     for attempt in range(1, 16):
-        vm_config = client.get_qemu_config(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id)
+        vm_config = _get_qemu_config_usb_map(settings)
         config_value = str(vm_config.get(slot) or "")
         _report(
             progress,
@@ -254,11 +259,64 @@ def _attach_usb_candidate(
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail=(
             f"USB attach failed on node `{settings.pbs_execution_vm_node}` VM `{settings.pbs_execution_vm_id}`. "
-            f"Payload: `{payload}`. API response: `{api_response}`. "
-            f"VM config does not contain `{slot}=host={mapping}` after Proxmox API update. "
+            f"Payload: `{payload}`. Host agent response: `{_agent_result_summary(api_response)}`. "
+            f"VM config does not contain `{slot}=host={mapping}` after host agent qm update. "
             f"USB config: {_vm_usb_config_summary(vm_config)}"
         ),
     )
+
+
+def _attach_usb_slot_via_host_agent(settings, slot: str, mapping: str, usb3: bool | None) -> HostAgentResult:
+    return get_host_agent_client().post(
+        "/qemu/usb/attach",
+        {
+            "vmid": settings.pbs_execution_vm_id,
+            "slot": slot,
+            "host": mapping,
+            "usb3": usb3,
+        },
+    )
+
+
+def _detach_usb_slot_via_host_agent(settings, slot: str) -> HostAgentResult:
+    return get_host_agent_client().post(
+        "/qemu/usb/detach",
+        {
+            "vmid": settings.pbs_execution_vm_id,
+            "slot": slot,
+        },
+    )
+
+
+def _get_qemu_config_usb_map(settings) -> dict[str, str]:
+    result = get_host_agent_client().post("/qemu/config", {"vmid": settings.pbs_execution_vm_id})
+    raw_config = _extract_qemu_config_text(result)
+    return _parse_qm_usb_config(raw_config)
+
+
+def _extract_qemu_config_text(result: HostAgentResult) -> str:
+    config = result.payload.get("config")
+    if isinstance(config, str):
+        return config
+    return result.stdout_log or ""
+
+
+def _parse_qm_usb_config(raw_config: str) -> dict[str, str]:
+    usb_config: dict[str, str] = {}
+    for raw_line in raw_config.splitlines():
+        if ":" not in raw_line:
+            continue
+        key, value = raw_line.split(":", 1)
+        key = key.strip()
+        if key.startswith("usb"):
+            usb_config[key] = value.strip()
+    return usb_config
+
+
+def _agent_result_summary(result: HostAgentResult | None) -> str:
+    if result is None:
+        return "none"
+    return f"message={result.message}; command={result.command_summary}; stdout={result.stdout_log}; stderr={result.stderr_log}"
 
 
 def _vm_config_value_matches_mapping(config_value: str, mapping: str) -> bool:

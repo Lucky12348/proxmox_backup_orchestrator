@@ -135,7 +135,8 @@ class DiskInventoryTests(TestCase):
 
         with (
             patch("app.services.disk_eject.get_external_backup_agent_bridge", return_value=_FakeEjectBridge()),
-            patch("app.services.disk_eject.ProxmoxClient", return_value=_FakeProxmoxClient({})),
+            patch("app.services.disk_eject._detach_usb_slot_via_host_agent", return_value=_host_agent_result()),
+            patch("app.services.disk_eject._get_qemu_config_usb_map", return_value={}),
         ):
             result = eject_dedicated_external_disk(self.session, disk.id)
 
@@ -164,7 +165,8 @@ class DiskInventoryTests(TestCase):
 
         with (
             patch("app.services.disk_eject.get_external_backup_agent_bridge", return_value=_FakeEjectBridge()),
-            patch("app.services.disk_eject.ProxmoxClient", return_value=_FakeProxmoxClient({"usb0": "host=1058:2630,usb3=1"})),
+            patch("app.services.disk_eject._detach_usb_slot_via_host_agent", return_value=_host_agent_result()),
+            patch("app.services.disk_eject._get_qemu_config_usb_map", return_value={"usb0": "host=1058:2630,usb3=1"}),
             self.assertRaises(HTTPException) as raised,
         ):
             eject_dedicated_external_disk(self.session, disk.id)
@@ -237,13 +239,5 @@ class _FakeEjectBridge:
         )
 
 
-class _FakeProxmoxClient:
-    def __init__(self, vm_config):
-        self.vm_config = vm_config
-
-    def delete_qemu_usb_device(self, node_name: str, vm_id: int, slot: str) -> None:
-        if self.vm_config.get("_delete_fails"):
-            raise RuntimeError("delete failed")
-
-    def get_qemu_config(self, node_name: str, vm_id: int) -> dict:
-        return self.vm_config
+def _host_agent_result():
+    return type("HostAgentResult", (), {"message": "ok"})()

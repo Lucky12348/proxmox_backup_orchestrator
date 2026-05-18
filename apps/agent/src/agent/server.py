@@ -17,6 +17,9 @@ from agent.main import (
     prepare_external_datastore_result,
     prepare_dedicated_pbs_datastore_result,
     cleanup_legacy_external_export_objects,
+    qemu_config_result,
+    qemu_usb_attach_result,
+    qemu_usb_detach_result,
     run_external_export_result,
 )
 
@@ -73,6 +76,22 @@ class EjectDedicatedPbsDatastoreRequest(BaseModel):
 class InspectDiskRequest(BaseModel):
     disk: str = Field(min_length=1)
     mount_base_path: str | None = Field(default=None, max_length=255)
+
+
+class QemuUsbAttachRequest(BaseModel):
+    vmid: int = Field(gt=0)
+    slot: str = Field(pattern=r"^usb\d+$")
+    host: str = Field(min_length=1)
+    usb3: bool | None = None
+
+
+class QemuUsbDetachRequest(BaseModel):
+    vmid: int = Field(gt=0)
+    slot: str = Field(pattern=r"^usb\d+$")
+
+
+class QemuConfigRequest(BaseModel):
+    vmid: int = Field(gt=0)
 
 
 def get_settings() -> AgentSettings:
@@ -186,6 +205,39 @@ def inspect_disk(
     return _run_endpoint(
         "inspect-disk",
         lambda: inspect_disk_result(payload.disk, payload.mount_base_path),
+    )
+
+
+@app.post("/qemu/usb/attach", response_model=None)
+def qemu_usb_attach(
+    payload: QemuUsbAttachRequest,
+    _: None = Depends(require_agent_token),
+) -> Response:
+    return _run_endpoint(
+        "qemu-usb-attach",
+        lambda: qemu_usb_attach_result(payload.vmid, payload.slot, payload.host, payload.usb3),
+    )
+
+
+@app.post("/qemu/usb/detach", response_model=None)
+def qemu_usb_detach(
+    payload: QemuUsbDetachRequest,
+    _: None = Depends(require_agent_token),
+) -> Response:
+    return _run_endpoint(
+        "qemu-usb-detach",
+        lambda: qemu_usb_detach_result(payload.vmid, payload.slot),
+    )
+
+
+@app.post("/qemu/config", response_model=None)
+def qemu_config(
+    payload: QemuConfigRequest,
+    _: None = Depends(require_agent_token),
+) -> Response:
+    return _run_endpoint(
+        "qemu-config",
+        lambda: qemu_config_result(payload.vmid),
     )
 
 

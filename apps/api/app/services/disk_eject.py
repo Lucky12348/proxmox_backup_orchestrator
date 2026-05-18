@@ -7,10 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models import BackupRunStatus, ExternalBackupMode, ExternalBackupRun, ExternalDisk
+from app.services.disk_handoff import _detach_usb_slot_via_host_agent, _get_qemu_config_usb_map
 from app.services.external_backup_agent import AgentCommandError, get_external_backup_agent_bridge
 from app.services.external_backup_execution import build_dedicated_datastore_name
 from app.services.external_backups import append_external_backup_run_log
-from app.services.proxmox_client import ProxmoxClient
 
 
 RUNNING_EJECT_REFUSAL = "Impossible d’éjecter le disque: une tâche PBS est en cours."
@@ -122,10 +122,9 @@ def _detach_usb_passthrough_from_pbs_vm(disk: ExternalDisk) -> str:
         return "Disk is not currently attached to the PBS VM."
 
     settings = get_settings()
-    client = ProxmoxClient(settings)
     try:
-        client.delete_qemu_usb_device(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id, slot)
-        vm_config = client.get_qemu_config(settings.pbs_execution_vm_node, settings.pbs_execution_vm_id)
+        _detach_usb_slot_via_host_agent(settings, slot)
+        vm_config = _get_qemu_config_usb_map(settings)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
