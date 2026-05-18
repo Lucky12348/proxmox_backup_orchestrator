@@ -9,14 +9,52 @@ from agent.main import (
     SubprocessResult,
     _ensure_loop_image_mounted,
     _find_mount_source,
+    bytes_to_gb,
     is_initialized_pbs_datastore_path,
     loop_backing_file,
+    prepare_dedicated_pbs_datastore_result,
     prepare_external_datastore_result,
     run_external_export_result,
 )
 
 
 class ExternalExportDatastoreCreateTests(TestCase):
+    def test_bytes_to_gb_parses_human_readable_sizes(self):
+        self.assertGreater(bytes_to_gb("3.6T"), 3000)
+        self.assertGreaterEqual(bytes_to_gb("750G"), 749)
+        self.assertLessEqual(bytes_to_gb("750G"), 751)
+        self.assertLess(bytes_to_gb("16M"), 1)
+        self.assertGreaterEqual(bytes_to_gb(4000000000000), 3724)
+        self.assertLessEqual(bytes_to_gb(4000000000000), 3726)
+
+    def test_dedicated_prepare_size_error_includes_raw_and_parsed_values(self):
+        disk = {
+            "name": "sdc",
+            "kname": "sdc",
+            "path": "/dev/sdc",
+            "type": "disk",
+            "serial": "WD-WXD2DA1L1E7C",
+            "size": "16M",
+            "children": [],
+        }
+
+        with (
+            patch("agent.main.resolve_disk", return_value=(disk, [disk])),
+            patch("agent.main.load_udev_properties", return_value={}),
+            self.assertRaises(RuntimeError) as raised,
+        ):
+            prepare_dedicated_pbs_datastore_result(
+                "/dev/sdc",
+                "pbo-WD-WXD2DA1L1E7C",
+                True,
+                AgentSettings(),
+            )
+
+        message = str(raised.exception)
+        self.assertIn("raw size=`16M`", message)
+        self.assertIn("parsed size=`0 GB`", message)
+        self.assertIn("minimum=`32 GB`", message)
+
     def test_exfat_coexistence_prepare_returns_loop_backed_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             mount = Path(temp_dir)

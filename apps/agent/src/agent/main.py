@@ -105,6 +105,10 @@ class ExternalExportProgress:
         except Exception as exc:
             logger.warning("Unable to post external export progress callback: %s", exc)
 
+    @property
+    def enabled(self) -> bool:
+        return self.run_id is not None
+
 
 def post_heartbeat(settings: AgentSettings) -> None:
     payload = {
@@ -309,9 +313,13 @@ def prepare_dedicated_pbs_datastore_result(
     disk, _ = resolve_disk(identifier)
     serial = disk_serial_number(disk, load_udev_properties(device_name(disk))) or device_name(disk)
     device_path = str(disk["path"])
-    size_gb = bytes_to_gb(disk.get("size"))
+    raw_size = disk.get("size")
+    size_gb = bytes_to_gb(raw_size)
     if size_gb < 32:
-        raise RuntimeError(f"Refusing to prepare `{device_path}` because it is below the 32 GB minimum.")
+        raise RuntimeError(
+            f"Refusing to prepare `{device_path}`; raw size=`{raw_size}`, "
+            f"parsed size=`{size_gb} GB`, minimum=`32 GB`."
+        )
     _assert_safe_dedicated_disk(disk)
 
     mount_path = default_mount_base_path(None) / serial / "pbs-datastore"
@@ -503,12 +511,18 @@ def run_external_export_result(
             logger.info(detection_message)
 
             try:
-                create_store_result = run_subprocess_streaming(
-                    create_store_command,
-                    timeout_seconds=datastore_create_timeout,
-                    on_stdout=lambda line: progress.post("target_datastore_stdout", line, stdout_line=line),
-                    on_stderr=lambda line: progress.post("target_datastore_stderr", line, stderr_line=line),
-                )
+                if progress.enabled:
+                    create_store_result = run_subprocess_streaming(
+                        create_store_command,
+                        timeout_seconds=datastore_create_timeout,
+                        on_stdout=lambda line: progress.post("target_datastore_stdout", line, stdout_line=line),
+                        on_stderr=lambda line: progress.post("target_datastore_stderr", line, stderr_line=line),
+                    )
+                else:
+                    create_store_result = run_subprocess(
+                        create_store_command,
+                        timeout_seconds=datastore_create_timeout,
+                    )
                 progress.post(
                     "target_datastore",
                     f"Target PBS datastore command finished with exit {create_store_result.returncode}.",
@@ -596,12 +610,19 @@ def run_external_export_result(
             f"Starting PBS sync job `{sync_job_name}` from `{datastore_name}` to `{target_store_name}`.",
             command=redact_command([manager, "sync-job", "run", sync_job_name]),
         )
-        sync_run_result = run_subprocess_streaming(
-            [manager, "sync-job", "run", sync_job_name],
-            timeout_seconds=settings.export_timeout_seconds,
-            on_stdout=lambda line: progress.post("sync_stdout", line, stdout_line=line),
-            on_stderr=lambda line: progress.post("sync_stderr", line, stderr_line=line),
-        )
+        sync_run_command = [manager, "sync-job", "run", sync_job_name]
+        if progress.enabled:
+            sync_run_result = run_subprocess_streaming(
+                sync_run_command,
+                timeout_seconds=settings.export_timeout_seconds,
+                on_stdout=lambda line: progress.post("sync_stdout", line, stdout_line=line),
+                on_stderr=lambda line: progress.post("sync_stderr", line, stderr_line=line),
+            )
+        else:
+            sync_run_result = run_subprocess(
+                sync_run_command,
+                timeout_seconds=settings.export_timeout_seconds,
+            )
         record_command_result(sync_run_result, command_summaries, stdout_logs, stderr_logs)
         if sync_run_result.returncode != 0:
             raise RuntimeError(
@@ -919,6 +940,7 @@ def list_all_block_nodes() -> list[dict[str, Any]]:
         [
             "lsblk",
             "-J",
+            "-b",
             "-o",
             "NAME,KNAME,PATH,TYPE,MODEL,SERIAL,SIZE,RM,TRAN,MOUNTPOINT,FSTYPE,PKNAME",
         ]
@@ -1361,7 +1383,7 @@ def _run_logged_command(
 ) -> SubprocessResult:
     try:
         command_text = redact_command(command)
-        if progress is not None:
+        if progress is not None and progress.enabled:
             progress.post(step or "command", f"Starting `{command_text}`.", command=command_text)
             result = run_subprocess_streaming(
                 command,
@@ -1710,15 +1732,45 @@ def first_value(*values: Any) -> str | None:
 
 
 def bytes_to_gb(raw_size: Any) -> int:
-    try:
-        size_bytes = int(raw_size)
-    except (TypeError, ValueError):
-        return 0
-
+    size_bytes = _parse_size_bytes(raw_size)
     if size_bytes <= 0:
         return 0
 
-    return max(1, round(size_bytes / (1024**3)))
+    return round(size_bytes / (1024**3))
+
+
+def _parse_size_bytes(raw_size: Any) -> float:
+    if isinstance(raw_size, bool) or raw_size is None:
+        return 0
+    if isinstance(raw_size, int | float):
+        return float(raw_size)
+    if not isinstance(raw_size, str):
+        return 0
+
+    value = raw_size.strip()
+    if not value:
+        return 0
+    try:
+        return float(value)
+    except ValueError:
+        pass
+
+    unit = value[-1].upper()
+    multiplier_by_unit = {
+        "K": 1024,
+        "M": 1024**2,
+        "G": 1024**3,
+        "T": 1024**4,
+        "P": 1024**5,
+    }
+    multiplier = multiplier_by_unit.get(unit)
+    if multiplier is None:
+        return 0
+    try:
+        number = float(value[:-1].strip())
+    except ValueError:
+        return 0
+    return number * multiplier
 
 
 def build_parser() -> argparse.ArgumentParser:
