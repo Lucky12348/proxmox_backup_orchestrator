@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Route, Routes } from "react-router-dom";
 
-import { getExternalBackupPreview } from "./api";
+import { getExternalBackupPreview, AUTH_EXPIRED_EVENT } from "./api";
+import { AuthProvider, useAuth } from "./AuthContext";
+import { LoginPage } from "./pages/LoginPage";
 import { AppShell } from "./components/AppShell";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { ErrorBanner } from "./components/ErrorBanner";
@@ -29,10 +31,19 @@ interface ConfirmState {
   onConfirm: () => void;
 }
 
-export default function App() {
+// Inner app — rendered only when authenticated
+function AuthenticatedApp() {
+  const { logout } = useAuth();
   const [language, setLanguage] = useState<Language>("fr");
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [preparationDisk, setPreparationDisk] = useState<ExternalDisk | null>(null);
+
+  // Listen for auth-expired events from api.ts
+  useEffect(() => {
+    const handler = () => logout();
+    window.addEventListener(AUTH_EXPIRED_EVENT, handler);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handler);
+  }, [logout]);
 
   const {
     data,
@@ -63,17 +74,9 @@ export default function App() {
     return data ? getLatestStatusLabel(data.overview.latest_backup_status, t) : t.status.unknown;
   }, [data, t]);
 
-  function openConfirm(nextState: ConfirmState) {
-    setConfirmState(nextState);
-  }
-
-  function closeConfirm() {
-    setConfirmState(null);
-  }
-
-  function closePreparationModal() {
-    setPreparationDisk(null);
-  }
+  function openConfirm(nextState: ConfirmState) { setConfirmState(nextState); }
+  function closeConfirm() { setConfirmState(null); }
+  function closePreparationModal() { setPreparationDisk(null); }
 
   function handleDiskToggleRequest(request: DiskActionRequest) {
     const descriptors = {
@@ -86,9 +89,7 @@ export default function App() {
         description: request.value ? t.confirmDedicatedEnable : t.confirmDedicatedDisable,
       },
     } as const;
-
     const descriptor = descriptors[request.field];
-
     openConfirm({
       title: descriptor.title,
       description: `${request.disk.display_name}: ${descriptor.description}`,
@@ -96,11 +97,8 @@ export default function App() {
       cancelLabel: t.cancel,
       tone: "warning",
       onConfirm: () => {
-        if (request.field === "trusted") {
-          void mutateDisk(request.disk.id, { trusted: request.value });
-        } else if (request.field === "dedicated_backup_disk") {
-          void mutateDisk(request.disk.id, { dedicated_backup_disk: request.value });
-        }
+        if (request.field === "trusted") void mutateDisk(request.disk.id, { trusted: request.value });
+        else if (request.field === "dedicated_backup_disk") void mutateDisk(request.disk.id, { dedicated_backup_disk: request.value });
         closeConfirm();
       },
     });
@@ -113,10 +111,7 @@ export default function App() {
       confirmLabel: t.proxmoxSync,
       cancelLabel: t.cancel,
       tone: "info",
-      onConfirm: () => {
-        void runProxmoxSync(t.proxmoxSyncSummary);
-        closeConfirm();
-      },
+      onConfirm: () => { void runProxmoxSync(t.proxmoxSyncSummary); closeConfirm(); },
     });
   }
 
@@ -127,10 +122,7 @@ export default function App() {
       confirmLabel: t.pbsSync,
       cancelLabel: t.cancel,
       tone: "info",
-      onConfirm: () => {
-        void runPBSSync(t.pbsSyncSummary);
-        closeConfirm();
-      },
+      onConfirm: () => { void runPBSSync(t.pbsSyncSummary); closeConfirm(); },
     });
   }
 
@@ -141,10 +133,7 @@ export default function App() {
       confirmLabel: t.activityCleanupConfirm,
       cancelLabel: t.cancel,
       tone: "danger",
-      onConfirm: () => {
-        void cleanupActivityRuns(10, t.activityCleanupSummary);
-        closeConfirm();
-      },
+      onConfirm: () => { void cleanupActivityRuns(10, t.activityCleanupSummary); closeConfirm(); },
     });
   }
 
@@ -153,44 +142,28 @@ export default function App() {
       openConfirm({
         title: t.confirmExternalBackupTitle,
         description: t.externalBackupBlockedUntrusted,
-        confirmLabel: t.dismiss,
-        cancelLabel: t.cancel,
-        tone: "warning",
+        confirmLabel: t.dismiss, cancelLabel: t.cancel, tone: "warning",
         onConfirm: closeConfirm,
       });
       return;
     }
-
     if (!disk.connected) {
       openConfirm({
         title: t.confirmExternalBackupTitle,
         description: t.externalBackupBlockedDisconnected,
-        confirmLabel: t.dismiss,
-        cancelLabel: t.cancel,
-        tone: "warning",
+        confirmLabel: t.dismiss, cancelLabel: t.cancel, tone: "warning",
         onConfirm: closeConfirm,
       });
       return;
     }
-
     try {
       const preview = await getExternalBackupPreview(disk.id);
-      const modeLabel =
-        preview.mode === "dedicated"
-          ? t.externalBackupDedicatedMode
-          : t.externalBackupCoexistenceMode;
-      const preserveText = preview.preserves_existing_data
-        ? t.externalBackupPreservesData
-        : t.externalBackupUsesDedicatedPath;
-      const preparationWarning = disk.prepared_as_pbs_datastore
-        ? t.externalBackupReuseWarning
-        : t.externalBackupDestructiveWarning;
-      const loopSizeText =
-        preview.mode === "coexistence" && preview.loop_image_size_gb !== null
-          ? `${t.externalBackupLoopSize}: ${preview.loop_image_size_gb} GiB.`
-          : null;
+      const modeLabel = preview.mode === "dedicated" ? t.externalBackupDedicatedMode : t.externalBackupCoexistenceMode;
+      const preserveText = preview.preserves_existing_data ? t.externalBackupPreservesData : t.externalBackupUsesDedicatedPath;
+      const preparationWarning = disk.prepared_as_pbs_datastore ? t.externalBackupReuseWarning : t.externalBackupDestructiveWarning;
+      const loopSizeText = preview.mode === "coexistence" && preview.loop_image_size_gb !== null
+        ? `${t.externalBackupLoopSize}: ${preview.loop_image_size_gb} GiB.` : null;
       const loopWarningText = preview.loop_image_size_warning ? t.externalBackupLoopSizeWarning : null;
-
       openConfirm({
         title: t.confirmExternalBackupTitle,
         description: [
@@ -200,28 +173,18 @@ export default function App() {
           `${t.externalBackupTargetPath}: ${preview.target_path}`,
           `${t.externalBackupPBSHandoff}`,
           `${t.externalBackupPBSExclusive}`,
-          preparationWarning,
-          preserveText,
-          loopSizeText,
-          loopWarningText,
-        ]
-          .filter(Boolean)
-          .join(" "),
+          preparationWarning, preserveText, loopSizeText, loopWarningText,
+        ].filter(Boolean).join(" "),
         confirmLabel: t.externalBackupAction,
         cancelLabel: t.cancel,
         tone: "info",
-        onConfirm: () => {
-          void startExternalBackup(disk.id, t.externalBackupSummary);
-          closeConfirm();
-        },
+        onConfirm: () => { void startExternalBackup(disk.id, t.externalBackupSummary); closeConfirm(); },
       });
     } catch (previewError) {
       openConfirm({
         title: t.confirmExternalBackupTitle,
         description: previewError instanceof Error ? previewError.message : t.error,
-        confirmLabel: t.dismiss,
-        cancelLabel: t.cancel,
-        tone: "warning",
+        confirmLabel: t.dismiss, cancelLabel: t.cancel, tone: "warning",
         onConfirm: closeConfirm,
       });
     }
@@ -230,53 +193,34 @@ export default function App() {
   function handleDiskPreparationRequest(disk: ExternalDisk) {
     if (!disk.connected) {
       openConfirm({
-        title: t.prepareDiskTitle,
-        description: t.prepareDiskBlockedDisconnected,
-        confirmLabel: t.dismiss,
-        cancelLabel: t.cancel,
-        tone: "warning",
+        title: t.prepareDiskTitle, description: t.prepareDiskBlockedDisconnected,
+        confirmLabel: t.dismiss, cancelLabel: t.cancel, tone: "warning",
         onConfirm: closeConfirm,
       });
       return;
     }
-
     setPreparationDisk(disk);
   }
 
   function handleDiskEjectRequest(disk: ExternalDisk) {
     openConfirm({
       title: t.ejectDiskTitle,
-      description: [
-        `${t.diskName}: ${disk.display_name}`,
-        t.ejectDiskConfirmation,
-      ].join(" "),
+      description: [`${t.diskName}: ${disk.display_name}`, t.ejectDiskConfirmation].join(" "),
       confirmLabel: t.ejectDiskAction,
       cancelLabel: t.cancel,
       tone: "warning",
-      onConfirm: () => {
-        void ejectDisk(disk.id, t.ejectDiskSuccess);
-        closeConfirm();
-      },
+      onConfirm: () => { void ejectDisk(disk.id, t.ejectDiskSuccess); closeConfirm(); },
     });
   }
 
   async function handleDiskPreparationSubmit(payload: DiskPreparationSubmitPayload) {
-    if (preparationDisk === null) {
-      return;
-    }
-
+    if (!preparationDisk) return;
     const run = await startDiskPreparation(
       preparationDisk.id,
-      {
-        mode: payload.mode,
-        mount_base_path: payload.mountBasePath,
-        confirm_destructive: payload.confirmDestructive,
-      },
+      { mode: payload.mode, mount_base_path: payload.mountBasePath, confirm_destructive: payload.confirmDestructive },
       t.prepareDiskSummary,
     );
-    if (run) {
-      closePreparationModal();
-    }
+    if (run) closePreparationModal();
   }
 
   if (loading) {
@@ -305,36 +249,21 @@ export default function App() {
     <>
       <AppShell language={language} onLanguageChange={setLanguage} t={t}>
         {bannerError ? (
-          <ErrorBanner
-            dismissLabel={t.dismiss}
-            message={bannerError}
-            onDismiss={clearBannerError}
-          />
+          <ErrorBanner dismissLabel={t.dismiss} message={bannerError} onDismiss={clearBannerError} />
         ) : null}
-
         {syncMessage ? (
-          <ErrorBanner
-            dismissLabel={t.dismiss}
-            message={syncMessage}
-            onDismiss={clearSyncMessage}
-            tone="info"
-          />
+          <ErrorBanner dismissLabel={t.dismiss} message={syncMessage} onDismiss={clearSyncMessage} tone="info" />
         ) : null}
 
         <Routes>
-          <Route
-            element={<DashboardPage data={data} latestBackupLabel={latestBackupLabel} t={t} language={language} />}
-            path="/"
-          />
+          <Route element={<DashboardPage data={data} latestBackupLabel={latestBackupLabel} t={t} language={language} />} path="/" />
           <Route
             element={
               <AssetsPage
-                data={data}
-                language={language}
+                data={data} language={language}
                 onVmCriticalChange={(vmId, critical) => void mutateVmCritical(vmId, critical)}
                 pbsInventoryByVmId={pbsInventoryByVmId}
-                savingKey={savingKey}
-                t={t}
+                savingKey={savingKey} t={t}
               />
             }
             path="/assets"
@@ -342,15 +271,13 @@ export default function App() {
           <Route
             element={
               <DisksPage
-                data={data}
-                language={language}
+                data={data} language={language}
                 onDiskFieldChange={(diskId, payload) => void mutateDisk(diskId, payload)}
                 onDiskEjectRequest={handleDiskEjectRequest}
                 onExternalBackupRequest={(disk) => void handleExternalBackupRequest(disk)}
                 onDiskPreparationRequest={handleDiskPreparationRequest}
                 onDiskToggleRequest={handleDiskToggleRequest}
-                savingKey={savingKey}
-                t={t}
+                savingKey={savingKey} t={t}
               />
             }
             path="/disks"
@@ -359,13 +286,10 @@ export default function App() {
           <Route
             element={
               <IntegrationsPage
-                data={data}
-                language={language}
+                data={data} language={language}
                 onPBSSyncRequest={handlePBSSyncRequest}
                 onProxmoxSyncRequest={handleProxmoxSyncRequest}
-                pbsSyncing={pbsSyncing}
-                proxmoxSyncing={proxmoxSyncing}
-                t={t}
+                pbsSyncing={pbsSyncing} proxmoxSyncing={proxmoxSyncing} t={t}
               />
             }
             path="/integrations"
@@ -407,4 +331,24 @@ export default function App() {
       />
     </>
   );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppInner />
+    </AuthProvider>
+  );
+}
+
+function AppInner() {
+  const { isAuthenticated } = useAuth();
+  // We need t for LoginPage — use default language here
+  const t = translations["fr"];
+
+  if (!isAuthenticated) {
+    return <LoginPage t={t} />;
+  }
+
+  return <AuthenticatedApp />;
 }

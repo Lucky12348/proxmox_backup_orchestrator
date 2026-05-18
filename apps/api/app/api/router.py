@@ -1,23 +1,38 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from app.api.routes.agent import router as agent_router
-from app.api.routes.backup_runs import router as backup_runs_router
-from app.api.routes.disks import router as disks_router
-from app.api.routes.external_backups import router as external_backups_router
-from app.api.routes.integrations_pbs import router as integrations_pbs_router
-from app.api.routes.integrations_proxmox import router as integrations_proxmox_router
-from app.api.routes.overview import router as overview_router
-from app.api.routes.planning import router as planning_router
-from app.api.routes.vms import router as vms_router
+from app.api.routes import (
+    agent,
+    backup_runs,
+    disks,
+    external_backups,
+    integrations_pbs,
+    integrations_proxmox,
+    overview,
+    planning,
+    vms,
+)
+from app.auth import get_current_user, router as auth_router
 
 
-api_router = APIRouter(prefix="/api/v1")
-api_router.include_router(agent_router)
-api_router.include_router(overview_router)
-api_router.include_router(vms_router)
-api_router.include_router(disks_router)
-api_router.include_router(external_backups_router)
-api_router.include_router(backup_runs_router)
-api_router.include_router(integrations_proxmox_router)
-api_router.include_router(integrations_pbs_router)
-api_router.include_router(planning_router)
+public_router = APIRouter(prefix="/api/v1")
+public_router.include_router(auth_router)
+public_router.include_router(agent.router)
+public_router.include_router(external_backups.public_callback_router)
+
+protected_router = APIRouter(
+    prefix="/api/v1",
+    dependencies=[Depends(get_current_user)],
+)
+
+protected_router.include_router(overview.router)
+protected_router.include_router(vms.router)
+protected_router.include_router(disks.router)
+protected_router.include_router(external_backups.router)
+protected_router.include_router(backup_runs.router)
+protected_router.include_router(integrations_proxmox.router)
+protected_router.include_router(integrations_pbs.router)
+protected_router.include_router(planning.router)
+
+api_router = APIRouter()
+api_router.include_router(public_router)
+api_router.include_router(protected_router)

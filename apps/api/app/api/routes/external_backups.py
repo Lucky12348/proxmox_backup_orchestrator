@@ -26,6 +26,7 @@ from app.services.external_backups import (
 
 
 router = APIRouter(prefix="/external-backups", tags=["external-backups"])
+public_callback_router = APIRouter(prefix="/external-backups", tags=["external-backups"])
 
 
 @router.get("/preview/{disk_id}")
@@ -80,7 +81,7 @@ def delete_run(run_id: int, db: DbSession) -> None:
     delete_external_backup_run(db, run_id)
 
 
-@router.post("/runs/{run_id}/log", response_model=ExternalBackupRunRead)
+@public_callback_router.post("/runs/{run_id}/log", response_model=ExternalBackupRunRead)
 def append_run_log(
     run_id: int,
     payload: ExternalBackupRunLogRequest,

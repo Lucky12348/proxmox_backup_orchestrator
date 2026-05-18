@@ -1,3 +1,4 @@
+import { getStoredToken } from "./AuthContext";
 import type {
   AgentStatus,
   BackupRun,
@@ -20,26 +21,39 @@ import type {
 
 const API_BASE_PATH = "/api/v1";
 
+// Custom event to signal 401 to the app (triggers logout)
+export const AUTH_EXPIRED_EVENT = "pbo:auth-expired";
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getStoredToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> ?? {}),
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${API_BASE_PATH}${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
+
+  // Session expired — dispatch event so App can redirect to login
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    throw new Error("Session expired. Please log in again.");
+  }
 
   if (!response.ok) {
     const body = await response.text();
     let parsedDetail: string | undefined;
-
     try {
       const parsed = JSON.parse(body) as { detail?: string };
       parsedDetail = parsed.detail;
     } catch {
       parsedDetail = undefined;
     }
-
     throw new Error(parsedDetail || body || `Request failed with status ${response.status}`);
   }
 
@@ -58,7 +72,10 @@ export function getVMs() {
   return request<VirtualMachine[]>("/vms");
 }
 
-export function updateVM(id: number, payload: Partial<Pick<VirtualMachine, "critical" | "enabled" | "size_gb">>) {
+export function updateVM(
+  id: number,
+  payload: Partial<Pick<VirtualMachine, "critical" | "enabled" | "size_gb">>,
+) {
   return request<VirtualMachine>(`/vms/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
@@ -150,10 +167,7 @@ export function getExternalBackupPreview(diskId: number) {
 export function runExternalBackup(diskId: number) {
   return request<ExternalBackupRun>("/external-backups/run", {
     method: "POST",
-    body: JSON.stringify({
-      disk_id: diskId,
-      confirmation: true,
-    }),
+    body: JSON.stringify({ disk_id: diskId, confirmation: true }),
   });
 }
 
@@ -166,21 +180,21 @@ export function getExternalBackupRun(runId: number) {
 }
 
 export function cleanupExternalBackupRuns(keepLast = 10) {
-  return request<{ deleted: number; keep_last: number }>(`/external-backups/runs/cleanup?keep_last=${keepLast}`, {
-    method: "DELETE",
-  });
+  return request<{ deleted: number; keep_last: number }>(
+    `/external-backups/runs/cleanup?keep_last=${keepLast}`,
+    { method: "DELETE" },
+  );
 }
 
 export function deleteExternalBackupRun(runId: number) {
-  return request<void>(`/external-backups/runs/${runId}`, {
-    method: "DELETE",
-  });
+  return request<void>(`/external-backups/runs/${runId}`, { method: "DELETE" });
 }
 
 export function cleanupBackupRuns(keepLast = 10) {
-  return request<{ deleted: number; keep_last: number }>(`/backup-runs/cleanup?keep_last=${keepLast}`, {
-    method: "DELETE",
-  });
+  return request<{ deleted: number; keep_last: number }>(
+    `/backup-runs/cleanup?keep_last=${keepLast}`,
+    { method: "DELETE" },
+  );
 }
 
 export function prepareDisk(
@@ -211,9 +225,7 @@ export function detachDiskFromPBS(diskId: number) {
 }
 
 export function ejectExternalDisk(diskId: number) {
-  return request<ExternalDisk>(`/disks/${diskId}/eject`, {
-    method: "POST",
-  });
+  return request<ExternalDisk>(`/disks/${diskId}/eject`, { method: "POST" });
 }
 
 export function getDiskPBSVisibility(diskId: number) {
