@@ -1992,18 +1992,30 @@ def _combined_command_output(result: SubprocessResult) -> str:
 
 
 def _only_pbs_services_block_mount(fuser_output: str) -> bool:
-    process_lines = _fuser_process_lines(fuser_output)
-    if not process_lines:
+    lines = [line for line in fuser_output.splitlines() if line.strip()]
+    if not lines:
         return False
-    allowed_markers = (
+    return all(_is_safe_pbs_fuser_line(line) for line in lines)
+
+
+def _is_safe_pbs_fuser_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return True
+    if "USER" in stripped and "PID" in stripped and "COMMAND" in stripped:
+        return True
+    if stripped.endswith(":"):
+        return True
+    if " kernel " in f" {stripped} " and " mount " in f" {stripped} ":
+        return True
+    safe_tokens = (
         "proxmox-backup-",
         "proxmox-backup-proxy",
         "proxmox-backup-api",
         "proxmox-backup.service",
         "proxmox-backup-proxy.service",
-        "proxmox-backup",
     )
-    return all(any(marker in line for marker in allowed_markers) for line in process_lines)
+    return any(token in stripped for token in safe_tokens)
 
 
 def _fuser_process_lines(fuser_output: str) -> list[str]:

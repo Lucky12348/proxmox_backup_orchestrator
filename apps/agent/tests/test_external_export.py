@@ -10,6 +10,7 @@ from agent.main import (
     _ensure_loop_image_mounted,
     _find_mount_source,
     _fuser_process_lines,
+    _is_safe_pbs_fuser_line,
     _only_pbs_services_block_mount,
     bytes_to_gb,
     eject_dedicated_pbs_datastore_result,
@@ -237,13 +238,15 @@ class ExternalExportDatastoreCreateTests(TestCase):
 
     def test_fuser_parser_ignores_kernel_mount_and_accepts_truncated_pbs_process(self):
         output = (
-            "USER PID ACCESS COMMAND\n"
+            "                     USER        PID ACCESS COMMAND\n"
             "/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore:\n"
-            "root kernel mount /mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore\n"
-            "backup 13053 F.... proxmox-backup-\n"
+            "                     root     kernel mount /mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore\n"
+            "                     backup    13053 F.... proxmox-backup-\n"
         )
 
-        self.assertEqual(_fuser_process_lines(output), ["backup 13053 f.... proxmox-backup-"])
+        self.assertEqual(len(_fuser_process_lines(output)), 1)
+        self.assertIn("proxmox-backup-", _fuser_process_lines(output)[0])
+        self.assertTrue(all(_is_safe_pbs_fuser_line(line) for line in output.splitlines()))
         self.assertTrue(_only_pbs_services_block_mount(output))
 
     def test_eject_busy_datastore_refuses_non_pbs_blocker_with_fuser_output(self):
