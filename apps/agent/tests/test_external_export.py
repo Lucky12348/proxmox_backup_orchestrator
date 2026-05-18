@@ -188,6 +188,94 @@ class ExternalExportDatastoreCreateTests(TestCase):
         self.assertIn(["sync"], commands)
         self.assertTrue(any(command[0] == "umount" and command[1].endswith("pbs-datastore") for command in commands))
 
+    def test_eject_busy_datastore_restarts_pbs_services_when_only_pbs_blocks_mount(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            mount = base / "WD-WXD2DA1L1E7C" / "pbs-datastore"
+            mount.mkdir(parents=True)
+            commands: list[list[str]] = []
+
+            def fake_run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResult:
+                commands.append(command)
+                if command[0] == "umount" and len([item for item in commands if item[0] == "umount"]) == 1:
+                    return SubprocessResult(command, 32, "", f"umount: {command[1]}: target is busy.")
+                return SubprocessResult(command, 0, "", "")
+
+            fuser_result = SubprocessResult(
+                ["fuser", "-vm", str(mount)],
+                0,
+                "",
+                "                     USER        PID ACCESS COMMAND\n"
+                f"{mount}:            root     kernel mount\n"
+                "                     backup     1234 F.... proxmox-backup-proxy\n",
+            )
+            with (
+                patch("agent.main.default_mount_base_path", return_value=base),
+                patch("agent.main._assert_safe_eject_mount_path"),
+                patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
+                patch("agent.main._pbs_datastore_has_running_tasks", return_value=False),
+                patch("agent.main._pbo_export_sync_job_running", return_value=False),
+                patch("agent.main._find_mount_source", side_effect=["/dev/sdc1", None]),
+                patch("agent.main._run_fuser_verbose", return_value=fuser_result),
+                patch("agent.main.time.sleep"),
+                patch("agent.main.run_subprocess", side_effect=fake_run_subprocess),
+            ):
+                result = eject_dedicated_pbs_datastore_result(
+                    "WD-WXD2DA1L1E7C",
+                    "pbo-wd-wxd2da1l1e7c",
+                    str(mount),
+                    AgentSettings(),
+                )
+
+        self.assertEqual(result["message"], "External datastore unmounted safely. Disk can be detached.")
+        self.assertIn(["systemctl", "stop", "proxmox-backup-proxy.service"], commands)
+        self.assertIn(["systemctl", "stop", "proxmox-backup.service"], commands)
+        self.assertIn(["systemctl", "restart", "proxmox-backup.service"], commands)
+        self.assertIn(["systemctl", "restart", "proxmox-backup-proxy.service"], commands)
+
+    def test_eject_busy_datastore_refuses_non_pbs_blocker_with_fuser_output(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            mount = base / "WD-WXD2DA1L1E7C" / "pbs-datastore"
+            mount.mkdir(parents=True)
+            commands: list[list[str]] = []
+
+            def fake_run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResult:
+                commands.append(command)
+                if command[0] == "umount":
+                    return SubprocessResult(command, 32, "", f"umount: {command[1]}: target is busy.")
+                return SubprocessResult(command, 0, "", "")
+
+            fuser_result = SubprocessResult(
+                ["fuser", "-vm", str(mount)],
+                0,
+                "",
+                "                     USER        PID ACCESS COMMAND\n"
+                "                     root       4321 F.... bash\n",
+            )
+            with (
+                patch("agent.main.default_mount_base_path", return_value=base),
+                patch("agent.main._assert_safe_eject_mount_path"),
+                patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
+                patch("agent.main._pbs_datastore_has_running_tasks", return_value=False),
+                patch("agent.main._pbo_export_sync_job_running", return_value=False),
+                patch("agent.main._find_mount_source", return_value="/dev/sdc1"),
+                patch("agent.main._run_fuser_verbose", return_value=fuser_result),
+                patch("agent.main.run_subprocess", side_effect=fake_run_subprocess),
+                self.assertRaises(RuntimeError) as raised,
+            ):
+                eject_dedicated_pbs_datastore_result(
+                    "WD-WXD2DA1L1E7C",
+                    "pbo-wd-wxd2da1l1e7c",
+                    str(mount),
+                    AgentSettings(),
+                )
+
+        message = str(raised.exception)
+        self.assertIn("bash", message)
+        self.assertIn("fuser output", message)
+        self.assertFalse(any(command[:2] == ["systemctl", "stop"] for command in commands))
+
     def test_exfat_coexistence_prepare_returns_loop_backed_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             mount = Path(temp_dir)

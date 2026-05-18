@@ -9,6 +9,7 @@ import socket
 import stat
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -507,7 +508,17 @@ def eject_dedicated_pbs_datastore_result(
         umount_result = run_subprocess(["umount", str(resolved_mount)], timeout_seconds=settings.export_timeout_seconds)
         record_command_result(umount_result, command_summaries, stdout_logs, stderr_logs)
         if umount_result.returncode != 0:
-            raise RuntimeError(format_command_failure(f"Failed to unmount `{resolved_mount}`.", umount_result))
+            if not _is_target_busy_umount_result(umount_result):
+                raise RuntimeError(format_command_failure(f"Failed to unmount `{resolved_mount}`.", umount_result))
+            _handle_busy_dedicated_datastore_unmount(
+                resolved_mount,
+                manager,
+                datastore_name,
+                settings,
+                command_summaries,
+                stdout_logs,
+                stderr_logs,
+            )
 
     if _find_mount_source(resolved_mount):
         raise RuntimeError(f"Refusing to eject because `{resolved_mount}` is still mounted.")
@@ -515,7 +526,7 @@ def eject_dedicated_pbs_datastore_result(
     return {
         "ok": True,
         "success": True,
-        "message": "Dedicated PBS datastore unmounted. Disk is ready for VM detach.",
+        "message": "External datastore unmounted safely. Disk can be detached.",
         "serial": clean_serial,
         "datastore_name": datastore_name,
         "mount_path": str(resolved_mount),
@@ -1899,6 +1910,102 @@ def _assert_safe_eject_mount_path(mount_path: Path) -> None:
         raise RuntimeError(f"Refusing to unmount protected path `{mount_path}`.")
     if not str(mount_path).startswith("/mnt/pbo/") or mount_path.name != "pbs-datastore":
         raise RuntimeError(f"Refusing to unmount non-PBO datastore path `{mount_path}`.")
+
+
+def _is_target_busy_umount_result(result: SubprocessResult) -> bool:
+    output = f"{result.stdout}\n{result.stderr}".casefold()
+    return "busy" in output or "target is busy" in output
+
+
+def _handle_busy_dedicated_datastore_unmount(
+    mount_path: Path,
+    manager: str,
+    datastore_name: str,
+    settings: AgentSettings,
+    command_summaries: list[str],
+    stdout_logs: list[str],
+    stderr_logs: list[str],
+) -> None:
+    fuser_result = _run_fuser_verbose(mount_path)
+    record_command_result(fuser_result, command_summaries, stdout_logs, stderr_logs)
+    fuser_output = _combined_command_output(fuser_result)
+    if not _only_pbs_services_block_mount(fuser_output):
+        raise RuntimeError(
+            f"Refusing to eject because `{mount_path}` is busy with non-PBS blocker processes.\n"
+            f"fuser output:\n{fuser_output or '(no fuser output)'}"
+        )
+
+    if _pbs_datastore_has_running_tasks(manager, datastore_name, settings, command_summaries, stdout_logs, stderr_logs):
+        raise RuntimeError(
+            f"Refusing to eject because a PBS task started while `{mount_path}` was busy.\n"
+            f"fuser output:\n{fuser_output or '(no fuser output)'}"
+        )
+    if _pbo_export_sync_job_running(manager, settings, command_summaries, stdout_logs, stderr_logs):
+        raise RuntimeError(
+            f"Refusing to eject because a temporary PBO export sync job started while `{mount_path}` was busy.\n"
+            f"fuser output:\n{fuser_output or '(no fuser output)'}"
+        )
+
+    stopped_services: list[str] = []
+    try:
+        for service in ("proxmox-backup-proxy.service", "proxmox-backup.service"):
+            result = run_subprocess(["systemctl", "stop", service], timeout_seconds=60)
+            record_command_result(result, command_summaries, stdout_logs, stderr_logs)
+            if result.returncode != 0:
+                raise RuntimeError(format_command_failure(f"Failed to stop `{service}` before eject.", result))
+            stopped_services.append(service)
+
+        time.sleep(3)
+        retry_result = run_subprocess(["umount", str(mount_path)], timeout_seconds=settings.export_timeout_seconds)
+        record_command_result(retry_result, command_summaries, stdout_logs, stderr_logs)
+        if retry_result.returncode != 0:
+            raise RuntimeError(
+                format_command_failure(
+                    f"Failed to unmount `{mount_path}` after stopping PBS services. fuser output:\n{fuser_output}",
+                    retry_result,
+                )
+            )
+    finally:
+        for service in ("proxmox-backup.service", "proxmox-backup-proxy.service"):
+            if service not in stopped_services:
+                continue
+            result = run_subprocess(["systemctl", "restart", service], timeout_seconds=60)
+            record_command_result(result, command_summaries, stdout_logs, stderr_logs)
+            if result.returncode != 0:
+                stderr_logs.append(format_command_failure(f"Failed to restart `{service}` after eject attempt.", result))
+
+
+def _run_fuser_verbose(mount_path: Path) -> SubprocessResult:
+    fuser = shutil.which("fuser")
+    if not fuser:
+        return SubprocessResult(["fuser", "-vm", str(mount_path)], 127, "", "Missing required dependency: fuser")
+    return run_subprocess([fuser, "-vm", str(mount_path)], timeout_seconds=15)
+
+
+def _combined_command_output(result: SubprocessResult) -> str:
+    return "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part).strip()
+
+
+def _only_pbs_services_block_mount(fuser_output: str) -> bool:
+    process_lines = _fuser_process_lines(fuser_output)
+    if not process_lines:
+        return False
+    allowed_markers = ("proxmox-backup-proxy", "proxmox-backup-api", "proxmox-backup")
+    return all(any(marker in line for marker in allowed_markers) for line in process_lines)
+
+
+def _fuser_process_lines(fuser_output: str) -> list[str]:
+    lines: list[str] = []
+    for raw_line in fuser_output.splitlines():
+        line = raw_line.strip().casefold()
+        if not line or " pid " in f" {line} " or "command" in line:
+            continue
+        if "kernel" in line and "mount" in line:
+            continue
+        tokens = line.replace(":", " ").split()
+        if any(token.isdigit() for token in tokens):
+            lines.append(line)
+    return lines
 
 
 def _pbs_datastore_has_running_tasks(
