@@ -15,7 +15,7 @@ When `AUTH_ENABLED=true`, configure a single admin user:
 ```env
 AUTH_ENABLED=true
 AUTH_USERNAME=admin
-AUTH_PASSWORD_HASH=$2b$12$replace-with-generated-bcrypt-hash
+AUTH_PASSWORD_HASH=$$2b$$12$$replace-with-generated-bcrypt-hash
 AUTH_SECRET_KEY=replace-with-random-secret
 AUTH_TOKEN_EXPIRE_MINUTES=480
 ```
@@ -26,7 +26,15 @@ Generate the hash from the repository root:
 py scripts/generate_password_hash.py
 ```
 
+The script prints a Docker Compose-safe `AUTH_PASSWORD_HASH=<hash>` line. In a docker-compose `.env` file, bcrypt hashes must escape every `$` as `$$`; otherwise Compose interpolates the value and the API may receive a truncated hash such as `$2b$12`.
+
 Bcrypt passwords are limited to 72 bytes after UTF-8 encoding. The API pins `bcrypt<5` because `passlib==1.7.4` is not compatible with bcrypt 5.x.
+
+To debug hash verification inside the API environment:
+
+```powershell
+py -c "from passlib.hash import bcrypt; print(bcrypt.verify('your-password', '$2b$12$paste_the_runtime_hash_here'))"
+```
 
 ## Current scope
 

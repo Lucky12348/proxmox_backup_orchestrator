@@ -45,10 +45,21 @@ class TokenData(BaseModel):
 
 def validate_auth_settings() -> None:
     """Fail startup early when authentication is enabled but incomplete."""
-    if AUTH_ENABLED and not AUTH_PASSWORD_HASH.strip():
+    if not AUTH_ENABLED:
+        return
+
+    password_hash = AUTH_PASSWORD_HASH.strip()
+    if not password_hash:
         raise RuntimeError(
             "AUTH_ENABLED=true but AUTH_PASSWORD_HASH is empty. "
             "Generate one with: py scripts/generate_password_hash.py"
+        )
+
+    if len(password_hash) < 50 or not password_hash.startswith("$2"):
+        raise RuntimeError(
+            "AUTH_PASSWORD_HASH does not look like a complete bcrypt hash. "
+            "It must start with '$2' and be at least 50 characters long. "
+            "If this value is in a docker-compose .env file, escape every '$' as '$$'."
         )
 
 

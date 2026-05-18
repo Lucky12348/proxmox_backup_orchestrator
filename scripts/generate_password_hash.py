@@ -26,7 +26,9 @@ def main() -> int:
         )
         return 1
 
-    print(f"AUTH_PASSWORD_HASH={bcrypt.hash(password)}")
+    password_hash = bcrypt.hash(password)
+    compose_safe_hash = password_hash.replace("$", "$$")
+    print(f"AUTH_PASSWORD_HASH={compose_safe_hash}")
     return 0
 
 
