@@ -21,7 +21,14 @@ function excerptLog(value: string | null, maxLength = 32000) {
   return value.length <= maxLength ? value : `...[truncated]\n${value.slice(-maxLength)}`;
 }
 
-export function ActivityPage({ data, externalBackupRuns, language, t }: ActivityPageProps) {
+export function ActivityPage({
+  cleanupSaving,
+  data,
+  externalBackupRuns,
+  language,
+  onCleanupOldRunsRequest,
+  t,
+}: ActivityPageProps) {
   return (
     <div className="page-stack">
       <PageHeader title={t.nav.activity} description={t.activityIntro} />
@@ -29,6 +36,14 @@ export function ActivityPage({ data, externalBackupRuns, language, t }: Activity
       <section className="panel-card">
         <div className="panel-card-header">
           <h2>{t.externalBackupRuns}</h2>
+          <button
+            className="ghost-button"
+            disabled={cleanupSaving}
+            onClick={onCleanupOldRunsRequest}
+            type="button"
+          >
+            {cleanupSaving ? t.activityCleanupRunning : t.activityCleanupButton}
+          </button>
         </div>
         {externalBackupRuns.length === 0 ? (
           <EmptyState description={t.externalBackupRunsDescription} title={t.emptyExternalBackupRuns} />

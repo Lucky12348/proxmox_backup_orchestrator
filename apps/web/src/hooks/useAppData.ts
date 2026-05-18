@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   getAgentStatus,
   getBackupRuns,
+  cleanupBackupRuns,
+  cleanupExternalBackupRuns,
   getExternalBackupRuns,
   getPBSInventory,
   getPBSStatus,
@@ -297,6 +299,27 @@ export function useAppData() {
     return null;
   }
 
+  async function cleanupActivityRuns(keepLast: number, successMessage: string) {
+    setSavingKey("activity-cleanup");
+    setBannerError(null);
+    setSyncMessage(null);
+
+    try {
+      const [externalResult, backupResult] = await Promise.all([
+        cleanupExternalBackupRuns(keepLast),
+        cleanupBackupRuns(keepLast),
+      ]);
+      await refresh();
+      setSyncMessage(
+        `${successMessage}: ${externalResult.deleted + backupResult.deleted}`,
+      );
+    } catch (cleanupError) {
+      setBannerError(cleanupError instanceof Error ? cleanupError.message : "Unknown error");
+    } finally {
+      setSavingKey(null);
+    }
+  }
+
   const pbsInventoryByVmId = useMemo(
     () => new Map(data?.pbsInventory.map((item) => [item.vm_id, item]) ?? []),
     [data?.pbsInventory],
@@ -322,5 +345,6 @@ export function useAppData() {
     runPBSSync,
     startExternalBackup,
     startDiskPreparation,
+    cleanupActivityRuns,
   };
 }

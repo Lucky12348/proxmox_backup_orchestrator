@@ -53,6 +53,7 @@ export default function App() {
     runPBSSync,
     startExternalBackup,
     startDiskPreparation,
+    cleanupActivityRuns,
   } = useAppData();
 
   const t = translations[language];
@@ -133,6 +134,20 @@ export default function App() {
       tone: "info",
       onConfirm: () => {
         void runPBSSync(t.pbsSyncSummary);
+        closeConfirm();
+      },
+    });
+  }
+
+  function handleActivityCleanupRequest() {
+    openConfirm({
+      title: t.activityCleanupTitle,
+      description: t.activityCleanupDescription,
+      confirmLabel: t.activityCleanupConfirm,
+      cancelLabel: t.cancel,
+      tone: "danger",
+      onConfirm: () => {
+        void cleanupActivityRuns(10, t.activityCleanupSummary);
         closeConfirm();
       },
     });
@@ -354,8 +369,10 @@ export default function App() {
             element={
               <ActivityPage
                 data={data}
+                cleanupSaving={savingKey === "activity-cleanup"}
                 externalBackupRuns={data.externalBackupRuns}
                 language={language}
+                onCleanupOldRunsRequest={handleActivityCleanupRequest}
                 t={t}
               />
             }

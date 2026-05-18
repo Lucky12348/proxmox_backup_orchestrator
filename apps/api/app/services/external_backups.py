@@ -84,6 +84,41 @@ def get_external_backup_run(db: Session, run_id: int) -> ExternalBackupRun:
     return run
 
 
+def delete_external_backup_run(db: Session, run_id: int) -> None:
+    run = get_external_backup_run(db, run_id)
+    if run.status in {BackupRunStatus.PENDING, BackupRunStatus.RUNNING}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Pending or running external backup runs cannot be deleted.",
+        )
+
+    db.delete(run)
+    db.commit()
+
+
+def cleanup_external_backup_runs(db: Session, keep_last: int = 10) -> int:
+    keep_last = max(0, keep_last)
+    runs = list_external_backup_runs(db)
+    protected_ids = {
+        run.id
+        for run in runs[:keep_last]
+    } | {
+        run.id
+        for run in runs
+        if run.status in {BackupRunStatus.PENDING, BackupRunStatus.RUNNING}
+    }
+    deletable = [
+        run
+        for run in runs
+        if run.status == BackupRunStatus.FAILED and run.id not in protected_ids
+    ]
+
+    for run in deletable:
+        db.delete(run)
+    db.commit()
+    return len(deletable)
+
+
 def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> ExternalBackupRun:
     if not confirmation:
         raise HTTPException(

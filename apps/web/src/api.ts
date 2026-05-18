@@ -43,6 +43,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(parsedDetail || body || `Request failed with status ${response.status}`);
   }
 
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   return (await response.json()) as T;
 }
 
@@ -160,6 +164,24 @@ export function getExternalBackupRuns() {
 
 export function getExternalBackupRun(runId: number) {
   return request<ExternalBackupRun>(`/external-backups/runs/${runId}`);
+}
+
+export function cleanupExternalBackupRuns(keepLast = 10) {
+  return request<{ deleted: number; keep_last: number }>(`/external-backups/runs/cleanup?keep_last=${keepLast}`, {
+    method: "DELETE",
+  });
+}
+
+export function deleteExternalBackupRun(runId: number) {
+  return request<void>(`/external-backups/runs/${runId}`, {
+    method: "DELETE",
+  });
+}
+
+export function cleanupBackupRuns(keepLast = 10) {
+  return request<{ deleted: number; keep_last: number }>(`/backup-runs/cleanup?keep_last=${keepLast}`, {
+    method: "DELETE",
+  });
 }
 
 export function prepareDisk(

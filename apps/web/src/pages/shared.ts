@@ -60,6 +60,8 @@ export interface PlanningPageProps extends PageCommonProps {}
 
 export interface ActivityPageProps extends PageCommonProps {
   externalBackupRuns: ExternalBackupRun[];
+  cleanupSaving: boolean;
+  onCleanupOldRunsRequest: () => void;
 }
 
 export interface SettingsPageProps {

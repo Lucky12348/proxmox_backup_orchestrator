@@ -16,6 +16,7 @@ from app.services.disk_handoff import (
     get_pbs_disk_visibility,
     handoff_disk_to_pbs,
 )
+from app.services.activity_cleanup import cleanup_disk_preparation_runs
 from app.services.disk_preparations import get_disk_preparation_run, list_disk_preparation_runs, prepare_disk
 from app.services.disks import list_preferred_disks
 
@@ -78,6 +79,12 @@ def get_preparation_runs(disk_id: int, db: DbSession) -> list[DiskPreparationRun
         DiskPreparationRunRead.model_validate(run)
         for run in list_disk_preparation_runs(db, disk_id)
     ]
+
+
+@router.delete("/preparation-runs/cleanup")
+def cleanup_preparation_runs(db: DbSession, keep_last: int = 10) -> dict[str, int]:
+    deleted = cleanup_disk_preparation_runs(db, keep_last=keep_last)
+    return {"deleted": deleted, "keep_last": keep_last}
 
 
 @router.get("/preparation-runs/{run_id}", response_model=DiskPreparationRunRead)
