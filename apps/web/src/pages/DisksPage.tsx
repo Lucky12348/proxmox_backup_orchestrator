@@ -5,13 +5,29 @@ import { StatusBadge } from "../components/StatusBadge";
 import { formatDateTime } from "../utils";
 import type { DisksPageProps } from "./shared";
 
+function CapacityBar({ used, total }: { used: number | null; total: number }) {
+  const pct = used !== null ? Math.min(100, Math.round((used / total) * 100)) : 0;
+  const cls = pct >= 90 ? "danger" : pct >= 70 ? "warn" : "";
+
+  return (
+    <div className="cap-wrap">
+      <div className="cap-nums">
+        <span>{used ?? "?"} GB</span>
+        <span>{total} GB</span>
+      </div>
+      <div className="cap-bar">
+        <div className={`cap-fill ${cls}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
 export function DisksPage({
   data,
   language,
   savingKey,
   t,
   onDiskToggleRequest,
-  onDiskFieldChange,
   onExternalBackupRequest,
   onDiskEjectRequest,
   onDiskPreparationRequest,
@@ -27,48 +43,39 @@ export function DisksPage({
           <table>
             <thead>
               <tr>
-                <th>{t.diskSerial}</th>
                 <th>{t.diskName}</th>
-                <th>{t.diskModel}</th>
-                <th>{t.diskCapacity}</th>
-                <th>{t.diskFilesystem}</th>
-                <th>{t.diskMountPath}</th>
                 <th>{t.diskConnected}</th>
-                <th>{t.diskCandidateType}</th>
-                <th>{t.diskDetectionReason}</th>
+                <th>{t.diskCapacity}</th>
                 <th>{t.diskTrusted}</th>
-                <th>{t.diskHandoffStatus}</th>
                 <th>{t.diskPbsVisible}</th>
-                <th>{t.diskDedicated}</th>
-                <th>{t.pbsDatastore}</th>
-                <th>{t.diskUsableCapacity}</th>
-                <th>{t.diskReservedCapacity}</th>
-                <th>{t.diskPlanningNotes}</th>
-                <th>{t.prepareDiskAction}</th>
-                <th>{t.externalBackupAction}</th>
-                <th>{t.ejectDiskAction}</th>
                 <th>{t.diskLastSeen}</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {data.disks.map((disk) => (
                 <tr key={disk.id}>
-                  <td>{disk.serial_number}</td>
-                  <td>{disk.display_name}</td>
-                  <td>{disk.model_name ?? t.notAvailable}</td>
-                  <td>{disk.capacity_gb} GB</td>
-                  <td>{disk.filesystem_type ?? t.notAvailable}</td>
-                  <td>{disk.mount_path ?? t.notAvailable}</td>
+                  <td>
+                    <div style={{ fontWeight: 500, color: "var(--t1)", fontSize: 13 }}>
+                      {disk.display_name}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>
+                      {disk.serial_number}
+                      {disk.model_name ? ` - ${disk.model_name}` : ""}
+                    </div>
+                  </td>
                   <td>
                     <StatusBadge tone={disk.connected ? "success" : "neutral"}>
                       {disk.connected ? t.connected : t.disconnected}
                     </StatusBadge>
                   </td>
-                  <td>{disk.candidate_type ?? t.notAvailable}</td>
-                  <td>{disk.detection_reason ?? t.notAvailable}</td>
                   <td>
-                    <label className="checkbox-cell">
+                    <CapacityBar used={disk.usable_capacity_gb} total={disk.capacity_gb} />
+                  </td>
+                  <td>
+                    <label className="toggle">
                       <input
+                        type="checkbox"
                         checked={disk.trusted}
                         disabled={savingKey === `disk-${disk.id}`}
                         onChange={(event) =>
@@ -78,108 +85,49 @@ export function DisksPage({
                             value: event.target.checked,
                           })
                         }
-                        type="checkbox"
                       />
-                      <span>{disk.trusted ? t.yes : t.no}</span>
+                      <span className="toggle-slider" />
                     </label>
-                  </td>
-                  <td>
-                    {disk.pbs_visible || disk.pbs_handoff_slot ? (
-                      <StatusBadge tone="success">
-                        {disk.pbs_device_path
-                          ? `${disk.handoff_status ?? "PBS"} (${disk.pbs_device_path})`
-                          : disk.handoff_status ?? "PBS"}
-                      </StatusBadge>
-                    ) : (
-                      disk.handoff_status ?? t.notAvailable
-                    )}
                   </td>
                   <td>
                     <StatusBadge tone={disk.pbs_visible ? "success" : "neutral"}>
                       {disk.pbs_visible ? t.yes : t.no}
                     </StatusBadge>
                   </td>
-                  <td>
-                    <StatusBadge tone={disk.dedicated_backup_disk ? "success" : "warning"}>
-                      {disk.dedicated_backup_disk ? t.yes : t.no}
-                    </StatusBadge>
+                  <td style={{ fontSize: 12, color: "var(--t3)" }}>
+                    {formatDateTime(disk.last_seen_at, language, t.notAvailable)}
                   </td>
                   <td>
-                    {disk.pbs_datastore_name ?? disk.pbs_mount_path ?? t.notAvailable}
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button
+                        className="action-button"
+                        disabled={savingKey === `external-backup-${disk.id}` || !disk.connected}
+                        onClick={() => onExternalBackupRequest(disk)}
+                        type="button"
+                        style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
+                      >
+                        {t.externalBackupAction}
+                      </button>
+                      <button
+                        className="ghost-button"
+                        disabled={savingKey === `disk-prep-${disk.id}`}
+                        onClick={() => onDiskPreparationRequest(disk)}
+                        type="button"
+                        style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
+                      >
+                        {savingKey === `disk-prep-${disk.id}` ? t.preparingDisk : t.prepareDiskAction}
+                      </button>
+                      <button
+                        className="ghost-button"
+                        disabled={savingKey === `disk-eject-${disk.id}` || !disk.connected}
+                        onClick={() => onDiskEjectRequest(disk)}
+                        type="button"
+                        style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
+                      >
+                        {savingKey === `disk-eject-${disk.id}` ? t.ejectingDisk : t.ejectDiskAction}
+                      </button>
+                    </div>
                   </td>
-                  <td>
-                    <input
-                      className="number-input"
-                      defaultValue={disk.usable_capacity_gb ?? ""}
-                      disabled={savingKey === `disk-${disk.id}`}
-                      min={0}
-                      onBlur={(event) =>
-                        onDiskFieldChange(disk.id, {
-                          usable_capacity_gb:
-                            event.target.value === "" ? null : Number(event.target.value),
-                        })
-                      }
-                      type="number"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      className="number-input"
-                      defaultValue={disk.reserved_capacity_gb}
-                      disabled={savingKey === `disk-${disk.id}`}
-                      min={0}
-                      onBlur={(event) =>
-                        onDiskFieldChange(disk.id, {
-                          reserved_capacity_gb: Number(event.target.value || 0),
-                        })
-                      }
-                      type="number"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      className="text-input"
-                      defaultValue={disk.planning_notes ?? ""}
-                      disabled={savingKey === `disk-${disk.id}`}
-                      onBlur={(event) =>
-                        onDiskFieldChange(disk.id, {
-                          planning_notes: event.target.value || null,
-                        })
-                      }
-                      type="text"
-                    />
-                  </td>
-                  <td>
-                    <button
-                      className="ghost-button"
-                      disabled={savingKey === `disk-prep-${disk.id}`}
-                      onClick={() => onDiskPreparationRequest(disk)}
-                      type="button"
-                    >
-                      {savingKey === `disk-prep-${disk.id}` ? t.preparingDisk : t.prepareDiskAction}
-                    </button>
-                  </td>
-                  <td>
-                    <button
-                      className="action-button"
-                      disabled={savingKey === `external-backup-${disk.id}`}
-                      onClick={() => onExternalBackupRequest(disk)}
-                      type="button"
-                    >
-                      {t.externalBackupAction}
-                    </button>
-                  </td>
-                  <td>
-                    <button
-                      className="ghost-button"
-                      disabled={savingKey === `disk-eject-${disk.id}`}
-                      onClick={() => onDiskEjectRequest(disk)}
-                      type="button"
-                    >
-                      {savingKey === `disk-eject-${disk.id}` ? t.ejectingDisk : t.ejectDiskAction}
-                    </button>
-                  </td>
-                  <td>{formatDateTime(disk.last_seen_at, language, t.notAvailable)}</td>
                 </tr>
               ))}
             </tbody>

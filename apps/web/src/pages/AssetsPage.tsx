@@ -112,7 +112,11 @@ export function AssetsPage({
                 return (
                   <tr key={vm.id}>
                     <td>{vm.name}</td>
-                    <td>{vm.vm_type.toUpperCase()}</td>
+                    <td>
+                      <span className={vm.vm_type === "vm" ? "type-pill vm-pill" : "type-pill ct-pill"}>
+                        {vm.vm_type.toUpperCase()}
+                      </span>
+                    </td>
                     <td>
                       <StatusBadge tone={getSourceTone(vm.source)}>
                         {t.source[vm.source]}
@@ -130,14 +134,14 @@ export function AssetsPage({
                       </StatusBadge>
                     </td>
                     <td>
-                      <label className="checkbox-cell">
+                      <label className="toggle">
                         <input
+                          type="checkbox"
                           checked={vm.critical}
                           disabled={savingKey === `vm-${vm.id}`}
                           onChange={(event) => onVmCriticalChange(vm.id, event.target.checked)}
-                          type="checkbox"
                         />
-                        <span>{vm.critical ? t.yes : t.no}</span>
+                        <span className="toggle-slider" />
                       </label>
                     </td>
                     <td>{vm.size_gb} GB</td>

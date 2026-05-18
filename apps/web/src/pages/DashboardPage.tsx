@@ -99,11 +99,11 @@ function LatestBackupCard({ label, value, hint, tone }: LatestBackupCardProps) {
   }, []);
 
   const colorMap: Record<string, string> = {
-    success: "var(--success)",
-    danger:  "var(--danger)",
-    warning: "var(--warning)",
-    info:    "var(--info)",
-    neutral: "var(--text-secondary)",
+    success: "var(--gr)",
+    danger:  "var(--re)",
+    warning: "var(--ye)",
+    info:    "var(--ac)",
+    neutral: "var(--t2)",
   };
 
   return (
@@ -208,19 +208,17 @@ export function DashboardPage({ data, t, latestBackupLabel }: DashboardPageProps
           <div className="summary-list">
             <div className="summary-row">
               <span>{t.planningCoverage}</span>
-              <strong style={{ fontFamily: "var(--text-mono)", color: "var(--accent)", fontSize: "0.9rem" }}>
+              <strong style={{ color: "var(--ac)", fontSize: "0.9rem" }}>
                 {data.planningOverview.planning_coverage_percent}%
               </strong>
             </div>
             <div className="summary-row">
               <span>{t.planningTrustedDisks}</span>
-              <strong style={{ fontFamily: "var(--text-mono)", fontSize: "0.9rem" }}>
-                {data.planningOverview.trusted_disk_count}
-              </strong>
+              <strong>{data.planningOverview.trusted_disk_count}</strong>
             </div>
             <div className="summary-row">
               <span>{t.planningPlannedAssets}</span>
-              <strong style={{ fontFamily: "var(--text-mono)", fontSize: "0.9rem" }}>
+              <strong>
                 {data.planningOverview.planned_vm_count} / {data.planningOverview.plannable_vm_count}
               </strong>
             </div>

@@ -116,17 +116,29 @@ export function AppShell({ children, language, onLanguageChange, t }: AppShellPr
         </nav>
 
         <div className="sidebar-footer">
-          <label className="language-select">
-            <span>{t.language}</span>
-            <select
-              aria-label={t.language}
-              onChange={(event) => onLanguageChange(event.target.value as Language)}
-              value={language}
-            >
-              <option value="fr">FR</option>
-              <option value="en">EN</option>
-            </select>
-          </label>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px" }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: "50%",
+              background: "var(--ac-d)", border: "1px solid rgba(88,166,255,.3)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 11, fontWeight: 600, color: "var(--ac)", flexShrink: 0
+            }}>A</div>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: "var(--t1)" }}>admin</div>
+              <div style={{ fontSize: 11, color: "var(--t3)" }}>Local</div>
+            </div>
+            <label className="language-select" style={{ marginLeft: "auto" }}>
+              <select
+                aria-label={t.language}
+                onChange={(event) => onLanguageChange(event.target.value as Language)}
+                value={language}
+                style={{ minHeight: 28, fontSize: 11, padding: "3px 8px" }}
+              >
+                <option value="fr">FR</option>
+                <option value="en">EN</option>
+              </select>
+            </label>
+          </div>
         </div>
       </aside>
 
@@ -138,16 +150,13 @@ export function AppShell({ children, language, onLanguageChange, t }: AppShellPr
             <span className="topbar-title">{t.adminConsole}</span>
           </div>
           <div className="topbar-right">
-            {/* status dot */}
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <span style={{
-                width: 7, height: 7, borderRadius: "50%",
-                background: "var(--success)",
-                boxShadow: "0 0 6px var(--success)",
-                display: "inline-block"
+                width: 6, height: 6, borderRadius: "50%",
+                background: "var(--gr)", display: "inline-block"
               }} />
-              <span className="muted-text" style={{ fontSize: "0.7rem" }}>LIVE</span>
-            </span>
+              <span className="muted-text">LIVE</span>
+            </div>
           </div>
         </header>
 

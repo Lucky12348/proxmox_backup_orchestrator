@@ -1,7 +1,77 @@
-﻿/* â”€â”€ Reset â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+# PBO — UI Redesign Implementation Guide
+
+> Instructions complètes pour implémenter la refonte UI dans le projet existant.
+> Le code actuel fonctionne (auth JWT inclus). Ce README décrit uniquement les changements
+> de style et de structure visuelle — **aucune logique métier n'est modifiée**.
+
+---
+
+## Contexte
+
+Le projet a déjà intégré :
+- ✅ Authentification JWT (auth.py, AuthContext.tsx, LoginPage.tsx, router.py mis à jour)
+- ✅ GSAP chargé via CDN dans index.html
+- ✅ Google Fonts (Space Mono + Syne) dans index.html
+
+**Le problème actuel :** le design hérité utilise `Space Mono` comme police principale (illisible,
+trop étroite) et `Syne` pour les titres. Les backgrounds sont quasi-noirs avec des accents cyan
+très saturés — lisibilité insuffisante sur Firefox. Les bordures cyan trop présentes créent une
+fatigue visuelle.
+
+**Direction cible :** dark lisible, palette inspirée GitHub Dark (#0d1117), typographie système
+`-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif`, densité réduite,
+badges avec dot de statut, barres de capacité visuelles sur les disques, toggles CSS pour les
+booleans, filtres inline sans labels uppercase agressifs.
+
+---
+
+## Fichiers à modifier
+
+### 1. `apps/web/index.html` — REMPLACER
+
+**Retirer** les polices Google Fonts (Space Mono + Syne) et ne garder que GSAP.
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PBO — Proxmox Backup Orchestrator</title>
+    <meta name="description" content="Backup visibility, removable media tracking, and planning for Proxmox." />
+    <meta name="theme-color" content="#0d1117" />
+    <!-- GSAP -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+```
+
+---
+
+### 2. `apps/web/src/styles.css` — REMPLACER INTÉGRALEMENT
+
+Remplacer tout le contenu par le CSS ci-dessous.
+
+**Changements clés par rapport à l'actuel :**
+- Police : `font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif` (plus de Space Mono / Syne)
+- Couleurs de fond : `#0d1117` (void), `#161b22` (surface), `#21262d` (elevated) — palette GitHub Dark
+- Accent : `#58a6ff` (bleu GitHub, moins agressif que cyan)
+- Bordures : `#30363d` (neutre, pas de teinte bleue)
+- Texte principal : `#e6edf3`, secondaire : `#8b949e`, muted : `#6e7681`
+- Suppression de toutes les variables `--text-mono`, `--text-display`
+- Sidebar : largeur 220px (au lieu de 260px), fond `#161b22`
+- Nouveau : `.toggle` (switch CSS), `.cap-bar` (barre de capacité), `.type-pill`
+
+```css
+/* ── Reset ─────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* â”€â”€ Tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Tokens ─────────────────────────────────────────── */
 :root {
   --bg0: #0d1117;
   --bg1: #161b22;
@@ -37,14 +107,14 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg0); }
 button, input, select { font: inherit; }
 #root { min-height: 100vh; }
 
-/* â”€â”€ Shell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Shell ───────────────────────────────────────────── */
 .shell {
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   min-height: 100vh;
 }
 
-/* â”€â”€ Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Sidebar ─────────────────────────────────────────── */
 .sidebar {
   position: sticky;
   top: 0;
@@ -138,7 +208,7 @@ button, input, select { font: inherit; }
   flex-shrink: 0;
 }
 
-/* â”€â”€ Topbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Topbar ──────────────────────────────────────────── */
 .shell-main { display: flex; flex-direction: column; min-width: 0; }
 
 .topbar {
@@ -162,7 +232,7 @@ button, input, select { font: inherit; }
 .topbar-title { font-size: 13px; font-weight: 600; color: var(--t1); }
 .topbar-right { display: flex; align-items: center; gap: 12px; }
 
-/* â”€â”€ Page layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Page layout ─────────────────────────────────────── */
 .page-container { padding: 20px 24px 40px; flex: 1; }
 .page-stack { display: flex; flex-direction: column; gap: 16px; }
 
@@ -191,13 +261,13 @@ button, input, select { font: inherit; }
 
 .page-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
-/* â”€â”€ Grids â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Grids ───────────────────────────────────────────── */
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .stats-grid-compact { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .integration-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 
-/* â”€â”€ KPI / Stat cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── KPI / Stat cards ────────────────────────────────── */
 .stat-card {
   background: var(--bg1);
   border: 1px solid var(--bd);
@@ -235,7 +305,7 @@ button, input, select { font: inherit; }
 .stat-value-danger  { color: var(--re); }
 .stat-value-warning { color: var(--ye); }
 
-/* â”€â”€ Panel cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Panel cards ─────────────────────────────────────── */
 .panel-card {
   background: var(--bg1);
   border: 1px solid var(--bd);
@@ -262,7 +332,7 @@ button, input, select { font: inherit; }
 
 .panel-narrow { width: min(520px, calc(100vw - 40px)); }
 
-/* â”€â”€ Summary rows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Summary rows ────────────────────────────────────── */
 .summary-list { display: flex; flex-direction: column; }
 
 .summary-row {
@@ -279,7 +349,7 @@ button, input, select { font: inherit; }
 .summary-row span { color: var(--t2); font-size: 13px; }
 .summary-row strong { font-weight: 500; color: var(--t1); font-size: 13px; }
 
-/* â”€â”€ Compact list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Compact list ────────────────────────────────────── */
 .compact-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
 
 .compact-list li {
@@ -295,7 +365,7 @@ button, input, select { font: inherit; }
 .compact-list li span { color: var(--t2); }
 .compact-list li strong { font-weight: 500; color: var(--t1); }
 
-/* â”€â”€ Status badges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Status badges ───────────────────────────────────── */
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -332,7 +402,7 @@ button, input, select { font: inherit; }
 .status-neutral { background: var(--bg3); color: var(--t2); border: 1px solid var(--bd); }
 .status-neutral::before { background: var(--t3); }
 
-/* â”€â”€ Buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Buttons ─────────────────────────────────────────── */
 .action-button,
 .ghost-button,
 .icon-button {
@@ -378,7 +448,7 @@ button, input, select { font: inherit; }
 .action-warning { border-color: rgba(210,153,34,.4); background: var(--ye-d); color: var(--ye); }
 .action-info    { border-color: rgba(88,166,255,.4); background: var(--ac-d); color: var(--ac); }
 
-/* â”€â”€ Inline link â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Inline link ─────────────────────────────────────── */
 .inline-link {
   font-size: 11px;
   font-weight: 600;
@@ -391,10 +461,10 @@ button, input, select { font: inherit; }
 }
 .inline-link:hover { opacity: 1; }
 
-/* â”€â”€ Muted text â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Muted text ──────────────────────────────────────── */
 .muted-text { font-size: 11px; color: var(--t3); }
 
-/* â”€â”€ Form fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Form fields ─────────────────────────────────────── */
 .language-select,
 .field {
   display: grid;
@@ -440,14 +510,14 @@ button, input, select { font: inherit; }
 .number-input { width: 100px; }
 .text-input   { min-width: 160px; }
 
-/* â”€â”€ Filters bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Filters bar ─────────────────────────────────────── */
 .filters-bar {
   display: grid;
   grid-template-columns: minmax(200px, 1.4fr) repeat(2, minmax(130px, 0.8fr));
   gap: 10px;
 }
 
-/* â”€â”€ Data table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Data table ──────────────────────────────────────── */
 .data-table-wrap {
   overflow-x: auto;
   border-radius: var(--r8);
@@ -486,7 +556,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .checkbox-cell { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
 .checkbox-cell input { width: 14px; height: 14px; accent-color: var(--ac); cursor: pointer; }
 
-/* â”€â”€ Toggle switch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Toggle switch ───────────────────────────────────── */
 .toggle {
   position: relative;
   width: 32px;
@@ -518,7 +588,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .toggle input:checked + .toggle-slider { background: var(--gr-d); border-color: rgba(63,185,80,.4); }
 .toggle input:checked + .toggle-slider::before { transform: translateX(14px); background: var(--gr); }
 
-/* â”€â”€ Capacity bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Capacity bar ────────────────────────────────────── */
 .cap-wrap { display: grid; gap: 4px; min-width: 100px; }
 .cap-nums { display: flex; justify-content: space-between; font-size: 11px; color: var(--t3); }
 .cap-bar  { height: 4px; background: var(--bg3); border-radius: 2px; overflow: hidden; }
@@ -526,7 +596,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .cap-fill.warn   { background: var(--ye); }
 .cap-fill.danger { background: var(--re); }
 
-/* â”€â”€ Type pill (VM / CT) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Type pill (VM / CT) ─────────────────────────────── */
 .type-pill {
   display: inline-block;
   padding: 2px 7px;
@@ -539,7 +609,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .vm-pill { background: var(--ac-d); color: var(--ac); border: 1px solid rgba(88,166,255,.15); }
 .ct-pill { background: rgba(165,160,255,.1); color: var(--pu); border: 1px solid rgba(165,160,255,.15); }
 
-/* â”€â”€ Banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Banner ──────────────────────────────────────────── */
 .banner {
   display: flex;
   align-items: center;
@@ -555,12 +625,12 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .banner-error { background: var(--re-d); border-color: rgba(248,81,73,.2); color: #ff8099; }
 .banner-info  { background: var(--ac-d); border-color: rgba(88,166,255,.2); color: var(--ac); }
 
-/* â”€â”€ Empty state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Empty state ─────────────────────────────────────── */
 .empty-state-block { display: grid; gap: 5px; padding: 16px 0; }
 .empty-state-title { margin: 0; font-size: 13px; font-weight: 500; color: var(--t2); }
 .empty-state-description { margin: 0; font-size: 12px; color: var(--t3); }
 
-/* â”€â”€ Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Loading ─────────────────────────────────────────── */
 .loading-block {
   display: grid;
   justify-items: center;
@@ -581,10 +651,10 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* â”€â”€ Centered shell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Centered shell ──────────────────────────────────── */
 .centered-shell { display: grid; place-items: center; min-height: 100vh; padding: 20px; }
 
-/* â”€â”€ Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Modal ───────────────────────────────────────────── */
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -628,7 +698,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
   border-top: 1px solid var(--bd);
 }
 
-/* â”€â”€ Choice cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Choice cards ────────────────────────────────────── */
 .choice-grid { display: grid; gap: 10px; }
 .choice-card {
   display: grid;
@@ -646,7 +716,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .choice-card-danger { border-color: rgba(248,81,73,.2); }
 .destructive-check { padding: 10px 12px; border: 1px solid rgba(248,81,73,.2); border-radius: var(--r6); background: var(--re-d); font-size: 13px; }
 
-/* â”€â”€ Log details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Log details ─────────────────────────────────────── */
 .log-details { min-width: 220px; }
 .log-details summary { cursor: pointer; font-size: 12px; color: var(--ac); font-weight: 600; }
 .log-details-body { display: grid; gap: 8px; margin-top: 8px; }
@@ -669,11 +739,11 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
   line-height: 1.6;
 }
 
-/* â”€â”€ Integration message â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Integration message ─────────────────────────────── */
 .integration-details { display: flex; flex-direction: column; }
 .integration-message { margin: 10px 0 0; font-size: 12px; color: var(--t3); line-height: 1.5; }
 
-/* â”€â”€ Login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Login ───────────────────────────────────────────── */
 .login-shell {
   display: grid;
   place-items: center;
@@ -758,7 +828,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
   text-align: center;
 }
 
-/* â”€â”€ Responsive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Responsive ──────────────────────────────────────── */
 @media (max-width: 1200px) {
   .stats-grid, .integration-grid { grid-template-columns: repeat(2, 1fr); }
   .summary-grid { grid-template-columns: 1fr; }
@@ -776,3 +846,305 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
   .page-header { flex-direction: column; }
   .stats-grid, .stats-grid-compact, .integration-grid, .filters-bar { grid-template-columns: 1fr; }
 }
+```
+
+---
+
+### 3. `apps/web/src/components/AppShell.tsx` — MODIFIER
+
+Changer uniquement l'indicateur LIVE dans le topbar-right.
+Remplacer le bloc `<span style={{ display: "flex"...}}>` par :
+
+```tsx
+<div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+  <span style={{
+    width: 6, height: 6, borderRadius: "50%",
+    background: "var(--gr)", display: "inline-block"
+  }} />
+  <span className="muted-text">LIVE</span>
+</div>
+```
+
+Ajouter aussi un user block dans le footer. Remplacer le contenu de `sidebar-footer` par :
+
+```tsx
+<div className="sidebar-footer">
+  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px" }}>
+    <div style={{
+      width: 28, height: 28, borderRadius: "50%",
+      background: "var(--ac-d)", border: "1px solid rgba(88,166,255,.3)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: 11, fontWeight: 600, color: "var(--ac)", flexShrink: 0
+    }}>A</div>
+    <div>
+      <div style={{ fontSize: 12, fontWeight: 500, color: "var(--t1)" }}>admin</div>
+      <div style={{ fontSize: 11, color: "var(--t3)" }}>Local</div>
+    </div>
+    <label className="language-select" style={{ marginLeft: "auto" }}>
+      <select
+        aria-label={t.language}
+        onChange={(event) => onLanguageChange(event.target.value as Language)}
+        value={language}
+        style={{ minHeight: 28, fontSize: 11, padding: "3px 8px" }}
+      >
+        <option value="fr">FR</option>
+        <option value="en">EN</option>
+      </select>
+    </label>
+  </div>
+</div>
+```
+
+---
+
+### 4. `apps/web/src/pages/DisksPage.tsx` — REMPLACER INTÉGRALEMENT
+
+Réduire les 21 colonnes à 7 colonnes essentielles + barres de capacité visuelles.
+
+```tsx
+import { DataTable } from "../components/DataTable";
+import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
+import { StatusBadge } from "../components/StatusBadge";
+import { formatDateTime } from "../utils";
+import type { DisksPageProps } from "./shared";
+
+function CapacityBar({ used, total }: { used: number | null; total: number }) {
+  const pct = used !== null ? Math.min(100, Math.round((used / total) * 100)) : 0;
+  const cls = pct >= 90 ? "danger" : pct >= 70 ? "warn" : "";
+  return (
+    <div className="cap-wrap">
+      <div className="cap-nums">
+        <span>{used ?? "?"} GB</span>
+        <span>{total} GB</span>
+      </div>
+      <div className="cap-bar">
+        <div className={`cap-fill ${cls}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+export function DisksPage({
+  data,
+  language,
+  savingKey,
+  t,
+  onDiskToggleRequest,
+  onDiskFieldChange,
+  onExternalBackupRequest,
+  onDiskEjectRequest,
+  onDiskPreparationRequest,
+}: DisksPageProps) {
+  return (
+    <div className="page-stack">
+      <PageHeader title={t.nav.disks} description={t.disksIntro} />
+
+      {data.disks.length === 0 ? (
+        <EmptyState description={t.disksEmptyDescription} title={t.emptyDisks} />
+      ) : (
+        <DataTable>
+          <table>
+            <thead>
+              <tr>
+                <th>{t.diskName}</th>
+                <th>{t.diskConnected}</th>
+                <th>{t.diskCapacity}</th>
+                <th>{t.diskTrusted}</th>
+                <th>{t.diskPbsVisible}</th>
+                <th>{t.diskLastSeen}</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.disks.map((disk) => (
+                <tr key={disk.id}>
+                  <td>
+                    <div style={{ fontWeight: 500, color: "var(--t1)", fontSize: 13 }}>
+                      {disk.display_name}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>
+                      {disk.serial_number}
+                      {disk.model_name ? ` · ${disk.model_name}` : ""}
+                    </div>
+                  </td>
+                  <td>
+                    <StatusBadge tone={disk.connected ? "success" : "neutral"}>
+                      {disk.connected ? t.connected : t.disconnected}
+                    </StatusBadge>
+                  </td>
+                  <td>
+                    <CapacityBar
+                      used={disk.usable_capacity_gb}
+                      total={disk.capacity_gb}
+                    />
+                  </td>
+                  <td>
+                    <label className="toggle">
+                      <input
+                        type="checkbox"
+                        checked={disk.trusted}
+                        disabled={savingKey === `disk-${disk.id}`}
+                        onChange={(e) =>
+                          onDiskToggleRequest({ disk, field: "trusted", value: e.target.checked })
+                        }
+                      />
+                      <span className="toggle-slider" />
+                    </label>
+                  </td>
+                  <td>
+                    <StatusBadge tone={disk.pbs_visible ? "success" : "neutral"}>
+                      {disk.pbs_visible ? t.yes : t.no}
+                    </StatusBadge>
+                  </td>
+                  <td style={{ fontSize: 12, color: "var(--t3)" }}>
+                    {formatDateTime(disk.last_seen_at, language, t.notAvailable)}
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button
+                        className="action-button"
+                        disabled={savingKey === `external-backup-${disk.id}` || !disk.connected}
+                        onClick={() => onExternalBackupRequest(disk)}
+                        type="button"
+                        style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
+                      >
+                        {t.externalBackupAction}
+                      </button>
+                      <button
+                        className="ghost-button"
+                        disabled={savingKey === `disk-prep-${disk.id}`}
+                        onClick={() => onDiskPreparationRequest(disk)}
+                        type="button"
+                        style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
+                      >
+                        {savingKey === `disk-prep-${disk.id}` ? t.preparingDisk : t.prepareDiskAction}
+                      </button>
+                      <button
+                        className="ghost-button"
+                        disabled={savingKey === `disk-eject-${disk.id}` || !disk.connected}
+                        onClick={() => onDiskEjectRequest(disk)}
+                        type="button"
+                        style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
+                      >
+                        {savingKey === `disk-eject-${disk.id}` ? t.ejectingDisk : t.ejectDiskAction}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DataTable>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+### 5. `apps/web/src/pages/AssetsPage.tsx` — MODIFIER le tableau
+
+Dans la colonne criticité, remplacer le `<label className="checkbox-cell">` par un toggle :
+
+```tsx
+<td>
+  <label className="toggle">
+    <input
+      type="checkbox"
+      checked={vm.critical}
+      disabled={savingKey === `vm-${vm.id}`}
+      onChange={(e) => onVmCriticalChange(vm.id, e.target.checked)}
+    />
+    <span className="toggle-slider" />
+  </label>
+</td>
+```
+
+Dans la colonne type, remplacer `{vm.vm_type.toUpperCase()}` par :
+
+```tsx
+<span className={vm.vm_type === "vm" ? "type-pill vm-pill" : "type-pill ct-pill"}>
+  {vm.vm_type.toUpperCase()}
+</span>
+```
+
+---
+
+### 6. `apps/web/src/pages/DashboardPage.tsx` — MODIFIER les strong dans les panels
+
+Dans les deux panels `planningSummary` et `integrationsSummary`, retirer le
+`fontFamily: "var(--text-mono)"` des `<strong>` inline — cette variable n'existe plus.
+
+Remplacer par simplement :
+```tsx
+<strong style={{ color: "var(--ac)", fontSize: "0.9rem" }}>
+  {data.planningOverview.planning_coverage_percent}%
+</strong>
+```
+et les autres `strong` sans style particulier (la CSS gère déjà `summary-row strong`).
+
+---
+
+### 7. `apps/web/src/components/ErrorBanner.tsx` — MODIFIER
+
+Le composant utilise `tone="error"` mais la CSS cible `.banner-error`. Corriger :
+
+```tsx
+interface ErrorBannerProps {
+  message: string;
+  tone?: "error" | "info";
+  dismissLabel?: string;
+  onDismiss?: () => void;
+}
+
+export function ErrorBanner({ message, tone = "error", dismissLabel = "Close", onDismiss }: ErrorBannerProps) {
+  return (
+    <section className={`banner ${tone === "info" ? "banner-info" : "banner-error"}`}>
+      <p>{message}</p>
+      {onDismiss ? (
+        <button className="ghost-button" onClick={onDismiss} type="button" style={{ minHeight: 28, fontSize: 12 }}>
+          {dismissLabel}
+        </button>
+      ) : null}
+    </section>
+  );
+}
+```
+
+---
+
+## Vérification finale
+
+Après avoir appliqué ces changements, lancer :
+
+```bash
+cd apps/web
+npm run build
+```
+
+Si des erreurs TypeScript remontent sur `--text-mono` ou `--text-display` dans des
+fichiers non listés ici (ex: `PrepareDiskModal.tsx`), supprimer simplement ces
+références CSS inline — les variables n'existent plus dans le nouveau système.
+
+Rechercher dans tout le frontend :
+```bash
+grep -r "text-mono\|text-display\|--accent\b\|--bg-void\|--bg-deep\|--bg-surface\|--text-primary\|--text-secondary\|--text-muted\|--border-subtle\|--border-dim\|--border-normal" apps/web/src/
+```
+Tout résultat doit être corrigé en utilisant les nouvelles variables (`--t1`, `--t2`, `--ac`, `--bg1`, etc.)
+ou en supprimant le style inline si la CSS le gère déjà via les classes.
+
+---
+
+## Résumé des changements
+
+| Fichier | Type | Raison |
+|---|---|---|
+| `apps/web/index.html` | Modifier | Supprimer Google Fonts (Space Mono / Syne) |
+| `apps/web/src/styles.css` | Remplacer | Nouveau design system complet |
+| `apps/web/src/components/AppShell.tsx` | Modifier | Topbar + footer sidebar |
+| `apps/web/src/pages/DisksPage.tsx` | Remplacer | 21 colonnes → 7 + barres capacité + toggles |
+| `apps/web/src/pages/AssetsPage.tsx` | Modifier | Checkbox → toggle, type → pill |
+| `apps/web/src/pages/DashboardPage.tsx` | Modifier | Supprimer refs à `--text-mono` |
+| `apps/web/src/components/ErrorBanner.tsx` | Modifier | Fix classe CSS banner |
