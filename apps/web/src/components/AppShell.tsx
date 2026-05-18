@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
+import { useAuth } from "../AuthContext";
 import type { Language, TranslationDictionary } from "../i18n";
 
 interface AppShellProps {
@@ -90,6 +91,8 @@ const NAV_ITEMS = [
 ] as const;
 
 export function AppShell({ children, language, onLanguageChange, t }: AppShellProps) {
+  const { logout } = useAuth();
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -127,6 +130,30 @@ export function AppShell({ children, language, onLanguageChange, t }: AppShellPr
               <div style={{ fontSize: 12, fontWeight: 500, color: "var(--t1)" }}>admin</div>
               <div style={{ fontSize: 11, color: "var(--t3)" }}>Local</div>
             </div>
+            <button
+              aria-label={language === "fr" ? "Déconnexion" : "Log out"}
+              className="icon-button"
+              onClick={logout}
+              title={language === "fr" ? "Déconnexion" : "Log out"}
+              type="button"
+              style={{ width: 28, height: 28 }}
+            >
+              <svg
+                aria-hidden="true"
+                fill="none"
+                height="15"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.7"
+                viewBox="0 0 16 16"
+                width="15"
+              >
+                <path d="M6 14H3.5A1.5 1.5 0 0 1 2 12.5v-9A1.5 1.5 0 0 1 3.5 2H6" />
+                <path d="M10 5l3 3-3 3" />
+                <path d="M13 8H6" />
+              </svg>
+            </button>
             <label className="language-select" style={{ marginLeft: "auto" }}>
               <select
                 aria-label={t.language}

@@ -52,21 +52,9 @@ interface AnimatedStatCardProps {
 
 function AnimatedStatCard({ label, value, hint, valueClass }: AnimatedStatCardProps) {
   const counterRef = useCountUp(value);
-  const cardRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    if (typeof gsap === "undefined" || !cardRef.current) return;
-    gsap.from(cardRef.current, {
-      opacity: 0,
-      y: 16,
-      scale: 0.97,
-      duration: 0.45,
-      ease: "power2.out",
-    });
-  }, []);
 
   return (
-    <article className="stat-card" ref={cardRef}>
+    <article className="stat-card">
       <p className="stat-label">{label}</p>
       <p className={`stat-value ${valueClass ?? ""}`}>
         <span ref={counterRef}>0</span>
@@ -84,20 +72,6 @@ interface LatestBackupCardProps {
 }
 
 function LatestBackupCard({ label, value, hint, tone }: LatestBackupCardProps) {
-  const cardRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    if (typeof gsap === "undefined" || !cardRef.current) return;
-    gsap.from(cardRef.current, {
-      opacity: 0,
-      y: 16,
-      scale: 0.97,
-      duration: 0.45,
-      ease: "power2.out",
-      delay: 0.15,
-    });
-  }, []);
-
   const colorMap: Record<string, string> = {
     success: "var(--gr)",
     danger:  "var(--re)",
@@ -107,7 +81,7 @@ function LatestBackupCard({ label, value, hint, tone }: LatestBackupCardProps) {
   };
 
   return (
-    <article className="stat-card" ref={cardRef}>
+    <article className="stat-card">
       <p className="stat-label">{label}</p>
       <p className="stat-value" style={{ color: colorMap[tone ?? "neutral"], fontSize: "1.4rem" }}>
         {value}
@@ -118,33 +92,36 @@ function LatestBackupCard({ label, value, hint, tone }: LatestBackupCardProps) {
 }
 
 export function DashboardPage({ data, t, latestBackupLabel }: DashboardPageProps) {
-  const sectionRefs = useRef<HTMLElement[]>([]);
-  const statsRef = useRef<HTMLElement>(null);
+  const dashboardRef = useRef<HTMLDivElement>(null);
 
   // Stagger sections on mount
   useEffect(() => {
-    if (typeof gsap === "undefined") return;
+    if (typeof gsap === "undefined" || !dashboardRef.current) return;
     const ctx = gsap.context(() => {
-      gsap.from(".dashboard-section", {
+      gsap.fromTo(".dashboard-section", {
         opacity: 0,
         y: 20,
+      }, {
+        opacity: 1,
+        y: 0,
         duration: 0.5,
         stagger: 0.12,
         ease: "power2.out",
         delay: 0.1,
+        clearProps: "transform,opacity",
       });
-    });
+    }, dashboardRef);
     return () => ctx.revert();
   }, []);
 
   const backupTone = getBackupStatusTone(data.overview.latest_backup_status);
 
   return (
-    <div className="page-stack">
+    <div className="page-stack" ref={dashboardRef}>
       <PageHeader title={t.nav.dashboard} description={t.dashboardIntro} />
 
       {/* KPI STATS */}
-      <section className="stats-grid dashboard-section" ref={statsRef}>
+      <section className="stats-grid dashboard-section">
         <AnimatedStatCard
           label={t.coveragePercent}
           value={`${data.overview.coverage_percent}%`}
