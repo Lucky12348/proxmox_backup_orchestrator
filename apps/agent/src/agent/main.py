@@ -2010,14 +2010,36 @@ def _fuser_process_lines(fuser_output: str) -> list[str]:
     lines: list[str] = []
     for raw_line in fuser_output.splitlines():
         line = raw_line.strip().casefold()
-        if not line or " pid " in f" {line} " or "command" in line:
+        if not line:
             continue
-        if "kernel" in line and ("mount" in line or "/mnt/pbo/" in line):
+        if _is_fuser_header_line(line) or _is_fuser_mount_label_line(line):
             continue
-        tokens = line.replace(":", " ").split()
-        if any(token.isdigit() for token in tokens):
+        if _is_fuser_kernel_mount_line(line):
+            continue
+        tokens = line.split()
+        if _looks_like_fuser_process_line(tokens):
             lines.append(line)
     return lines
+
+
+def _is_fuser_header_line(line: str) -> bool:
+    tokens = set(line.split())
+    return {"user", "pid", "access", "command"}.issubset(tokens)
+
+
+def _is_fuser_mount_label_line(line: str) -> bool:
+    return line.endswith(":") and (line.startswith("/") or line.startswith("/mnt/pbo/"))
+
+
+def _is_fuser_kernel_mount_line(line: str) -> bool:
+    tokens = line.replace(":", " ").split()
+    return "kernel" in tokens and "mount" in tokens
+
+
+def _looks_like_fuser_process_line(tokens: list[str]) -> bool:
+    if len(tokens) < 4:
+        return False
+    return any(token.isdigit() for token in tokens)
 
 
 def _pbs_datastore_has_running_tasks(

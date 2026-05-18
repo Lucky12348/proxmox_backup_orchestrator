@@ -237,7 +237,7 @@ class ExternalExportDatastoreCreateTests(TestCase):
 
     def test_fuser_parser_ignores_kernel_mount_and_accepts_truncated_pbs_process(self):
         output = (
-            "kernel 13053 USER PID ACCESS COMMAND\n"
+            "USER PID ACCESS COMMAND\n"
             "/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore:\n"
             "root kernel mount /mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore\n"
             "backup 13053 F.... proxmox-backup-\n"
