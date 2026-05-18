@@ -1,10 +1,6 @@
-import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import type { Language, TranslationDictionary } from "../i18n";
-
-// GSAP is loaded via CDN in index.html
-declare const gsap: any;
 
 interface AppShellProps {
   children: ReactNode;
@@ -94,60 +90,16 @@ const NAV_ITEMS = [
 ] as const;
 
 export function AppShell({ children, language, onLanguageChange, t }: AppShellProps) {
-  const sidebarRef = useRef<HTMLElement>(null);
-  const navLinksRef = useRef<HTMLElement>(null);
-  const mainRef = useRef<HTMLDivElement>(null);
-  const location = useLocation();
-
-  // Sidebar entrance animation
-  useEffect(() => {
-    if (typeof gsap === "undefined") return;
-    const ctx = gsap.context(() => {
-      gsap.from(".sidebar-brand", {
-        opacity: 0,
-        x: -20,
-        duration: 0.5,
-        ease: "power2.out",
-      });
-      gsap.from(".nav-link", {
-        opacity: 0,
-        x: -14,
-        duration: 0.4,
-        stagger: 0.06,
-        ease: "power2.out",
-        delay: 0.15,
-      });
-      gsap.from(".sidebar-footer", {
-        opacity: 0,
-        y: 10,
-        duration: 0.4,
-        ease: "power2.out",
-        delay: 0.5,
-      });
-    }, sidebarRef);
-    return () => ctx.revert();
-  }, []);
-
-  // Page transition on route change
-  useEffect(() => {
-    if (typeof gsap === "undefined" || !mainRef.current) return;
-    gsap.fromTo(
-      mainRef.current,
-      { opacity: 0, y: 8 },
-      { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" }
-    );
-  }, [location.pathname]);
-
   return (
     <div className="shell">
-      <aside className="sidebar" ref={sidebarRef}>
+      <aside className="sidebar">
         <div className="sidebar-brand">
           <p className="sidebar-kicker">PBO</p>
           <h1>{t.title}</h1>
           <p>{t.appTagline}</p>
         </div>
 
-        <nav className="sidebar-nav" ref={navLinksRef as any} aria-label={t.navigation}>
+        <nav className="sidebar-nav" aria-label={t.navigation}>
           {NAV_ITEMS.map((item) => (
             <NavLink
               key={item.to}
@@ -199,7 +151,7 @@ export function AppShell({ children, language, onLanguageChange, t }: AppShellPr
           </div>
         </header>
 
-        <main className="page-container" ref={mainRef}>
+        <main className="page-container">
           {children}
         </main>
       </div>
