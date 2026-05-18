@@ -1946,6 +1946,11 @@ def _handle_busy_dedicated_datastore_unmount(
             f"fuser output:\n{fuser_output or '(no fuser output)'}"
         )
 
+    sync_result = run_subprocess(["sync"], timeout_seconds=60)
+    record_command_result(sync_result, command_summaries, stdout_logs, stderr_logs)
+    if sync_result.returncode != 0:
+        raise RuntimeError(format_command_failure("Failed to sync filesystem buffers before stopping PBS services.", sync_result))
+
     stopped_services: list[str] = []
     try:
         for service in ("proxmox-backup-proxy.service", "proxmox-backup.service"):
@@ -1990,7 +1995,14 @@ def _only_pbs_services_block_mount(fuser_output: str) -> bool:
     process_lines = _fuser_process_lines(fuser_output)
     if not process_lines:
         return False
-    allowed_markers = ("proxmox-backup-proxy", "proxmox-backup-api", "proxmox-backup")
+    allowed_markers = (
+        "proxmox-backup-",
+        "proxmox-backup-proxy",
+        "proxmox-backup-api",
+        "proxmox-backup.service",
+        "proxmox-backup-proxy.service",
+        "proxmox-backup",
+    )
     return all(any(marker in line for marker in allowed_markers) for line in process_lines)
 
 
@@ -2000,7 +2012,7 @@ def _fuser_process_lines(fuser_output: str) -> list[str]:
         line = raw_line.strip().casefold()
         if not line or " pid " in f" {line} " or "command" in line:
             continue
-        if "kernel" in line and "mount" in line:
+        if "kernel" in line and ("mount" in line or "/mnt/pbo/" in line):
             continue
         tokens = line.replace(":", " ").split()
         if any(token.isdigit() for token in tokens):

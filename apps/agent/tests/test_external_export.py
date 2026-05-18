@@ -9,6 +9,8 @@ from agent.main import (
     SubprocessResult,
     _ensure_loop_image_mounted,
     _find_mount_source,
+    _fuser_process_lines,
+    _only_pbs_services_block_mount,
     bytes_to_gb,
     eject_dedicated_pbs_datastore_result,
     is_initialized_pbs_datastore_path,
@@ -232,6 +234,17 @@ class ExternalExportDatastoreCreateTests(TestCase):
         self.assertIn(["systemctl", "stop", "proxmox-backup.service"], commands)
         self.assertIn(["systemctl", "restart", "proxmox-backup.service"], commands)
         self.assertIn(["systemctl", "restart", "proxmox-backup-proxy.service"], commands)
+
+    def test_fuser_parser_ignores_kernel_mount_and_accepts_truncated_pbs_process(self):
+        output = (
+            "kernel 13053 USER PID ACCESS COMMAND\n"
+            "/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore:\n"
+            "root kernel mount /mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore\n"
+            "backup 13053 F.... proxmox-backup-\n"
+        )
+
+        self.assertEqual(_fuser_process_lines(output), ["backup 13053 f.... proxmox-backup-"])
+        self.assertTrue(_only_pbs_services_block_mount(output))
 
     def test_eject_busy_datastore_refuses_non_pbs_blocker_with_fuser_output(self):
         with tempfile.TemporaryDirectory() as temp_dir:
