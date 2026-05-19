@@ -1,5 +1,3 @@
-# Proxmox Backup Orchestrator
-
 <p align="center">
   <img src="docs/assets/beautyfullImage.png" alt="Proxmox Backup Orchestrator presentation logo" width="720">
 </p>
@@ -71,19 +69,3 @@ Ports `8090` and `8091` must not be exposed broadly. The Proxmox firewall should
 - [Security](docs/SECURITY.md)
 
 Older architecture notes remain available in [docs/architecture.md](docs/architecture.md).
-
-## Secrets
-
-Do not commit `.env`. It contains application credentials, Proxmox/PBS API tokens, JWT signing material, and agent shared tokens. Generate strong random secrets with:
-
-```bash
-openssl rand -hex 32
-```
-
-For Docker Compose `.env` files, bcrypt hashes must escape every `$` as `$$`:
-
-```env
-AUTH_PASSWORD_HASH=$$2b$$12$$replace-with-generated-bcrypt-hash
-```
-
-Never use `code_secret`.
