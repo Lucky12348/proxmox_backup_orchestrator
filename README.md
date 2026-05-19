@@ -1,5 +1,9 @@
 # Proxmox Backup Orchestrator
 
+<p align="center">
+  <img src="docs/assets/beautyfullImage.png" alt="Proxmox Backup Orchestrator presentation logo" width="720">
+</p>
+
 Proxmox Backup Orchestrator coordinates removable-disk backups for a small Proxmox and Proxmox Backup Server environment. The application runs in a VM named `backupOrchestrator`; privileged disk and VM operations stay on purpose-built root agents running on the Proxmox host and the PBS VM.
 
 The normal production flow is:
