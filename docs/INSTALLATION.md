@@ -49,6 +49,7 @@ Edit `.env` and keep only the app VM values active for Docker Compose. Required 
 APP_ENV=production
 API_PORT=8000
 WEB_PORT=5173
+WEB_ALLOWED_HOSTS=extbackup.sofianechaoui.fr,localhost,127.0.0.1,192.168.1.103
 FRONTEND_ORIGIN=http://<app-vm-ip>:5173
 FRONTEND_ORIGIN_ALT=http://<app-vm-ip>
 
