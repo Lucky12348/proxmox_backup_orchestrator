@@ -168,6 +168,14 @@ button, input, select { font: inherit; }
   min-width: 160px;
 }
 .topbar-time-error { color: var(--re); }
+.topbar-time-stale { color: var(--ye); }
+.topbar-time-stale-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ye);
+  display: inline-block;
+}
 
 /* â”€â”€ Page layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .page-container { padding: 20px 24px 40px; flex: 1; }

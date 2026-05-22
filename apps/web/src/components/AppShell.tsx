@@ -94,36 +94,71 @@ const NAV_ITEMS = [
 export function AppShell({ children, language, onLanguageChange, t }: AppShellProps) {
   const { logout } = useAuth();
   const [apiTime, setApiTime] = useState<string>("--:--:--");
-  const [timeError, setTimeError] = useState(false);
+  const [timeOffsetMs, setTimeOffsetMs] = useState<number | null>(null);
+  const [lastTimeSyncAt, setLastTimeSyncAt] = useState<number | null>(null);
+  const [timeSyncFailed, setTimeSyncFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadTime() {
+    function updateDisplayedTime(offsetMs: number | null) {
+      if (offsetMs === null) {
+        setApiTime("TIME ERROR");
+        return;
+      }
+
+      setApiTime(formatHeaderTime(new Date(Date.now() + offsetMs)));
+    }
+
+    async function syncTime() {
       try {
+        const browserNowMs = Date.now();
         const result = await getSystemTime();
+        const serverNowMs = new Date(result.now_utc).getTime();
+        if (!Number.isFinite(serverNowMs)) {
+          throw new Error("Invalid server time");
+        }
+
         if (!cancelled) {
-          setApiTime(result.now_local);
-          setTimeError(false);
+          const nextOffset = serverNowMs - browserNowMs;
+          setTimeOffsetMs(nextOffset);
+          setLastTimeSyncAt(Date.now());
+          setTimeSyncFailed(false);
+          updateDisplayedTime(nextOffset);
         }
       } catch {
         if (!cancelled) {
-          setApiTime("TIME ERROR");
-          setTimeError(true);
+          setTimeSyncFailed(true);
         }
       }
     }
 
-    void loadTime();
-    const intervalId = window.setInterval(() => {
-      void loadTime();
+    void syncTime();
+
+    const displayIntervalId = window.setInterval(() => {
+      setTimeOffsetMs((currentOffset) => {
+        updateDisplayedTime(currentOffset);
+        return currentOffset;
+      });
     }, 1000);
+
+    const syncIntervalId = window.setInterval(() => {
+      void syncTime();
+    }, 60000);
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+      window.clearInterval(displayIntervalId);
+      window.clearInterval(syncIntervalId);
     };
   }, []);
+
+  const timeSyncStale = lastTimeSyncAt !== null && Date.now() - lastTimeSyncAt > 120000;
+  const timeClassName = timeSyncFailed && timeOffsetMs === null
+    ? "topbar-time topbar-time-error"
+    : timeSyncStale
+      ? "topbar-time topbar-time-stale"
+      : "topbar-time";
 
   return (
     <div className="shell">
@@ -215,7 +250,13 @@ export function AppShell({ children, language, onLanguageChange, t }: AppShellPr
                 background: "var(--gr)", display: "inline-block"
               }} />
               <span className="muted-text">LIVE</span>
-              <span className={timeError ? "topbar-time topbar-time-error" : "topbar-time"}>{apiTime}</span>
+              <span
+                className={timeClassName}
+                title={timeSyncStale ? "time sync stale" : undefined}
+              >
+                {apiTime}
+              </span>
+              {timeSyncStale ? <span className="topbar-time-stale-dot" title="time sync stale" /> : null}
             </div>
           </div>
         </header>
@@ -226,4 +267,18 @@ export function AppShell({ children, language, onLanguageChange, t }: AppShellPr
       </div>
     </div>
   );
+}
+
+function formatHeaderTime(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  const hours = String(value.getHours()).padStart(2, "0");
+  const minutes = String(value.getMinutes()).padStart(2, "0");
+  const seconds = String(value.getSeconds()).padStart(2, "0");
+  const timezone = Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+    .formatToParts(value)
+    .find((part) => part.type === "timeZoneName")?.value;
+
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}${timezone ? ` ${timezone}` : ""}`;
 }

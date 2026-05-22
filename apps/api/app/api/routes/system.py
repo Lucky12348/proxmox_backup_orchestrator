@@ -1,6 +1,5 @@
 import socket
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter
 
@@ -17,10 +16,6 @@ def get_system_time() -> SystemTimeRead:
     now_utc = datetime.now(timezone.utc)
     local = datetime.now().astimezone()
     timezone_name = local.tzname() or str(local.tzinfo) or "local"
-    try:
-        timezone_name = ZoneInfo(str(local.tzinfo)).key
-    except Exception:
-        pass
 
     return SystemTimeRead(
         now_utc=now_utc,
