@@ -67,6 +67,13 @@ class Settings:
     external_loop_datastore_size_gb: int = int(os.getenv("AGENT_LOOP_DATASTORE_SIZE_GB", "500"))
     agent_stale_after_minutes: int = int(os.getenv("AGENT_STALE_AFTER_MINUTES", "10"))
     show_seed_disks: bool = parse_bool(os.getenv("SHOW_SEED_DISKS"), default=False)
+    auto_sync_enabled: bool = parse_bool(os.getenv("AUTO_SYNC_ENABLED"), default=True)
+    proxmox_sync_interval_seconds: int = int(os.getenv("PROXMOX_SYNC_INTERVAL_SECONDS", "60"))
+    pbs_sync_interval_seconds: int = int(os.getenv("PBS_SYNC_INTERVAL_SECONDS", "60"))
+    maintenance_timeout_seconds: float = float(os.getenv("MAINTENANCE_TIMEOUT_SECONDS", "120"))
+    app_repo_path: str = os.getenv("APP_REPO_PATH", os.getcwd())
+    agent_repo_path: str = os.getenv("AGENT_REPO_PATH", os.getcwd())
+    app_compose_file: str = os.getenv("APP_COMPOSE_FILE", "infra/docker/docker-compose.yml")
 
     @property
     def cors_origins(self) -> list[str]:

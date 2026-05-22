@@ -13,6 +13,8 @@ from agent.main import (
     current_timestamp,
     eject_dedicated_pbs_datastore_result,
     inspect_disk_result,
+    maintenance_check_result,
+    maintenance_update_result,
     prepare_disk_result,
     prepare_external_datastore_result,
     prepare_dedicated_pbs_datastore_result,
@@ -272,6 +274,22 @@ def cleanup_legacy_external_export(
         "cleanup-legacy-external-export-objects",
         lambda: cleanup_legacy_external_export_objects(settings),
     )
+
+
+@app.post("/maintenance/check", response_model=None)
+def maintenance_check(
+    _: None = Depends(require_agent_token),
+    settings: AgentSettings = Depends(get_settings),
+) -> Response:
+    return _run_endpoint("maintenance-check", lambda: maintenance_check_result(settings))
+
+
+@app.post("/maintenance/update", response_model=None)
+def maintenance_update(
+    _: None = Depends(require_agent_token),
+    settings: AgentSettings = Depends(get_settings),
+) -> Response:
+    return _run_endpoint("maintenance-update", lambda: maintenance_update_result(settings))
 
 
 def _run_endpoint(command_name: str, action) -> Response:

@@ -7,8 +7,10 @@ from app.api.routes import (
     external_backups,
     integrations_pbs,
     integrations_proxmox,
+    maintenance,
     overview,
     planning,
+    system,
     vms,
 )
 from app.auth import get_current_user, router as auth_router
@@ -32,6 +34,8 @@ protected_router.include_router(backup_runs.router)
 protected_router.include_router(integrations_proxmox.router)
 protected_router.include_router(integrations_pbs.router)
 protected_router.include_router(planning.router)
+protected_router.include_router(system.router)
+protected_router.include_router(maintenance.router)
 
 api_router = APIRouter()
 api_router.include_router(public_router)

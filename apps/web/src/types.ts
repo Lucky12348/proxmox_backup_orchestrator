@@ -86,12 +86,16 @@ export interface ProxmoxStatus {
   node_name: string;
   verify_ssl: boolean;
   message: string;
+  last_sync_at: string | null;
+  sync_running: boolean;
+  last_sync_error: string | null;
 }
 
 export interface ProxmoxSyncSummary {
   synced_vms_count: number;
   synced_cts_count: number;
   total_seen: number;
+  already_running: boolean;
 }
 
 export interface PBSStatus {
@@ -99,12 +103,16 @@ export interface PBSStatus {
   datastore: string;
   verify_ssl: boolean;
   message: string;
+  last_sync_at: string | null;
+  sync_running: boolean;
+  last_sync_error: string | null;
 }
 
 export interface PBSSyncSummary {
   matched_vms: number;
   matched_cts: number;
   total_snapshots_seen: number;
+  already_running: boolean;
 }
 
 export interface PBSInventoryItem {
@@ -200,4 +208,44 @@ export interface DiskPreparationRun {
   mount_path: string | null;
   filesystem_type: string | null;
   created_at: string;
+}
+
+export interface SystemTime {
+  now_utc: string;
+  now_local: string;
+  timezone: string;
+  hostname: string;
+}
+
+export interface AutoSyncResult {
+  enabled: boolean;
+  proxmox_triggered: boolean;
+  pbs_triggered: boolean;
+}
+
+export interface MaintenanceCommandResult {
+  command: string;
+  stdout: string | null;
+  stderr: string | null;
+  return_code: number;
+}
+
+export interface MaintenanceComponentStatus {
+  component: string;
+  branch: string | null;
+  local_commit: string | null;
+  remote_commit: string | null;
+  status: "up_to_date" | "update_available" | "error" | string;
+  error: string | null;
+  logs: MaintenanceCommandResult[];
+}
+
+export interface MaintenanceAction {
+  component: string;
+  status: MaintenanceComponentStatus;
+  logs: MaintenanceCommandResult[];
+}
+
+export interface MaintenanceStatus {
+  components: MaintenanceComponentStatus[];
 }

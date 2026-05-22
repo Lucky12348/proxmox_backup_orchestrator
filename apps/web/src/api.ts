@@ -1,6 +1,7 @@
 import { getStoredToken } from "./AuthContext";
 import type {
   AgentStatus,
+  AutoSyncResult,
   BackupRun,
   DiskHandoffStatus,
   DiskPreparationRun,
@@ -8,6 +9,9 @@ import type {
   ExternalBackupPreview,
   ExternalBackupRun,
   ExternalDisk,
+  MaintenanceAction,
+  MaintenanceComponentStatus,
+  MaintenanceStatus,
   Overview,
   PBSInventoryItem,
   PBSStatus,
@@ -15,6 +19,7 @@ import type {
   ProxmoxStatus,
   ProxmoxSyncSummary,
   PlanningOverview,
+  SystemTime,
   UnplannedAsset,
   VirtualMachine,
 } from "./types";
@@ -238,4 +243,34 @@ export function getDiskPreparationRuns(diskId: number) {
 
 export function getDiskPreparationRun(runId: number) {
   return request<DiskPreparationRun>(`/disks/preparation-runs/${runId}`);
+}
+
+export function getSystemTime() {
+  return request<SystemTime>("/system/time");
+}
+
+export function triggerAutoSync() {
+  return request<AutoSyncResult>("/system/auto-sync", { method: "POST" });
+}
+
+export function getMaintenanceStatus() {
+  return request<MaintenanceStatus>("/maintenance/updates/status");
+}
+
+export function checkMaintenanceComponent(component: "app" | "proxmox-agent" | "pbs-agent") {
+  return request<MaintenanceComponentStatus>(`/maintenance/updates/${component}/check`, {
+    method: "POST",
+  });
+}
+
+export function updateMaintenanceComponent(component: "app" | "proxmox-agent" | "pbs-agent") {
+  return request<MaintenanceAction>(`/maintenance/updates/${component}/update`, {
+    method: "POST",
+  });
+}
+
+export function updateAllMaintenanceComponents() {
+  return request<MaintenanceAction[]>("/maintenance/updates/update-all", {
+    method: "POST",
+  });
 }

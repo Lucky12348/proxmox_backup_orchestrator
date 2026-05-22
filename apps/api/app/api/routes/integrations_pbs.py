@@ -5,7 +5,8 @@ from app.api.dependencies import DbSession
 from app.core.config import get_settings
 from app.schemas import PBSInventoryRead, PBSStatusRead, PBSSyncRead
 from app.services.pbs_client import PBSClient
-from app.services.pbs_sync import list_pbs_inventory, sync_pbs_inventory
+from app.services.pbs_sync import list_pbs_inventory
+from app.services.sync_state import get_pbs_sync_state, run_pbs_sync_guarded
 
 
 router = APIRouter(prefix="/integrations/pbs", tags=["integrations-pbs"])
@@ -15,6 +16,7 @@ router = APIRouter(prefix="/integrations/pbs", tags=["integrations-pbs"])
 def get_pbs_status() -> PBSStatusRead:
     settings = get_settings()
     client = PBSClient(settings)
+    sync_state = get_pbs_sync_state()
 
     try:
         client.get_version()
@@ -24,6 +26,9 @@ def get_pbs_status() -> PBSStatusRead:
             datastore=settings.pbs_datastore,
             verify_ssl=settings.pbs_verify_ssl,
             message=str(exc),
+            last_sync_at=sync_state.last_sync_at,
+            sync_running=sync_state.sync_running,
+            last_sync_error=sync_state.last_error,
         )
     except httpx.HTTPError as exc:
         return PBSStatusRead(
@@ -31,6 +36,9 @@ def get_pbs_status() -> PBSStatusRead:
             datastore=settings.pbs_datastore,
             verify_ssl=settings.pbs_verify_ssl,
             message=f"Unable to reach PBS API: {exc}",
+            last_sync_at=sync_state.last_sync_at,
+            sync_running=sync_state.sync_running,
+            last_sync_error=sync_state.last_error,
         )
 
     return PBSStatusRead(
@@ -38,13 +46,16 @@ def get_pbs_status() -> PBSStatusRead:
         datastore=settings.pbs_datastore,
         verify_ssl=settings.pbs_verify_ssl,
         message="Connection to PBS API succeeded",
+        last_sync_at=sync_state.last_sync_at,
+        sync_running=sync_state.sync_running,
+        last_sync_error=sync_state.last_error,
     )
 
 
 @router.post("/sync", response_model=PBSSyncRead)
-def sync_pbs(db: DbSession) -> PBSSyncRead:
+def sync_pbs() -> PBSSyncRead:
     try:
-        summary = sync_pbs_inventory(db)
+        summary = run_pbs_sync_guarded()
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
@@ -52,6 +63,14 @@ def sync_pbs(db: DbSession) -> PBSSyncRead:
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"PBS sync failed: {exc}",
         ) from exc
+
+    if summary is None:
+        return PBSSyncRead(
+            matched_vms=0,
+            matched_cts=0,
+            total_snapshots_seen=0,
+            already_running=True,
+        )
 
     return PBSSyncRead(
         matched_vms=summary.matched_vms,

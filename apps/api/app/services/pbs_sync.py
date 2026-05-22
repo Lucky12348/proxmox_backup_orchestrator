@@ -50,21 +50,25 @@ def sync_pbs_inventory(
     matched_vms = 0
     matched_cts = 0
 
-    for (vm_type, external_id), backup_time in latest_by_key.items():
-        vm = db.scalar(
+    proxmox_inventory = list(
+        db.scalars(
             select(VirtualMachine).where(
                 VirtualMachine.source == "proxmox",
-                VirtualMachine.external_id == external_id,
-                VirtualMachine.vm_type == vm_type,
+                VirtualMachine.external_id.is_not(None),
             )
         )
-        if vm is None:
-            continue
+    )
 
+    for vm in proxmox_inventory:
+        if vm.external_id is None:
+            continue
+        backup_time = latest_by_key.get((vm.vm_type, vm.external_id))
         vm.last_backup_at = backup_time
         db.add(vm)
 
-        if vm_type == VMType.VM:
+        if backup_time is None:
+            continue
+        if vm.vm_type == VMType.VM:
             matched_vms += 1
         else:
             matched_cts += 1
@@ -160,16 +164,28 @@ def _extract_vmid(snapshot: dict) -> str | None:
 def _extract_vm_type(snapshot: dict) -> VMType | None:
     for key in ("backup-type", "backup_type"):
         value = snapshot.get(key)
-        if value == "qemu":
+        if value in {"qemu", "vm"}:
             return VMType.VM
-        if value == "lxc":
+        if value in {"lxc", "ct"}:
             return VMType.CT
 
     backup_id = _extract_backup_id(snapshot)
     if backup_id:
+        if backup_id.startswith("vm/"):
+            return VMType.VM
+        if backup_id.startswith("ct/"):
+            return VMType.CT
         if backup_id.startswith("qemu"):
             return VMType.VM
         if backup_id.startswith("lxc") or backup_id.startswith("ct"):
             return VMType.CT
+
+    for key in ("backup-group", "backup_group", "group"):
+        value = snapshot.get(key)
+        if isinstance(value, str):
+            if value.startswith("vm/"):
+                return VMType.VM
+            if value.startswith("ct/"):
+                return VMType.CT
 
     return None

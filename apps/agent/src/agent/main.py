@@ -62,6 +62,8 @@ class AgentSettings:
     server_host: str = os.getenv("AGENT_SERVER_HOST", "0.0.0.0")
     server_port: int = int(os.getenv("AGENT_SERVER_PORT", "8081"))
     server_token: str = os.getenv("AGENT_SERVER_TOKEN", "")
+    repo_path: str = os.getenv("AGENT_REPO_PATH", os.getcwd())
+    maintenance_timeout_seconds: float = float(os.getenv("AGENT_MAINTENANCE_TIMEOUT_SECONDS", "120"))
 
 
 class ExternalExportProgress:
@@ -1841,6 +1843,37 @@ def run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResu
     )
 
 
+def run_subprocess_with_cwd(command: list[str], cwd: Path, timeout_seconds: float) -> SubprocessResult:
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except FileNotFoundError as exc:
+        missing = command[0] if command else "<unknown>"
+        raise RuntimeError(f"Required command `{missing}` was not found in PATH.") from exc
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.strip() if isinstance(exc.stdout, str) else ""
+        stderr = exc.stderr.strip() if isinstance(exc.stderr, str) else ""
+        details = [f"Command timed out after {timeout_seconds} seconds: {redact_command(command)}"]
+        if stderr:
+            details.append(f"stderr: {stderr[:500]}")
+        if stdout:
+            details.append(f"stdout: {stdout[:500]}")
+        raise RuntimeError(" ".join(details)) from exc
+
+    return SubprocessResult(
+        command=command,
+        returncode=completed.returncode,
+        stdout=completed.stdout.strip(),
+        stderr=completed.stderr.strip(),
+    )
+
+
 def run_subprocess_streaming(
     command: list[str],
     timeout_seconds: float,
@@ -2270,6 +2303,90 @@ def cleanup_legacy_external_export_objects(settings: AgentSettings | None = None
         "stdout_log": "\n\n".join(stdout_logs) or None,
         "stderr_log": "\n\n".join([*stderr_logs, *errors]) or None,
         "return_code": 0 if not errors else 1,
+    }
+
+
+def maintenance_check_result(settings: AgentSettings | None = None) -> dict[str, Any]:
+    settings = settings or AgentSettings()
+    status_payload = _maintenance_git_status(
+        Path(settings.repo_path),
+        settings.maintenance_timeout_seconds,
+    )
+    return {
+        "ok": status_payload["status"] != "error",
+        "message": "Maintenance status checked.",
+        "status": status_payload,
+    }
+
+
+def maintenance_update_result(settings: AgentSettings | None = None) -> dict[str, Any]:
+    settings = settings or AgentSettings()
+    repo = Path(settings.repo_path)
+    logs = _maintenance_run_sequence(
+        repo,
+        [
+            ["git", "fetch"],
+            ["git", "status", "--short"],
+            ["git", "rev-parse", "HEAD"],
+            ["git", "rev-parse", "@{u}"],
+            ["git", "pull", "--ff-only"],
+        ],
+        settings.maintenance_timeout_seconds,
+    )
+    status_payload = _maintenance_git_status(repo, settings.maintenance_timeout_seconds)
+    ok = all(item["return_code"] == 0 for item in logs) and status_payload["status"] != "error"
+    return {
+        "ok": ok,
+        "message": "Agent update completed." if ok else "Agent update failed.",
+        "status": status_payload,
+        "logs": logs,
+        "return_code": 0 if ok else 1,
+    }
+
+
+def _maintenance_git_status(repo: Path, timeout_seconds: float) -> dict[str, Any]:
+    logs = _maintenance_run_sequence(repo, [["git", "fetch"], ["git", "status", "--short"]], timeout_seconds)
+    branch = _maintenance_run(repo, ["git", "rev-parse", "--abbrev-ref", "HEAD"], timeout_seconds)
+    local = _maintenance_run(repo, ["git", "rev-parse", "HEAD"], timeout_seconds)
+    remote = _maintenance_run(repo, ["git", "rev-parse", "@{u}"], timeout_seconds)
+    logs.extend([branch, local, remote])
+    error = next((item["stderr"] or item["stdout"] for item in logs if item["return_code"] != 0), None)
+    status = "error" if error else ("up_to_date" if local["stdout"] == remote["stdout"] else "update_available")
+    return {
+        "branch": branch["stdout"],
+        "local_commit": local["stdout"],
+        "remote_commit": remote["stdout"],
+        "status": status,
+        "error": error,
+        "logs": logs,
+    }
+
+
+def _maintenance_run_sequence(repo: Path, commands: list[list[str]], timeout_seconds: float) -> list[dict[str, Any]]:
+    logs: list[dict[str, Any]] = []
+    for command in commands:
+        result = _maintenance_run(repo, command, timeout_seconds)
+        logs.append(result)
+        if result["return_code"] != 0:
+            break
+    return logs
+
+
+def _maintenance_run(repo: Path, command: list[str], timeout_seconds: float) -> dict[str, Any]:
+    try:
+        result = run_subprocess_with_cwd(command, repo, timeout_seconds)
+    except RuntimeError as exc:
+        return {
+            "command": redact_command(command),
+            "stdout": None,
+            "stderr": str(exc),
+            "return_code": 1,
+        }
+    return {
+        "command": redact_command(result.command),
+        "stdout": result.stdout or None,
+        "stderr": result.stderr or None,
+        "return_code": result.returncode,
     }
 
 

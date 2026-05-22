@@ -20,6 +20,7 @@ import {
   prepareDisk,
   syncPBSInventory,
   syncProxmoxInventory,
+  triggerAutoSync,
   runExternalBackup,
   updateDisk,
   updateVM,
@@ -138,6 +139,31 @@ export function useAppData() {
     void load();
   }, []);
 
+  useEffect(() => {
+    if (!data) {
+      return;
+    }
+
+    let cancelled = false;
+    void triggerAutoSync()
+      .then((result) => {
+        if (!cancelled && (result.proxmox_triggered || result.pbs_triggered)) {
+          window.setTimeout(() => {
+            if (!cancelled) void refresh();
+          }, 2500);
+        }
+      })
+      .catch((syncError) => {
+        if (!cancelled) {
+          setBannerError(syncError instanceof Error ? syncError.message : "Unknown error");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [data !== null]);
+
   const hasActiveExternalBackup =
     data?.externalBackupRuns.some((run) => run.status === "pending" || run.status === "running") ?? false;
 
@@ -217,9 +243,9 @@ export function useAppData() {
     try {
       const summary = await syncProxmoxInventory();
       await refresh();
-      setSyncMessage(
-        `${successMessage}: ${summary.total_seen} (${summary.synced_vms_count} VM, ${summary.synced_cts_count} CT)`,
-      );
+      setSyncMessage(summary.already_running
+        ? "Proxmox sync is already running."
+        : `${successMessage}: ${summary.total_seen} (${summary.synced_vms_count} VM, ${summary.synced_cts_count} CT)`);
     } catch (syncError) {
       setBannerError(syncError instanceof Error ? syncError.message : "Unknown error");
     } finally {
@@ -235,9 +261,9 @@ export function useAppData() {
     try {
       const summary = await syncPBSInventory();
       await refresh();
-      setSyncMessage(
-        `${successMessage}: ${summary.total_snapshots_seen} (${summary.matched_vms} VM, ${summary.matched_cts} CT)`,
-      );
+      setSyncMessage(summary.already_running
+        ? "PBS sync is already running."
+        : `${successMessage}: ${summary.total_snapshots_seen} (${summary.matched_vms} VM, ${summary.matched_cts} CT)`);
     } catch (syncError) {
       setBannerError(syncError instanceof Error ? syncError.message : "Unknown error");
     } finally {

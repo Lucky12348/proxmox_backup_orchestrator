@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { NavLink } from "react-router-dom";
+import { getSystemTime } from "../api";
 import { useAuth } from "../AuthContext";
 import type { Language, TranslationDictionary } from "../i18n";
 
@@ -92,6 +93,37 @@ const NAV_ITEMS = [
 
 export function AppShell({ children, language, onLanguageChange, t }: AppShellProps) {
   const { logout } = useAuth();
+  const [apiTime, setApiTime] = useState<string>("--:--:--");
+  const [timeError, setTimeError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadTime() {
+      try {
+        const result = await getSystemTime();
+        if (!cancelled) {
+          setApiTime(result.now_local);
+          setTimeError(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setApiTime("TIME ERROR");
+          setTimeError(true);
+        }
+      }
+    }
+
+    void loadTime();
+    const intervalId = window.setInterval(() => {
+      void loadTime();
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   return (
     <div className="shell">
@@ -183,6 +215,7 @@ export function AppShell({ children, language, onLanguageChange, t }: AppShellPr
                 background: "var(--gr)", display: "inline-block"
               }} />
               <span className="muted-text">LIVE</span>
+              <span className={timeError ? "topbar-time topbar-time-error" : "topbar-time"}>{apiTime}</span>
             </div>
           </div>
         </header>

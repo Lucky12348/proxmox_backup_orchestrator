@@ -64,7 +64,14 @@ export function IntegrationsPage({
               <span>{t.proxmoxSsl}</span>
               <strong>{data.proxmoxStatus.verify_ssl ? t.yes : t.no}</strong>
             </div>
+            <div className="summary-row">
+              <span>{t.lastSync}</span>
+              <strong>{data.proxmoxStatus.sync_running ? t.syncRunning : formatDateTime(data.proxmoxStatus.last_sync_at, language, t.notAvailable)}</strong>
+            </div>
             <p className="integration-message">{data.proxmoxStatus.message}</p>
+            {data.proxmoxStatus.last_sync_error ? (
+              <p className="integration-message danger-text">{data.proxmoxStatus.last_sync_error}</p>
+            ) : null}
           </div>
         </article>
 
@@ -90,7 +97,14 @@ export function IntegrationsPage({
               <span>{t.pbsSsl}</span>
               <strong>{data.pbsStatus.verify_ssl ? t.yes : t.no}</strong>
             </div>
+            <div className="summary-row">
+              <span>{t.lastSync}</span>
+              <strong>{data.pbsStatus.sync_running ? t.syncRunning : formatDateTime(data.pbsStatus.last_sync_at, language, t.notAvailable)}</strong>
+            </div>
             <p className="integration-message">{data.pbsStatus.message}</p>
+            {data.pbsStatus.last_sync_error ? (
+              <p className="integration-message danger-text">{data.pbsStatus.last_sync_error}</p>
+            ) : null}
           </div>
         </article>
 

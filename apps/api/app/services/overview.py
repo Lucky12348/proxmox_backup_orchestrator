@@ -27,7 +27,6 @@ def get_overview_metrics(db: Session) -> OverviewMetrics:
     if use_proxmox_inventory:
         vm_scope.append(VirtualMachine.source == "proxmox")
 
-    total_vms = db.scalar(select(func.count(VirtualMachine.id)).where(*vm_scope)) or 0
     enabled_vms = db.scalar(
         select(func.count(VirtualMachine.id)).where(
             *vm_scope,
@@ -58,7 +57,7 @@ def get_overview_metrics(db: Session) -> OverviewMetrics:
     latest_backup_status = latest_backup.status.value if latest_backup else derive_latest_backup_status(db)
 
     return OverviewMetrics(
-        total_vms=total_vms,
+        total_vms=enabled_vms,
         protected_vms=protected_vms,
         coverage_percent=coverage_percent,
         connected_disks=connected_disks,

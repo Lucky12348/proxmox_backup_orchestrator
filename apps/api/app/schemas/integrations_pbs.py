@@ -10,12 +10,16 @@ class PBSStatusRead(BaseModel):
     datastore: str
     verify_ssl: bool
     message: str
+    last_sync_at: datetime | None = None
+    sync_running: bool = False
+    last_sync_error: str | None = None
 
 
 class PBSSyncRead(BaseModel):
     matched_vms: int
     matched_cts: int
     total_snapshots_seen: int
+    already_running: bool = False
 
 
 class PBSInventoryRead(BaseModel):
