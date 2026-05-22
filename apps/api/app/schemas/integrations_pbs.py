@@ -3,9 +3,10 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.models import VMType
+from app.schemas.base import UTCDateTimeModel
 
 
-class PBSStatusRead(BaseModel):
+class PBSStatusRead(UTCDateTimeModel):
     connected: bool
     datastore: str
     verify_ssl: bool
@@ -22,7 +23,7 @@ class PBSSyncRead(BaseModel):
     already_running: bool = False
 
 
-class PBSInventoryRead(BaseModel):
+class PBSInventoryRead(UTCDateTimeModel):
     vm_id: int
     name: str
     vm_type: VMType

@@ -2,8 +2,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.base import UTCDateTimeModel
 
-class ExternalDiskRead(BaseModel):
+
+class ExternalDiskRead(UTCDateTimeModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int

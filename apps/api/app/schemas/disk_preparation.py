@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import BackupRunStatus, DiskPreparationMode
+from app.schemas.base import UTCDateTimeModel
 
 
 class DiskPreparationRequest(BaseModel):
@@ -11,7 +12,7 @@ class DiskPreparationRequest(BaseModel):
     confirm_destructive: bool = False
 
 
-class DiskPreparationRunRead(BaseModel):
+class DiskPreparationRunRead(UTCDateTimeModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int

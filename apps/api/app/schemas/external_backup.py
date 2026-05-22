@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import BackupRunStatus, ExternalBackupMode
+from app.schemas.base import UTCDateTimeModel
 
 
 class ExternalBackupRunRequest(BaseModel):
@@ -10,7 +11,7 @@ class ExternalBackupRunRequest(BaseModel):
     confirmation: bool = False
 
 
-class ExternalBackupRunRead(BaseModel):
+class ExternalBackupRunRead(UTCDateTimeModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -33,7 +34,7 @@ class ExternalBackupRunRead(BaseModel):
     created_at: datetime
 
 
-class ExternalBackupRunSummaryRead(BaseModel):
+class ExternalBackupRunSummaryRead(UTCDateTimeModel):
     id: int
     disk_id: int
     disk_name: str

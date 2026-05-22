@@ -3,9 +3,10 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import VMType
+from app.schemas.base import UTCDateTimeModel
 
 
-class VirtualMachineRead(BaseModel):
+class VirtualMachineRead(UTCDateTimeModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int

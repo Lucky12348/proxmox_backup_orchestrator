@@ -1,6 +1,6 @@
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
-import { formatDateTime, getAgentStatusTone } from "../utils";
+import { formatDateTime, getAgentStatusTone, parseUtcDate } from "../utils";
 import type { IntegrationsPageProps } from "./shared";
 
 function formatHeartbeatAge(value: number | null, t: IntegrationsPageProps["t"]) {
@@ -20,7 +20,8 @@ function formatAgeInMinutes(value: string | null, t: IntegrationsPageProps["t"])
     return t.notAvailable;
   }
 
-  const ageMs = Date.now() - new Date(value).getTime();
+  const parsed = parseUtcDate(value);
+  const ageMs = parsed ? Date.now() - parsed.getTime() : Number.NaN;
   if (!Number.isFinite(ageMs) || ageMs < 0) {
     return t.notAvailable;
   }

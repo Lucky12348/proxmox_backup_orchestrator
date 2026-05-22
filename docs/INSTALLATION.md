@@ -55,9 +55,14 @@ FRONTEND_ORIGIN_ALT=http://<app-vm-ip>
 AUTO_SYNC_ENABLED=true
 PROXMOX_SYNC_INTERVAL_SECONDS=60
 PBS_SYNC_INTERVAL_SECONDS=60
-MAINTENANCE_TIMEOUT_SECONDS=120
+MAINTENANCE_TIMEOUT_SECONDS=300
+APP_MAINTENANCE_AGENT_BASE_URL=http://host.docker.internal:8092
+APP_MAINTENANCE_AGENT_HOST=127.0.0.1
+APP_MAINTENANCE_AGENT_PORT=8092
+APP_MAINTENANCE_AGENT_TOKEN=<app-maintenance-agent-token>
 APP_REPO_PATH=/opt/proxmox_backup_orchestrator
 APP_COMPOSE_FILE=infra/docker/docker-compose.yml
+APP_MAINTENANCE_TIMEOUT_SECONDS=300
 
 POSTGRES_DB=proxmox_backup_orchestrator
 POSTGRES_USER=pbo
@@ -107,8 +112,28 @@ Generate JWT and agent tokens:
 
 ```bash
 openssl rand -hex 32  # AUTH_SECRET_KEY
+openssl rand -hex 32  # APP_MAINTENANCE_AGENT_TOKEN
 openssl rand -hex 32  # HOST_AGENT_TOKEN and Proxmox AGENT_SERVER_TOKEN
 openssl rand -hex 32  # PBS_AGENT_TOKEN and PBS AGENT_SERVER_TOKEN
+```
+
+Install the local App VM maintenance agent before using Settings > Maintenance:
+
+```bash
+cd /opt/proxmox_backup_orchestrator/apps/app-maintenance-agent
+python3 -m venv .venv
+.venv/bin/pip install -e .
+cp deploy/systemd/proxmox-backup-orchestrator-app-maintenance-agent.service \
+  /etc/systemd/system/proxmox-backup-orchestrator-app-maintenance-agent.service
+systemctl daemon-reload
+systemctl enable --now proxmox-backup-orchestrator-app-maintenance-agent.service
+systemctl status proxmox-backup-orchestrator-app-maintenance-agent.service
+```
+
+Health check on the App VM:
+
+```bash
+curl -H "X-Agent-Token: <app-maintenance-agent-token>" http://127.0.0.1:8092/health
 ```
 
 Start the app stack:

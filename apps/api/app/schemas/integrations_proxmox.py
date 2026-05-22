@@ -1,10 +1,11 @@
 from pydantic import BaseModel
 from datetime import datetime
 
+from app.schemas.base import UTCDateTimeModel
 from app.schemas.virtual_machine import VirtualMachineRead
 
 
-class ProxmoxStatusRead(BaseModel):
+class ProxmoxStatusRead(UTCDateTimeModel):
     connected: bool
     node_name: str
     verify_ssl: bool

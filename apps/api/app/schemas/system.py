@@ -2,8 +2,10 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.schemas.base import UTCDateTimeModel
 
-class SystemTimeRead(BaseModel):
+
+class SystemTimeRead(UTCDateTimeModel):
     now_utc: datetime
     now_local: str
     timezone: str

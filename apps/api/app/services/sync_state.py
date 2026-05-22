@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Callable, TypeVar
 
 import httpx
@@ -77,7 +77,7 @@ def _start_if_stale(
         if state.sync_running:
             return False
         if state.last_sync_at is not None:
-            age = datetime.utcnow() - state.last_sync_at
+            age = _utc_now() - _as_aware_utc(state.last_sync_at)
             if age < timedelta(seconds=interval_seconds):
                 return False
 
@@ -109,7 +109,7 @@ def _run_guarded(
         raise
     else:
         with lock:
-            state.last_sync_at = datetime.utcnow()
+            state.last_sync_at = _utc_now()
             state.last_error = None
         return summary
     finally:
@@ -125,3 +125,13 @@ def _sync_proxmox() -> ProxmoxSyncSummary:
 def _sync_pbs() -> PBSSyncSummary:
     with SessionLocal() as db:
         return sync_pbs_inventory(db)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)

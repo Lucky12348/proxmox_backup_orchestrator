@@ -71,9 +71,12 @@ class Settings:
     proxmox_sync_interval_seconds: int = int(os.getenv("PROXMOX_SYNC_INTERVAL_SECONDS", "60"))
     pbs_sync_interval_seconds: int = int(os.getenv("PBS_SYNC_INTERVAL_SECONDS", "60"))
     maintenance_timeout_seconds: float = float(os.getenv("MAINTENANCE_TIMEOUT_SECONDS", "120"))
-    app_repo_path: str = os.getenv("APP_REPO_PATH", os.getcwd())
+    app_maintenance_agent_base_url: str = os.getenv(
+        "APP_MAINTENANCE_AGENT_BASE_URL",
+        "http://127.0.0.1:8092",
+    )
+    app_maintenance_agent_token: str = os.getenv("APP_MAINTENANCE_AGENT_TOKEN", "")
     agent_repo_path: str = os.getenv("AGENT_REPO_PATH", os.getcwd())
-    app_compose_file: str = os.getenv("APP_COMPOSE_FILE", "infra/docker/docker-compose.yml")
 
     @property
     def cors_origins(self) -> list[str]:

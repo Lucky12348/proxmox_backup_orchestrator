@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.base import UTCDateTimeModel
 
 class AgentHeartbeatCreate(BaseModel):
     hostname: str = Field(max_length=255)
@@ -28,7 +29,7 @@ class AgentDiskReportCreate(BaseModel):
     disks: list[AgentDiskReportItem]
 
 
-class AgentHeartbeatRead(BaseModel):
+class AgentHeartbeatRead(UTCDateTimeModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -37,7 +38,7 @@ class AgentHeartbeatRead(BaseModel):
     observed_at: datetime
 
 
-class AgentStatusRead(BaseModel):
+class AgentStatusRead(UTCDateTimeModel):
     connected: bool
     hostname: str | None
     last_heartbeat_at: datetime | None

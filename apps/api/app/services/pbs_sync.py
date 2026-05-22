@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -122,13 +122,16 @@ def _parse_snapshot(snapshot: dict) -> dict[str, VMType | str | datetime] | None
 
 def _extract_backup_time(snapshot: dict) -> datetime | None:
     if isinstance(snapshot.get("backup-time"), (int, float)):
-        return datetime.utcfromtimestamp(snapshot["backup-time"])
+        return datetime.fromtimestamp(snapshot["backup-time"], tz=timezone.utc)
 
     for key in ("backup-time", "backup_time", "last-backup", "time"):
         value = snapshot.get(key)
         if isinstance(value, str):
             try:
-                return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    return parsed.replace(tzinfo=timezone.utc)
+                return parsed.astimezone(timezone.utc)
             except ValueError:
                 continue
 

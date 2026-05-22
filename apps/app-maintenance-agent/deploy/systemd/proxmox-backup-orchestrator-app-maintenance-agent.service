@@ -1,0 +1,16 @@
+[Unit]
+Description=Proxmox Backup Orchestrator App VM maintenance agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/proxmox_backup_orchestrator/apps/app-maintenance-agent
+EnvironmentFile=/opt/proxmox_backup_orchestrator/.env
+ExecStart=/opt/proxmox_backup_orchestrator/apps/app-maintenance-agent/.venv/bin/python -m app_maintenance_agent.main
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

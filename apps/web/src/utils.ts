@@ -7,14 +7,37 @@ const LOCALE_BY_LANGUAGE: Record<Language, string> = {
 };
 
 export function formatDateTime(value: string | null, language: Language, fallback: string) {
+  return formatDateTimeLocal(value, language, fallback);
+}
+
+export function formatDateTimeLocal(value: string | null, language: Language = "fr", fallback = "N/A") {
   if (!value) {
+    return fallback;
+  }
+
+  const date = parseUtcDate(value);
+  if (!date) {
     return fallback;
   }
 
   return new Intl.DateTimeFormat(LOCALE_BY_LANGUAGE[language], {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(new Date(value));
+  }).format(date);
+}
+
+export function parseUtcDate(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = hasTimezone(value) ? value : `${value}Z`;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function hasTimezone(value: string) {
+  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
 }
 
 export function getBackupStatusTone(status: BackupRunStatus | null) {
