@@ -1,4 +1,8 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
+
+from app.schemas.base import UTCDateTimeModel
 
 
 class MaintenanceCommandResultRead(BaseModel):
@@ -18,10 +22,12 @@ class MaintenanceComponentStatusRead(BaseModel):
     logs: list[MaintenanceCommandResultRead] = Field(default_factory=list)
 
 
-class MaintenanceActionRead(BaseModel):
+class MaintenanceActionRead(UTCDateTimeModel):
     component: str
     status: MaintenanceComponentStatusRead
     logs: list[MaintenanceCommandResultRead]
+    action_status: str
+    finished_at: datetime | None = None
 
 
 class MaintenanceStatusRead(BaseModel):

@@ -404,6 +404,34 @@ button, input, select { font: inherit; }
   padding: 12px;
   white-space: pre-wrap;
 }
+.maintenance-log-details {
+  margin-top: 12px;
+}
+.maintenance-log-details summary {
+  color: var(--t2);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.maintenance-log-list {
+  display: grid;
+  gap: 8px;
+}
+.maintenance-log-error {
+  border-color: rgba(248,81,73,.45);
+  color: #ffb3c1;
+}
+.inline-spinner {
+  animation: spin 0.8s linear infinite;
+  border: 2px solid rgba(255,255,255,.18);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  display: inline-block;
+  height: 12px;
+  width: 12px;
+  vertical-align: -2px;
+}
 
 .icon-button {
   width: 32px;

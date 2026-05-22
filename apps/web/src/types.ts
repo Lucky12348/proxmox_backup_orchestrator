@@ -244,6 +244,8 @@ export interface MaintenanceAction {
   component: string;
   status: MaintenanceComponentStatus;
   logs: MaintenanceCommandResult[];
+  action_status: "success" | "error" | string;
+  finished_at: string | null;
 }
 
 export interface MaintenanceStatus {

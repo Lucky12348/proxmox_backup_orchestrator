@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter
 
 from app.schemas.maintenance import (
@@ -77,10 +79,13 @@ def _status_read(status: MaintenanceComponentStatus) -> MaintenanceComponentStat
 
 
 def _action_read(result: MaintenanceActionResult) -> MaintenanceActionRead:
+    action_status = "error" if result.status.status == "error" or any(item.return_code != 0 for item in result.logs) else "success"
     return MaintenanceActionRead(
         component=result.component,
         status=_status_read(result.status),
         logs=[_command_read(item) for item in result.logs],
+        action_status=action_status,
+        finished_at=datetime.now(timezone.utc),
     )
 
 

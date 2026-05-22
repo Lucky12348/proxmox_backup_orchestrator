@@ -1,31 +1,69 @@
-import { useEffect, useState } from "react";
-import { PageHeader } from "../components/PageHeader";
-import { StatusBadge } from "../components/StatusBadge";
+import { useEffect, useMemo, useState } from "react";
+
 import {
-  getMaintenanceStatus,
   checkMaintenanceComponent,
+  getMaintenanceStatus,
+  getSystemTime,
   updateAllMaintenanceComponents,
   updateMaintenanceComponent,
 } from "../api";
+import { ErrorBanner } from "../components/ErrorBanner";
+import { PageHeader } from "../components/PageHeader";
+import { StatusBadge } from "../components/StatusBadge";
 import type { SettingsPageProps } from "./shared";
 import type { MaintenanceAction, MaintenanceCommandResult, MaintenanceComponentStatus } from "../types";
+import { formatDateTimeLocal } from "../utils";
 
 type MaintenanceComponent = "app" | "proxmox-agent" | "pbs-agent";
+type ComponentUiState = "idle" | "checking" | "update_running" | "update_success" | "update_error" | "restarting";
 
-const COMPONENTS: { id: MaintenanceComponent; label: string }[] = [
-  { id: "app", label: "App VM" },
-  { id: "proxmox-agent", label: "Proxmox agent" },
-  { id: "pbs-agent", label: "PBS agent" },
+interface ComponentMeta {
+  uiState: ComponentUiState;
+  lastCheckedAt: string | null;
+  lastUpdatedAt: string | null;
+  message: string | null;
+  logs: MaintenanceCommandResult[];
+}
+
+const COMPONENTS: { id: MaintenanceComponent; backend: string; label: string }[] = [
+  { id: "app", backend: "app-vm", label: "App VM" },
+  { id: "proxmox-agent", backend: "proxmox-agent", label: "Proxmox agent" },
+  { id: "pbs-agent", backend: "pbs-agent", label: "PBS agent" },
 ];
+
+const initialMeta: Record<MaintenanceComponent, ComponentMeta> = {
+  app: { uiState: "idle", lastCheckedAt: null, lastUpdatedAt: null, message: null, logs: [] },
+  "proxmox-agent": { uiState: "idle", lastCheckedAt: null, lastUpdatedAt: null, message: null, logs: [] },
+  "pbs-agent": { uiState: "idle", lastCheckedAt: null, lastUpdatedAt: null, message: null, logs: [] },
+};
 
 function shortCommit(value: string | null) {
   return value ? value.slice(0, 12) : "N/A";
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function backendName(component: MaintenanceComponent) {
+  return COMPONENTS.find((item) => item.id === component)?.backend ?? component;
+}
+
+function componentIdFromBackend(component: string): MaintenanceComponent | null {
+  return COMPONENTS.find((item) => item.backend === component)?.id ?? null;
 }
 
 function statusTone(status: string) {
   if (status === "up_to_date") return "success" as const;
   if (status === "update_available") return "warning" as const;
   return "danger" as const;
+}
+
+function uiTone(state: ComponentUiState) {
+  if (state === "update_success") return "success" as const;
+  if (state === "update_error") return "danger" as const;
+  if (state === "checking" || state === "update_running" || state === "restarting") return "info" as const;
+  return "neutral" as const;
 }
 
 function statusLabel(status: string, t: SettingsPageProps["t"]) {
@@ -35,38 +73,80 @@ function statusLabel(status: string, t: SettingsPageProps["t"]) {
   return status;
 }
 
-function renderLogs(logs: MaintenanceCommandResult[]) {
-  if (logs.length === 0) return null;
+function stateLabel(state: ComponentUiState, t: SettingsPageProps["t"]) {
+  return t.maintenanceUiState[state];
+}
+
+function isNetworkRestartError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /fetch|network|failed|load|timeout|aborted|reset|connexion|connection/i.test(message);
+}
+
+function logsHaveErrors(logs: MaintenanceCommandResult[]) {
+  return logs.some((log) => log.return_code !== 0);
+}
+
+function renderLogs(logs: MaintenanceCommandResult[], t: SettingsPageProps["t"]) {
+  if (logs.length === 0) {
+    return <p className="integration-message">{t.externalBackupNoLogs}</p>;
+  }
+
   return (
-    <pre className="maintenance-log">
-      {logs.map((log) => [
-        `$ ${log.command}`,
-        `exit=${log.return_code}`,
-        log.stdout ? `stdout:\n${log.stdout}` : null,
-        log.stderr ? `stderr:\n${log.stderr}` : null,
-      ].filter(Boolean).join("\n")).join("\n\n")}
-    </pre>
+    <details className="maintenance-log-details" open={logs.length <= 2 && !logsHaveErrors(logs)}>
+      <summary>{t.maintenanceLogs}</summary>
+      <div className="maintenance-log-list">
+        {logs.map((log, index) => (
+          <pre className={log.return_code === 0 ? "maintenance-log" : "maintenance-log maintenance-log-error"} key={`${log.command}-${index}`}>
+            {[
+              `$ ${log.command}`,
+              `exit=${log.return_code}`,
+              log.stdout ? `stdout:\n${log.stdout}` : null,
+              log.stderr ? `stderr:\n${log.stderr}` : null,
+            ].filter(Boolean).join("\n")}
+          </pre>
+        ))}
+      </div>
+    </details>
   );
 }
 
 export function SettingsPage({ t }: SettingsPageProps) {
   const [components, setComponents] = useState<MaintenanceComponentStatus[]>([]);
-  const [logs, setLogs] = useState<MaintenanceCommandResult[]>([]);
+  const [meta, setMeta] = useState<Record<MaintenanceComponent, ComponentMeta>>(initialMeta);
   const [loading, setLoading] = useState(false);
-  const [workingKey, setWorkingKey] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [banner, setBanner] = useState<{ message: string; tone: "info" | "error" } | null>(null);
 
-  async function loadStatus() {
-    setLoading(true);
-    setError(null);
+  const anyBusy = useMemo(
+    () => Object.values(meta).some((item) => item.uiState === "checking" || item.uiState === "update_running" || item.uiState === "restarting"),
+    [meta],
+  );
+
+  async function loadStatus(options: { silent?: boolean } = {}) {
+    if (!options.silent) setLoading(true);
     try {
       const result = await getMaintenanceStatus();
       setComponents(result.components);
-      setLogs(result.components.flatMap((component) => component.logs));
+      const checkedAt = nowIso();
+      setMeta((current) => {
+        const next = { ...current };
+        for (const status of result.components) {
+          const id = componentIdFromBackend(status.component);
+          if (!id) continue;
+          next[id] = {
+            ...next[id],
+            lastCheckedAt: checkedAt,
+            logs: next[id].logs.length > 0 ? next[id].logs : status.logs,
+            uiState: next[id].uiState === "checking" ? "idle" : next[id].uiState,
+          };
+        }
+        return next;
+      });
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Unknown error");
+      if (!options.silent) {
+        setBanner({ message: loadError instanceof Error ? loadError.message : "Unknown error", tone: "error" });
+      }
     } finally {
-      setLoading(false);
+      if (!options.silent) setLoading(false);
     }
   }
 
@@ -74,20 +154,30 @@ export function SettingsPage({ t }: SettingsPageProps) {
     void loadStatus();
   }, []);
 
+  useEffect(() => {
+    if (!anyBusy) return;
+    const intervalId = window.setInterval(() => {
+      void loadStatus({ silent: true });
+    }, 3000);
+    return () => window.clearInterval(intervalId);
+  }, [anyBusy]);
+
   async function checkComponent(component: MaintenanceComponent) {
-    setWorkingKey(`check-${component}`);
-    setError(null);
+    setComponentMeta(component, { uiState: "checking", message: null });
     try {
       const result = await checkMaintenanceComponent(component);
-      setComponents((current) => [
-        ...current.filter((item) => item.component !== result.component),
-        result,
-      ]);
-      setLogs(result.logs);
+      upsertComponent(result);
+      setComponentMeta(component, {
+        uiState: "idle",
+        lastCheckedAt: nowIso(),
+        logs: result.logs,
+        message: null,
+      });
     } catch (checkError) {
-      setError(checkError instanceof Error ? checkError.message : "Unknown error");
-    } finally {
-      setWorkingKey(null);
+      setComponentMeta(component, {
+        uiState: "update_error",
+        message: checkError instanceof Error ? checkError.message : "Unknown error",
+      });
     }
   }
 
@@ -95,45 +185,130 @@ export function SettingsPage({ t }: SettingsPageProps) {
     const warning = component === "app" ? t.maintenanceAppRestartWarning : t.maintenanceConfirmUpdate;
     if (!window.confirm(warning)) return;
 
-    setWorkingKey(`update-${component}`);
-    setError(null);
+    setBanner(null);
+    setComponentMeta(component, { uiState: "update_running", message: t.maintenanceUpdating, logs: meta[component].logs });
     try {
       const result = await updateMaintenanceComponent(component);
       applyActionResult(result);
+      await checkComponent(component);
+      const success = result.action_status !== "error" && !logsHaveErrors(result.logs);
+      setComponentMeta(component, {
+        uiState: success ? "update_success" : "update_error",
+        lastUpdatedAt: result.finished_at ?? nowIso(),
+        message: success ? t.maintenanceUpdateSuccess : t.maintenanceUpdateError,
+        logs: result.logs,
+      });
+      setBanner({ message: success ? t.maintenanceUpdateSuccess : t.maintenanceUpdateError, tone: success ? "info" : "error" });
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : "Unknown error");
-    } finally {
-      setWorkingKey(null);
+      if (component === "app" && isNetworkRestartError(updateError)) {
+        await waitForAppRestart(component);
+        return;
+      }
+      setComponentMeta(component, {
+        uiState: "update_error",
+        message: updateError instanceof Error ? updateError.message : "Unknown error",
+      });
+      setBanner({ message: t.maintenanceUpdateError, tone: "error" });
     }
   }
 
   async function updateAllComponents() {
+    if (anyBusy) return;
     if (!window.confirm(t.maintenanceAppRestartWarning)) return;
 
-    setWorkingKey("update-all");
-    setError(null);
+    setBanner(null);
+    for (const component of COMPONENTS) {
+      setComponentMeta(component.id, { uiState: "update_running", message: t.maintenanceUpdating });
+    }
     try {
       const results = await updateAllMaintenanceComponents();
-      for (const result of results) applyActionResult(result);
-      setLogs(results.flatMap((result) => result.logs));
+      for (const result of results) {
+        applyActionResult(result);
+        const id = componentIdFromBackend(result.status.component);
+        if (!id) continue;
+        const success = result.action_status !== "error" && !logsHaveErrors(result.logs);
+        setComponentMeta(id, {
+          uiState: success ? "update_success" : "update_error",
+          lastUpdatedAt: result.finished_at ?? nowIso(),
+          message: success ? t.maintenanceUpdateSuccess : t.maintenanceUpdateError,
+          logs: result.logs,
+        });
+      }
+      await loadStatus({ silent: true });
+      setBanner({ message: t.maintenanceUpdateSuccess, tone: "info" });
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : "Unknown error");
-    } finally {
-      setWorkingKey(null);
+      if (isNetworkRestartError(updateError)) {
+        await waitForAppRestart("app");
+        return;
+      }
+      setBanner({ message: updateError instanceof Error ? updateError.message : t.maintenanceUpdateError, tone: "error" });
+      for (const component of COMPONENTS) {
+        setComponentMeta(component.id, { uiState: "update_error", message: t.maintenanceUpdateError });
+      }
     }
   }
 
+  async function waitForAppRestart(component: MaintenanceComponent) {
+    setComponentMeta(component, { uiState: "restarting", message: t.maintenanceRestarting });
+    setBanner({ message: t.maintenanceRestarting, tone: "info" });
+
+    const deadline = Date.now() + 120000;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      try {
+        await getSystemTime();
+        await loadStatus({ silent: true });
+        const completedAt = nowIso();
+        setMeta((current) => {
+          const next = { ...current };
+          for (const item of COMPONENTS) {
+            const previous = next[item.id];
+            const wasBusy = previous.uiState === "update_running" || previous.uiState === "restarting";
+            next[item.id] = {
+              ...previous,
+              uiState: item.id === component ? "update_success" : wasBusy ? "idle" : previous.uiState,
+              lastCheckedAt: completedAt,
+              lastUpdatedAt: item.id === component ? completedAt : previous.lastUpdatedAt,
+              message: item.id === component ? t.maintenanceAppUpdated : previous.message,
+            };
+          }
+          return next;
+        });
+        setBanner({ message: t.maintenanceAppUpdated, tone: "info" });
+        return;
+      } catch {
+        // Keep polling while the API/Web containers restart.
+      }
+    }
+
+    setComponentMeta(component, { uiState: "update_error", message: t.maintenanceReconnectFailed });
+    setBanner({ message: t.maintenanceReconnectFailed, tone: "error" });
+  }
+
   function applyActionResult(result: MaintenanceAction) {
+    upsertComponent(result.status);
+    const id = componentIdFromBackend(result.status.component);
+    if (id) {
+      setComponentMeta(id, { logs: result.logs, lastUpdatedAt: result.finished_at ?? nowIso() });
+    }
+  }
+
+  function upsertComponent(status: MaintenanceComponentStatus) {
     setComponents((current) => [
-      ...current.filter((item) => item.component !== result.status.component),
-      result.status,
+      ...current.filter((item) => item.component !== status.component),
+      status,
     ]);
-    setLogs(result.logs);
+  }
+
+  function setComponentMeta(component: MaintenanceComponent, patch: Partial<ComponentMeta>) {
+    setMeta((current) => ({
+      ...current,
+      [component]: { ...current[component], ...patch },
+    }));
   }
 
   function findStatus(component: MaintenanceComponent) {
-    const backendName = component === "app" ? "app-vm" : component;
-    return components.find((item) => item.component === backendName);
+    return components.find((item) => item.component === backendName(component));
   }
 
   return (
@@ -144,49 +319,66 @@ export function SettingsPage({ t }: SettingsPageProps) {
         <div className="panel-card-header">
           <h2>{t.maintenanceTitle}</h2>
           <div className="button-row">
-            <button className="action-button" disabled={loading || workingKey !== null} onClick={() => void loadStatus()} type="button">
-              {loading ? t.loading : t.maintenanceCheckUpdates}
+            <button className="ghost-button" disabled={loading} onClick={() => void loadStatus()} type="button">
+              {loading ? <><span className="inline-spinner" /> {t.maintenanceChecking}</> : t.refresh}
             </button>
-            <button className="action-button" disabled={workingKey !== null} onClick={() => void updateAllComponents()} type="button">
-              {workingKey === "update-all" ? t.maintenanceUpdating : t.maintenanceUpdateAll}
+            <button className="action-button" disabled={anyBusy} onClick={() => void updateAllComponents()} type="button">
+              {anyBusy ? t.maintenanceBusy : t.maintenanceUpdateAll}
             </button>
           </div>
         </div>
         <p className="integration-message">{t.maintenanceDescription}</p>
-        {error ? <p className="integration-message danger-text">{error}</p> : null}
+        {banner ? (
+          <ErrorBanner dismissLabel={t.dismiss} message={banner.message} onDismiss={() => setBanner(null)} tone={banner.tone} />
+        ) : null}
 
         <div className="maintenance-grid">
           {COMPONENTS.map((component) => {
             const status = findStatus(component.id);
+            const componentMeta = meta[component.id];
+            const busy = componentMeta.uiState === "checking" || componentMeta.uiState === "update_running" || componentMeta.uiState === "restarting";
             return (
               <article className="maintenance-card" key={component.id}>
                 <div className="panel-card-header">
                   <h3>{component.label}</h3>
-                  <StatusBadge tone={statusTone(status?.status ?? "error")}>
-                    {status ? statusLabel(status.status, t) : t.status.unknown}
-                  </StatusBadge>
+                  <div className="button-row">
+                    {busy ? <span className="inline-spinner" /> : null}
+                    <StatusBadge tone={statusTone(status?.status ?? "error")}>
+                      {status ? statusLabel(status.status, t) : t.status.unknown}
+                    </StatusBadge>
+                    {componentMeta.uiState !== "idle" ? (
+                      <StatusBadge tone={uiTone(componentMeta.uiState)}>
+                        {stateLabel(componentMeta.uiState, t)}
+                      </StatusBadge>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="integration-details">
                   <div className="summary-row"><span>{t.maintenanceBranch}</span><strong>{status?.branch ?? t.notAvailable}</strong></div>
                   <div className="summary-row"><span>{t.maintenanceLocalCommit}</span><strong>{shortCommit(status?.local_commit ?? null)}</strong></div>
                   <div className="summary-row"><span>{t.maintenanceRemoteCommit}</span><strong>{shortCommit(status?.remote_commit ?? null)}</strong></div>
+                  <div className="summary-row"><span>{t.maintenanceLastChecked}</span><strong>{formatDateTimeLocal(componentMeta.lastCheckedAt, "fr", t.notAvailable)}</strong></div>
+                  <div className="summary-row"><span>{t.maintenanceLastUpdated}</span><strong>{formatDateTimeLocal(componentMeta.lastUpdatedAt, "fr", t.notAvailable)}</strong></div>
                 </div>
+                {componentMeta.message ? (
+                  <p className={componentMeta.uiState === "update_error" ? "integration-message danger-text" : "integration-message"}>
+                    {componentMeta.message}
+                  </p>
+                ) : null}
                 {status?.error ? <p className="integration-message danger-text">{status.error}</p> : null}
                 <div className="button-row">
-                  <button className="ghost-button" disabled={workingKey !== null} onClick={() => void checkComponent(component.id)} type="button">
-                    {workingKey === `check-${component.id}` ? t.loading : t.maintenanceCheckUpdates}
+                  <button className="ghost-button" disabled={busy} onClick={() => void checkComponent(component.id)} type="button">
+                    {componentMeta.uiState === "checking" ? <><span className="inline-spinner" /> {t.maintenanceChecking}</> : t.maintenanceCheckUpdates}
                   </button>
-                  <button className="action-button" disabled={workingKey !== null} onClick={() => void updateComponent(component.id)} type="button">
-                    {workingKey === `update-${component.id}` ? t.maintenanceUpdating : t.maintenanceUpdate}
+                  <button className="action-button" disabled={busy} onClick={() => void updateComponent(component.id)} type="button">
+                    {componentMeta.uiState === "update_running" ? <><span className="inline-spinner" /> {t.maintenanceUpdating}</> : t.maintenanceUpdate}
                   </button>
                 </div>
+                {renderLogs(componentMeta.logs.length > 0 ? componentMeta.logs : status?.logs ?? [], t)}
               </article>
             );
           })}
         </div>
-
-        <h3 className="section-subtitle">{t.maintenanceLogs}</h3>
-        {renderLogs(logs) ?? <p className="integration-message">{t.externalBackupNoLogs}</p>}
       </section>
     </div>
   );
