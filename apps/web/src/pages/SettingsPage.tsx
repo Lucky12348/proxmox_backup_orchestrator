@@ -4,7 +4,6 @@ import {
   checkMaintenanceComponent,
   getMaintenanceStatus,
   getSystemTime,
-  updateAllMaintenanceComponents,
   updateMaintenanceComponent,
 } from "../api";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -84,6 +83,10 @@ function isNetworkRestartError(error: unknown) {
 
 function logsHaveErrors(logs: MaintenanceCommandResult[]) {
   return logs.some((log) => log.return_code !== 0);
+}
+
+function isUpToDate(status: MaintenanceComponentStatus | undefined) {
+  return status?.status === "up_to_date";
 }
 
 function renderLogs(logs: MaintenanceCommandResult[], t: SettingsPageProps["t"]) {
@@ -190,15 +193,16 @@ export function SettingsPage({ t }: SettingsPageProps) {
     try {
       const result = await updateMaintenanceComponent(component);
       applyActionResult(result);
-      await checkComponent(component);
-      const success = result.action_status !== "error" && !logsHaveErrors(result.logs);
+      await loadStatus({ silent: true });
+      const noOp = result.action_status === "up_to_date";
+      const success = noOp || (result.action_status !== "error" && !logsHaveErrors(result.logs));
       setComponentMeta(component, {
         uiState: success ? "update_success" : "update_error",
         lastUpdatedAt: result.finished_at ?? nowIso(),
-        message: success ? t.maintenanceUpdateSuccess : t.maintenanceUpdateError,
+        message: noOp ? t.maintenanceAlreadyUpToDate : success ? t.maintenanceUpdateSuccess : t.maintenanceUpdateError,
         logs: result.logs,
       });
-      setBanner({ message: success ? t.maintenanceUpdateSuccess : t.maintenanceUpdateError, tone: success ? "info" : "error" });
+      setBanner({ message: noOp ? t.maintenanceAlreadyUpToDate : success ? t.maintenanceUpdateSuccess : t.maintenanceUpdateError, tone: success ? "info" : "error" });
     } catch (updateError) {
       if (component === "app" && isNetworkRestartError(updateError)) {
         await waitForAppRestart(component);
@@ -217,25 +221,61 @@ export function SettingsPage({ t }: SettingsPageProps) {
     if (!window.confirm(t.maintenanceAppRestartWarning)) return;
 
     setBanner(null);
-    for (const component of COMPONENTS) {
+    const counts = { skipped: 0, updated: 0, failed: 0 };
+    const candidates = COMPONENTS.filter((component) => {
+      const status = findStatus(component.id);
+      if (isUpToDate(status)) {
+        counts.skipped += 1;
+        setComponentMeta(component.id, { message: t.maintenanceAlreadyUpToDate });
+        return false;
+      }
+      return true;
+    });
+
+    if (candidates.length === 0) {
+      setBanner({ message: t.maintenanceUpdateAllSummary.replace("{updated}", "0").replace("{skipped}", String(counts.skipped)).replace("{failed}", "0"), tone: "info" });
+      return;
+    }
+
+    for (const component of candidates) {
       setComponentMeta(component.id, { uiState: "update_running", message: t.maintenanceUpdating });
     }
+
     try {
-      const results = await updateAllMaintenanceComponents();
-      for (const result of results) {
-        applyActionResult(result);
-        const id = componentIdFromBackend(result.status.component);
-        if (!id) continue;
-        const success = result.action_status !== "error" && !logsHaveErrors(result.logs);
-        setComponentMeta(id, {
-          uiState: success ? "update_success" : "update_error",
-          lastUpdatedAt: result.finished_at ?? nowIso(),
-          message: success ? t.maintenanceUpdateSuccess : t.maintenanceUpdateError,
-          logs: result.logs,
-        });
+      for (const component of candidates) {
+        try {
+          const result = await updateMaintenanceComponent(component.id);
+          applyActionResult(result);
+          const noOp = result.action_status === "up_to_date";
+          const success = noOp || (result.action_status !== "error" && !logsHaveErrors(result.logs));
+          if (noOp) counts.skipped += 1;
+          else if (success) counts.updated += 1;
+          else counts.failed += 1;
+          setComponentMeta(component.id, {
+            uiState: success ? "update_success" : "update_error",
+            lastUpdatedAt: result.finished_at ?? nowIso(),
+            message: noOp ? t.maintenanceAlreadyUpToDate : success ? t.maintenanceUpdateSuccess : t.maintenanceUpdateError,
+            logs: result.logs,
+          });
+        } catch (updateError) {
+          if (component.id === "app" && isNetworkRestartError(updateError)) {
+            await waitForAppRestart("app");
+            counts.updated += 1;
+            continue;
+          }
+          counts.failed += 1;
+          setComponentMeta(component.id, {
+            uiState: "update_error",
+            message: updateError instanceof Error ? updateError.message : t.maintenanceUpdateError,
+          });
+        }
       }
       await loadStatus({ silent: true });
-      setBanner({ message: t.maintenanceUpdateSuccess, tone: "info" });
+      const message = t.maintenanceUpdateAllSummary
+        .replace("{updated}", String(counts.updated))
+        .replace("{skipped}", String(counts.skipped))
+        .replace("{failed}", String(counts.failed));
+      setBanner({ message, tone: counts.failed > 0 ? "error" : "info" });
     } catch (updateError) {
       if (isNetworkRestartError(updateError)) {
         await waitForAppRestart("app");
@@ -337,6 +377,7 @@ export function SettingsPage({ t }: SettingsPageProps) {
             const status = findStatus(component.id);
             const componentMeta = meta[component.id];
             const busy = componentMeta.uiState === "checking" || componentMeta.uiState === "update_running" || componentMeta.uiState === "restarting";
+            const upToDate = isUpToDate(status);
             return (
               <article className="maintenance-card" key={component.id}>
                 <div className="panel-card-header">
@@ -370,8 +411,14 @@ export function SettingsPage({ t }: SettingsPageProps) {
                   <button className="ghost-button" disabled={busy} onClick={() => void checkComponent(component.id)} type="button">
                     {componentMeta.uiState === "checking" ? <><span className="inline-spinner" /> {t.maintenanceChecking}</> : t.maintenanceCheckUpdates}
                   </button>
-                  <button className="action-button" disabled={busy} onClick={() => void updateComponent(component.id)} type="button">
-                    {componentMeta.uiState === "update_running" ? <><span className="inline-spinner" /> {t.maintenanceUpdating}</> : t.maintenanceUpdate}
+                  <button
+                    className="action-button"
+                    disabled={busy || upToDate}
+                    onClick={() => void updateComponent(component.id)}
+                    title={upToDate ? t.maintenanceNoUpdateAvailable : undefined}
+                    type="button"
+                  >
+                    {componentMeta.uiState === "update_running" ? <><span className="inline-spinner" /> {t.maintenanceUpdating}</> : upToDate ? t.maintenanceUpToDateShort : t.maintenanceUpdate}
                   </button>
                 </div>
                 {renderLogs(componentMeta.logs.length > 0 ? componentMeta.logs : status?.logs ?? [], t)}

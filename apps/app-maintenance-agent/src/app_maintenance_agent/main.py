@@ -78,11 +78,30 @@ def maintenance_update(
     _: None = Depends(require_token),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
+    current_status = _git_status(settings)
+    if current_status["status"] == "error":
+        return {
+            "ok": False,
+            "message": current_status["error"] or "Maintenance check failed.",
+            "action_status": "error",
+            "status": current_status,
+            "logs": current_status["logs"],
+            "return_code": 1,
+        }
+    if current_status["local_commit"] == current_status["remote_commit"]:
+        return {
+            "ok": True,
+            "message": "Already up to date.",
+            "action_status": "up_to_date",
+            "status": current_status,
+            "logs": current_status["logs"],
+            "return_code": 0,
+        }
+
     repo = Path(settings.repo_path)
     logs = _run_sequence(
         repo,
         [
-            ["git", "fetch"],
             ["git", "status", "--short"],
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             ["git", "rev-parse", "HEAD"],
@@ -97,6 +116,7 @@ def maintenance_update(
     return {
         "ok": ok,
         "message": "App VM update completed." if ok else "App VM update failed.",
+        "action_status": "success" if ok else "error",
         "status": status_payload,
         "logs": logs,
         "return_code": 0 if ok else 1,

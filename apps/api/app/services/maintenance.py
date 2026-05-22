@@ -37,6 +37,7 @@ class MaintenanceActionResult:
     component: str
     status: MaintenanceComponentStatus
     logs: list[MaintenanceCommandResult]
+    action_status: str | None = None
 
 
 def check_app_status(settings: Settings | None = None) -> MaintenanceComponentStatus:
@@ -74,10 +75,13 @@ def update_agent(component: str, client: HostAgentClient) -> MaintenanceActionRe
             stderr=exc.stderr_log,
             return_code=exc.return_code or 1,
         )
-        return MaintenanceActionResult(component, status, [log])
+        return MaintenanceActionResult(component, status, [log], action_status="error")
     status = _status_from_payload(component, result.payload.get("status", {}))
     logs = [_command_result_from_payload(item) for item in result.payload.get("logs", []) if isinstance(item, dict)]
-    return MaintenanceActionResult(component, status, logs)
+    action_status = result.payload.get("action_status")
+    if not isinstance(action_status, str):
+        action_status = None
+    return MaintenanceActionResult(component, status, logs, action_status=action_status)
 
 
 def check_all_status() -> list[MaintenanceComponentStatus]:
@@ -89,11 +93,21 @@ def check_all_status() -> list[MaintenanceComponentStatus]:
 
 
 def update_all() -> list[MaintenanceActionResult]:
-    return [
-        update_agent("proxmox-agent", get_maintenance_host_agent_client()),
-        update_agent("pbs-agent", get_maintenance_pbs_agent_client()),
-        update_app(),
-    ]
+    results: list[MaintenanceActionResult] = []
+    for component, client in [
+        ("proxmox-agent", get_maintenance_host_agent_client()),
+        ("pbs-agent", get_maintenance_pbs_agent_client()),
+        ("app-vm", get_app_maintenance_agent_client()),
+    ]:
+        status = check_agent_status(component, client)
+        if status.status == "up_to_date":
+            results.append(MaintenanceActionResult(component, status, status.logs or [], action_status="up_to_date"))
+            continue
+        if status.status == "error":
+            results.append(MaintenanceActionResult(component, status, status.logs or [], action_status="error"))
+            continue
+        results.append(update_agent(component, client))
+    return results
 
 
 def get_app_maintenance_agent_client(settings: Settings | None = None) -> HostAgentClient:

@@ -2322,11 +2322,31 @@ def maintenance_check_result(settings: AgentSettings | None = None) -> dict[str,
 def maintenance_update_result(settings: AgentSettings | None = None) -> dict[str, Any]:
     settings = settings or AgentSettings()
     repo = Path(settings.repo_path)
+    current_status = _maintenance_git_status(repo, settings.maintenance_timeout_seconds)
+    if current_status["status"] == "error":
+        return {
+            "ok": False,
+            "message": current_status["error"] or "Maintenance check failed.",
+            "action_status": "error",
+            "status": current_status,
+            "logs": current_status["logs"],
+            "return_code": 1,
+        }
+    if current_status["local_commit"] == current_status["remote_commit"]:
+        return {
+            "ok": True,
+            "message": "Already up to date.",
+            "action_status": "up_to_date",
+            "status": current_status,
+            "logs": current_status["logs"],
+            "return_code": 0,
+        }
+
     logs = _maintenance_run_sequence(
         repo,
         [
-            ["git", "fetch"],
             ["git", "status", "--short"],
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             ["git", "rev-parse", "HEAD"],
             ["git", "rev-parse", "@{u}"],
             ["git", "pull", "--ff-only"],
@@ -2338,6 +2358,7 @@ def maintenance_update_result(settings: AgentSettings | None = None) -> dict[str
     return {
         "ok": ok,
         "message": "Agent update completed." if ok else "Agent update failed.",
+        "action_status": "success" if ok else "error",
         "status": status_payload,
         "logs": logs,
         "return_code": 0 if ok else 1,
