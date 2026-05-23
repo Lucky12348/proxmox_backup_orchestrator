@@ -31,10 +31,17 @@ interface ConfirmState {
   onConfirm: () => void;
 }
 
+const LANGUAGE_STORAGE_KEY = "pbo:language";
+
+function getStoredLanguage(): Language {
+  const value = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+  return value === "en" || value === "fr" ? value : "fr";
+}
+
 // Inner app — rendered only when authenticated
 function AuthenticatedApp() {
   const { logout } = useAuth();
-  const [language, setLanguage] = useState<Language>("fr");
+  const [language, setLanguage] = useState<Language>(() => getStoredLanguage());
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [preparationDisk, setPreparationDisk] = useState<ExternalDisk | null>(null);
 
@@ -69,6 +76,11 @@ function AuthenticatedApp() {
   } = useAppData();
 
   const t = translations[language];
+
+  function handleLanguageChange(nextLanguage: Language) {
+    window.localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
+    setLanguage(nextLanguage);
+  }
 
   const latestBackupLabel = useMemo(() => {
     return data ? getLatestStatusLabel(data.overview.latest_backup_status, t) : t.status.unknown;
@@ -247,7 +259,7 @@ function AuthenticatedApp() {
 
   return (
     <>
-      <AppShell language={language} onLanguageChange={setLanguage} t={t}>
+      <AppShell language={language} onLanguageChange={handleLanguageChange} t={t}>
         {bannerError ? (
           <ErrorBanner dismissLabel={t.dismiss} message={bannerError} onDismiss={clearBannerError} />
         ) : null}
