@@ -25,7 +25,11 @@ AUTH_SECRET_KEY: str = os.getenv(
     "change-me-in-production-use-a-long-random-string",
 )
 AUTH_ALGORITHM: str = "HS256"
-AUTH_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("AUTH_TOKEN_EXPIRE_MINUTES", "480"))
+MAX_AUTH_TOKEN_EXPIRE_MINUTES: int = 180
+AUTH_TOKEN_EXPIRE_MINUTES: int = min(
+    int(os.getenv("AUTH_TOKEN_EXPIRE_MINUTES", str(MAX_AUTH_TOKEN_EXPIRE_MINUTES))),
+    MAX_AUTH_TOKEN_EXPIRE_MINUTES,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 oauth2_scheme = OAuth2PasswordBearer(

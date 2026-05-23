@@ -17,7 +17,7 @@ AUTH_ENABLED=true
 AUTH_USERNAME=admin
 AUTH_PASSWORD_HASH=$$2b$$12$$replace-with-generated-bcrypt-hash
 AUTH_SECRET_KEY=replace-with-random-secret
-AUTH_TOKEN_EXPIRE_MINUTES=480
+AUTH_TOKEN_EXPIRE_MINUTES=180
 ```
 
 Generate the hash from the repository root:

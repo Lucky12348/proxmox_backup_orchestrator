@@ -73,7 +73,7 @@ AUTH_ENABLED=true
 AUTH_USERNAME=admin
 AUTH_PASSWORD_HASH=<compose-safe-bcrypt-hash>
 AUTH_SECRET_KEY=<random>
-AUTH_TOKEN_EXPIRE_MINUTES=480
+AUTH_TOKEN_EXPIRE_MINUTES=180
 
 PVE_API_URL=https://<proxmox-host>:8006/api2/json
 PVE_API_TOKEN_ID=root@pam!pbo-api
