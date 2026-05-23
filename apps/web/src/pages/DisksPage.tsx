@@ -30,7 +30,6 @@ export function DisksPage({
   onDiskToggleRequest,
   onExternalBackupRequest,
   onDiskEjectRequest,
-  onDiskPreparationRequest,
 }: DisksPageProps) {
   return (
     <div className="page-stack">
@@ -107,15 +106,6 @@ export function DisksPage({
                         style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
                       >
                         {t.externalBackupAction}
-                      </button>
-                      <button
-                        className="ghost-button"
-                        disabled={savingKey === `disk-prep-${disk.id}`}
-                        onClick={() => onDiskPreparationRequest(disk)}
-                        type="button"
-                        style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
-                      >
-                        {savingKey === `disk-prep-${disk.id}` ? t.preparingDisk : t.prepareDiskAction}
                       </button>
                       <button
                         className="ghost-button"

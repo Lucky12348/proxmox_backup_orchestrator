@@ -25,7 +25,6 @@ export interface DisksPageProps extends PageCommonProps {
   onDiskToggleRequest: (request: DiskActionRequest) => void;
   onExternalBackupRequest: (disk: ExternalDisk) => void;
   onDiskEjectRequest: (disk: ExternalDisk) => void;
-  onDiskPreparationRequest: (disk: ExternalDisk) => void;
   onDiskFieldChange: (
     diskId: number,
     payload: Partial<
@@ -40,14 +39,14 @@ export interface DisksPageProps extends PageCommonProps {
   ) => void;
 }
 
+export interface DashboardPageProps extends PageCommonProps {
+  latestBackupLabel: string;
+}
+
 export interface DiskPreparationSubmitPayload {
   mode: DiskPreparationMode;
   mountBasePath?: string;
   confirmDestructive: boolean;
-}
-
-export interface DashboardPageProps extends PageCommonProps {
-  latestBackupLabel: string;
 }
 
 export interface IntegrationsPageProps extends PageCommonProps {

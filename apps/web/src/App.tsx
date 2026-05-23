@@ -8,7 +8,6 @@ import { AppShell } from "./components/AppShell";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { ErrorBanner } from "./components/ErrorBanner";
 import { LoadingBlock } from "./components/LoadingBlock";
-import { PrepareDiskModal } from "./components/PrepareDiskModal";
 import { useAppData } from "./hooks/useAppData";
 import { translations, type Language } from "./i18n";
 import { ActivityPage } from "./pages/ActivityPage";
@@ -18,7 +17,7 @@ import { DisksPage } from "./pages/DisksPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { PlanningPage } from "./pages/PlanningPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import type { DiskActionRequest, DiskPreparationSubmitPayload } from "./pages/shared";
+import type { DiskActionRequest } from "./pages/shared";
 import type { ExternalDisk } from "./types";
 import { getLatestStatusLabel } from "./utils";
 
@@ -43,7 +42,6 @@ function AuthenticatedApp() {
   const { logout } = useAuth();
   const [language, setLanguage] = useState<Language>(() => getStoredLanguage());
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
-  const [preparationDisk, setPreparationDisk] = useState<ExternalDisk | null>(null);
 
   // Listen for auth-expired events from api.ts
   useEffect(() => {
@@ -70,7 +68,6 @@ function AuthenticatedApp() {
     runProxmoxSync,
     runPBSSync,
     startExternalBackup,
-    startDiskPreparation,
     ejectDisk,
     cleanupActivityRuns,
   } = useAppData();
@@ -88,7 +85,6 @@ function AuthenticatedApp() {
 
   function openConfirm(nextState: ConfirmState) { setConfirmState(nextState); }
   function closeConfirm() { setConfirmState(null); }
-  function closePreparationModal() { setPreparationDisk(null); }
 
   function handleDiskToggleRequest(request: DiskActionRequest) {
     const descriptors = {
@@ -202,18 +198,6 @@ function AuthenticatedApp() {
     }
   }
 
-  function handleDiskPreparationRequest(disk: ExternalDisk) {
-    if (!disk.connected) {
-      openConfirm({
-        title: t.prepareDiskTitle, description: t.prepareDiskBlockedDisconnected,
-        confirmLabel: t.dismiss, cancelLabel: t.cancel, tone: "warning",
-        onConfirm: closeConfirm,
-      });
-      return;
-    }
-    setPreparationDisk(disk);
-  }
-
   function handleDiskEjectRequest(disk: ExternalDisk) {
     openConfirm({
       title: t.ejectDiskTitle,
@@ -223,16 +207,6 @@ function AuthenticatedApp() {
       tone: "warning",
       onConfirm: () => { void ejectDisk(disk.id, t.ejectDiskSuccess); closeConfirm(); },
     });
-  }
-
-  async function handleDiskPreparationSubmit(payload: DiskPreparationSubmitPayload) {
-    if (!preparationDisk) return;
-    const run = await startDiskPreparation(
-      preparationDisk.id,
-      { mode: payload.mode, mount_base_path: payload.mountBasePath, confirm_destructive: payload.confirmDestructive },
-      t.prepareDiskSummary,
-    );
-    if (run) closePreparationModal();
   }
 
   if (loading) {
@@ -287,7 +261,6 @@ function AuthenticatedApp() {
                 onDiskFieldChange={(diskId, payload) => void mutateDisk(diskId, payload)}
                 onDiskEjectRequest={handleDiskEjectRequest}
                 onExternalBackupRequest={(disk) => void handleExternalBackupRequest(disk)}
-                onDiskPreparationRequest={handleDiskPreparationRequest}
                 onDiskToggleRequest={handleDiskToggleRequest}
                 savingKey={savingKey} t={t}
               />
@@ -332,14 +305,6 @@ function AuthenticatedApp() {
         open={confirmState !== null}
         title={confirmState?.title ?? ""}
         tone={confirmState?.tone ?? "warning"}
-      />
-      <PrepareDiskModal
-        disk={preparationDisk}
-        onCancel={closePreparationModal}
-        onSubmit={handleDiskPreparationSubmit}
-        open={preparationDisk !== null}
-        submitting={Boolean(preparationDisk && savingKey === `disk-prep-${preparationDisk.id}`)}
-        t={t}
       />
     </>
   );
