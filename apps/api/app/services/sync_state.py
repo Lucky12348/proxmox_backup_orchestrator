@@ -9,6 +9,8 @@ import httpx
 
 from app.core.config import Settings, get_settings
 from app.db.session import SessionLocal
+from app.services.notifications import notify_low_coverage
+from app.services.overview import get_overview_metrics
 from app.services.pbs_sync import PBSSyncSummary, sync_pbs_inventory
 from app.services.proxmox_sync import ProxmoxSyncSummary, sync_proxmox_inventory
 
@@ -119,12 +121,16 @@ def _run_guarded(
 
 def _sync_proxmox() -> ProxmoxSyncSummary:
     with SessionLocal() as db:
-        return sync_proxmox_inventory(db)
+        summary = sync_proxmox_inventory(db)
+        _notify_low_coverage_from_db(db)
+        return summary
 
 
 def _sync_pbs() -> PBSSyncSummary:
     with SessionLocal() as db:
-        return sync_pbs_inventory(db)
+        summary = sync_pbs_inventory(db)
+        _notify_low_coverage_from_db(db)
+        return summary
 
 
 def _utc_now() -> datetime:
@@ -135,3 +141,8 @@ def _as_aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _notify_low_coverage_from_db(db) -> None:
+    metrics = get_overview_metrics(db)
+    notify_low_coverage(metrics.coverage_percent, metrics.protected_vms, metrics.total_vms)

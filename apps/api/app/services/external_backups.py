@@ -213,11 +213,6 @@ def execute_external_backup_run(run_id: int) -> None:
         run.progress_message = "Starting external backup execution."
         db.add(run)
         db.commit()
-        disk_label = disk.display_name or disk.serial_number
-        if run.status == BackupRunStatus.SUCCESS:
-            notify_backup_success(disk_label)
-        elif run.status == BackupRunStatus.FAILED:
-            notify_backup_failure(disk_label, run.current_step, run.message)
         db.refresh(run)
         append_external_backup_run_log(db, run.id, step="starting", message="Starting external backup execution.")
 
@@ -367,6 +362,11 @@ def execute_external_backup_run(run_id: int) -> None:
 
         db.add(run)
         db.commit()
+        disk_label = _format_disk_notification_label(disk, run.datastore_name)
+        if run.status == BackupRunStatus.SUCCESS:
+            notify_backup_success(disk_label)
+        elif run.status == BackupRunStatus.FAILED:
+            notify_backup_failure(disk_label, run.current_step, run.message)
 
 
 def append_external_backup_run_log(
@@ -421,6 +421,18 @@ def _finish_run(
     run.last_log_at = datetime.utcnow()
     db.add(run)
     db.commit()
+
+
+def _format_disk_notification_label(disk: ExternalDisk, datastore_name: str | None = None) -> str:
+    label = disk.display_name or disk.serial_number
+    details = [f"serial {disk.serial_number}"]
+    if disk.model_name:
+        details.append(f"model {disk.model_name}")
+    if datastore_name:
+        details.append(f"datastore {datastore_name}")
+    if disk.source:
+        details.append(f"source {disk.source}")
+    return f"{label} ({', '.join(details)})"
 
 
 def _merge_logs(*values: str | None) -> str | None:

@@ -11,7 +11,9 @@ from app.core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 _last_agent_degraded_sent_at: dict[str, float] = {}
+_last_low_coverage_sent_at: float | None = None
 _AGENT_DEGRADED_COOLDOWN_SECONDS = 3600
+_LOW_COVERAGE_COOLDOWN_SECONDS = 3600
 
 
 @dataclass(frozen=True)
@@ -104,99 +106,138 @@ def get_notification_service(settings: Settings | None = None) -> NotificationSe
 
 
 def notify_backup_success(disk_label_or_serial: str) -> None:
-    settings = get_settings()
-    if not settings.notify_on_backup_success:
-        return
-    get_notification_service(settings).send(
-        "PBO: Backup externe terminé",
-        f"Export PBS vers disque {disk_label_or_serial} terminé avec succès.",
-        tags=["white_check_mark", "floppy_disk"],
-    )
+    try:
+        settings = get_settings()
+        if not settings.notify_on_backup_success:
+            _log_event("backup_success", False, reason="disabled")
+            return
+        sent = get_notification_service(settings).send(
+            "PBO: Backup externe termine",
+            f"Export PBS vers disque {disk_label_or_serial} termine avec succes.",
+            tags=["white_check_mark", "floppy_disk"],
+        )
+        _log_event("backup_success", sent)
+    except Exception as exc:
+        _log_event_error("backup_success", exc)
 
 
 def notify_backup_failure(disk_label_or_serial: str, step: str | None, error: str | None) -> None:
-    settings = get_settings()
-    if not settings.notify_on_backup_failure:
-        return
-    short_error = _shorten(error or "Erreur inconnue.")
-    clean_step = step or "unknown"
-    get_notification_service(settings).send(
-        "PBO: Backup externe échoué",
-        f"Disque {disk_label_or_serial}. Étape {clean_step}. Erreur: {short_error}",
-        priority="high",
-        tags=["warning", "floppy_disk"],
-    )
+    try:
+        settings = get_settings()
+        if not settings.notify_on_backup_failure:
+            _log_event("backup_failure", False, reason="disabled")
+            return
+        short_error = _shorten(error or "Erreur inconnue.")
+        clean_step = step or "unknown"
+        sent = get_notification_service(settings).send(
+            "PBO: Backup externe echoue",
+            f"Disque {disk_label_or_serial}. Etape {clean_step}. Erreur: {short_error}",
+            priority="high",
+            tags=["warning", "floppy_disk"],
+        )
+        _log_event("backup_failure", sent)
+    except Exception as exc:
+        _log_event_error("backup_failure", exc)
 
 
 def notify_disk_eject_ready(serial: str) -> None:
-    settings = get_settings()
-    if not settings.notify_on_disk_eject_ready:
-        return
-    get_notification_service(settings).send(
-        "PBO: Disque prêt à retirer",
-        f"Le disque externe {serial} peut être retiré.",
-        tags=["eject", "white_check_mark"],
-    )
+    try:
+        settings = get_settings()
+        if not settings.notify_on_disk_eject_ready:
+            _log_event("disk_eject_ready", False, reason="disabled")
+            return
+        sent = get_notification_service(settings).send(
+            "PBO: Disque pret a retirer",
+            f"Le disque externe {serial} peut etre retire.",
+            tags=["eject", "white_check_mark"],
+        )
+        _log_event("disk_eject_ready", sent)
+    except Exception as exc:
+        _log_event_error("disk_eject_ready", exc)
 
 
 def notify_update_result(component: str, success: bool, message: str | None = None) -> None:
-    settings = get_settings()
-    if not settings.notify_on_update_result:
-        return
-    if success:
-        get_notification_service(settings).send(
-            "PBO: Mise à jour terminée",
-            f"{component} est à jour.",
-            tags=["arrow_up", "white_check_mark"],
+    try:
+        settings = get_settings()
+        if not settings.notify_on_update_result:
+            _log_event("update_result", False, reason="disabled")
+            return
+        if success:
+            sent = get_notification_service(settings).send(
+                "PBO: Mise a jour terminee",
+                f"{component} est a jour.",
+                tags=["arrow_up", "white_check_mark"],
+            )
+            _log_event("update_result", sent)
+            return
+        sent = get_notification_service(settings).send(
+            "PBO: Mise a jour echouee",
+            f"{component}: {_shorten(message or 'Erreur inconnue.')}",
+            priority="high",
+            tags=["arrow_up", "warning"],
         )
-        return
-    get_notification_service(settings).send(
-        "PBO: Mise à jour échouée",
-        f"{component}: {_shorten(message or 'Erreur inconnue.')}",
-        priority="high",
-        tags=["arrow_up", "warning"],
-    )
+        _log_event("update_result", sent)
+    except Exception as exc:
+        _log_event_error("update_result", exc)
 
 
 def notify_agent_degraded(status_payload: dict[str, object]) -> None:
-    settings = get_settings()
-    if not settings.notify_on_agent_degraded:
-        return
-    status = str(status_payload.get("status") or "")
-    if status not in {"degraded", "disconnected"}:
-        return
+    try:
+        settings = get_settings()
+        if not settings.notify_on_agent_degraded:
+            _log_event("agent_degraded", False, reason="disabled")
+            return
+        status = str(status_payload.get("status") or "")
+        if status not in {"degraded", "disconnected"}:
+            return
 
-    hostname = str(status_payload.get("hostname") or "agent hote")
-    key = f"{hostname}:{status}"
-    now = time.monotonic()
-    previous = _last_agent_degraded_sent_at.get(key)
-    if previous is not None and now - previous < _AGENT_DEGRADED_COOLDOWN_SECONDS:
-        return
+        hostname = str(status_payload.get("hostname") or "agent hote")
+        key = f"{hostname}:{status}"
+        now = time.monotonic()
+        previous = _last_agent_degraded_sent_at.get(key)
+        if previous is not None and now - previous < _AGENT_DEGRADED_COOLDOWN_SECONDS:
+            _log_event("agent_degraded", False, reason="cooldown")
+            return
 
-    _last_agent_degraded_sent_at[key] = now
-    age = status_payload.get("last_seen_age_seconds")
-    age_message = f" Dernier heartbeat il y a {age}s." if isinstance(age, int) else ""
-    get_notification_service(settings).send(
-        "PBO: Agent dégradé",
-        f"L'agent {hostname} est {status}.{age_message}",
-        priority="high",
-        tags=["warning", "satellite"],
-    )
+        _last_agent_degraded_sent_at[key] = now
+        age = status_payload.get("last_seen_age_seconds")
+        age_message = f" Dernier heartbeat il y a {age}s." if isinstance(age, int) else ""
+        sent = get_notification_service(settings).send(
+            "PBO: Agent degrade",
+            f"L'agent {hostname} est {status}.{age_message}",
+            priority="high",
+            tags=["warning", "satellite"],
+        )
+        _log_event("agent_degraded", sent)
+    except Exception as exc:
+        _log_event_error("agent_degraded", exc)
 
 
 def notify_low_coverage(coverage_percent: float, protected_vms: int, total_vms: int) -> None:
-    settings = get_settings()
-    if not settings.notify_on_low_coverage:
-        return
-    threshold = settings.low_coverage_threshold_percent
-    if total_vms <= 0 or coverage_percent >= threshold:
-        return
-    get_notification_service(settings).send(
-        "PBO: Couverture backup incomplète",
-        f"Couverture PBS {coverage_percent:g}% ({protected_vms}/{total_vms}) sous le seuil {threshold:g}%.",
-        priority="high",
-        tags=["warning", "bar_chart"],
-    )
+    global _last_low_coverage_sent_at
+    try:
+        settings = get_settings()
+        if not settings.notify_on_low_coverage:
+            _log_event("low_coverage", False, reason="disabled")
+            return
+        threshold = settings.low_coverage_threshold_percent
+        if total_vms <= 0 or coverage_percent >= threshold:
+            return
+
+        now = time.monotonic()
+        if _last_low_coverage_sent_at is not None and now - _last_low_coverage_sent_at < _LOW_COVERAGE_COOLDOWN_SECONDS:
+            _log_event("low_coverage", False, reason="cooldown")
+            return
+        _last_low_coverage_sent_at = now
+        sent = get_notification_service(settings).send(
+            "PBO: Couverture backup incomplete",
+            f"Couverture PBS {coverage_percent:g}% ({protected_vms}/{total_vms}) sous le seuil {threshold:g}%.",
+            priority="high",
+            tags=["warning", "bar_chart"],
+        )
+        _log_event("low_coverage", sent)
+    except Exception as exc:
+        _log_event_error("low_coverage", exc)
 
 
 def _format_tags(tags: list[str] | tuple[str, ...] | str | None) -> str | None:
@@ -228,3 +269,18 @@ def _sanitize_error(exc: Exception, password: str | None = None) -> str:
     if password:
         message = message.replace(password, "***")
     return _shorten(message)
+
+
+def _log_event(event_name: str, sent: bool, reason: str | None = None) -> None:
+    if reason:
+        logger.info("notification event=%s sent=%s reason=%s", event_name, sent, reason)
+        return
+    logger.info("notification event=%s sent=%s", event_name, sent)
+
+
+def _log_event_error(event_name: str, exc: Exception) -> None:
+    try:
+        password = get_settings().ntfy_password
+    except Exception:
+        password = None
+    logger.warning("notification event=%s sent=false error=%s", event_name, _sanitize_error(exc, password))
