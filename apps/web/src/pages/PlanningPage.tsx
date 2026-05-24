@@ -211,8 +211,8 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
         <div className="calendar-toolbar">
           <div className="button-row">
             <button className="ghost-button" onClick={() => setVisibleDate(startOfDay(new Date()))} type="button">Aujourd'hui</button>
-            <button className="ghost-button icon-button" aria-label="Periode precedente" onClick={() => movePeriod(-1)} type="button">‹</button>
-            <button className="ghost-button icon-button" aria-label="Periode suivante" onClick={() => movePeriod(1)} type="button">›</button>
+            <button className="ghost-button icon-button" aria-label="Periode precedente" onClick={() => movePeriod(-1)} type="button">{"<"}</button>
+            <button className="ghost-button icon-button" aria-label="Periode suivante" onClick={() => movePeriod(1)} type="button">{">"}</button>
           </div>
           <h2>{periodTitle(calendarView, visibleDate)}</h2>
           <div className="button-row calendar-view-switcher">
