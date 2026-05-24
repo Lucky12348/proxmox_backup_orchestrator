@@ -4,7 +4,7 @@ PBO can send production notifications to a self-hosted ntfy server. Notification
 
 ## Environment
 
-Configure the App VM API environment:
+Configure the App VM API environment :):
 
 ```env
 NOTIFICATIONS_ENABLED=true
