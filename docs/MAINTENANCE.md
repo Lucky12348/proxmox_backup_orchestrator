@@ -26,6 +26,7 @@ APP_MAINTENANCE_AGENT_TOKEN=<random>
 APP_REPO_PATH=/opt/proxmox_backup_orchestrator
 APP_COMPOSE_FILE=infra/docker/docker-compose.yml
 APP_MAINTENANCE_TIMEOUT_SECONDS=300
+APP_MAINTENANCE_AGENT_SERVICE=proxmox-backup-orchestrator-app-maintenance-agent.service
 MAINTENANCE_TIMEOUT_SECONDS=300
 ```
 
@@ -56,7 +57,9 @@ git rev-parse @{u}
 git pull --ff-only
 docker-compose --env-file .env -f infra/docker/docker-compose.yml up --build -d
 docker-compose --env-file .env -f infra/docker/docker-compose.yml exec -T api \
-  python -c "import os; print(os.getenv('NOTIFICATIONS_ENABLED'), os.getenv('NTFY_BASE_URL'))"
+  python -c "import json, os; print(json.dumps({'NOTIFICATIONS_ENABLED': os.getenv('NOTIFICATIONS_ENABLED'), 'NTFY_BASE_URL': os.getenv('NTFY_BASE_URL'), 'NTFY_USERNAME': os.getenv('NTFY_USERNAME'), 'NTFY_TOPIC_SET': bool(os.getenv('NTFY_TOPIC')), 'NTFY_TOPIC_IS_DEFAULT': os.getenv('NTFY_TOPIC') == 'proxmox-backup-orchestrator'}))"
+systemd-run --on-active=10 --unit pbo-app-maintenance-agent-restart \
+  systemctl restart proxmox-backup-orchestrator-app-maintenance-agent.service
 ```
 
 If `docker-compose` is not available, the agent falls back to `docker compose` with the same `--env-file .env` arguments.
@@ -67,7 +70,15 @@ The command working directory is always `APP_REPO_PATH`. The production `.env` m
 .env not found at APP_REPO_PATH
 ```
 
-The post-update verification prints only `NOTIFICATIONS_ENABLED` and `NTFY_BASE_URL` from inside the recreated API container. It does not print `NTFY_PASSWORD`, `NTFY_TOPIC`, tokens, or other secrets.
+The post-update verification compares non-secret values from `.env` with the recreated API container. It checks `NOTIFICATIONS_ENABLED`, `NTFY_BASE_URL`, `NTFY_USERNAME`, and whether `NTFY_TOPIC` is set and not the default placeholder. It does not print `NTFY_PASSWORD`, the topic value, tokens, or other secrets. If the API container falls back to Compose defaults while `.env` contains production values, the update is marked failed.
+
+Because the app maintenance agent runs outside Docker, a code update can change the agent itself while the old process is still serving the current request. The update flow schedules a delayed systemd restart of `APP_MAINTENANCE_AGENT_SERVICE` after the container update and verification. If this is the first deployment of the fixed agent code, restart the service manually or run:
+
+```bash
+scripts/deploy-app-vm.sh
+```
+
+That script runs `git pull`, restarts the app maintenance agent, then recreates Docker containers with `docker-compose --env-file .env -f infra/docker/docker-compose.yml up --build -d`.
 
 Updating the app VM can rebuild containers and restart the Web UI.
 

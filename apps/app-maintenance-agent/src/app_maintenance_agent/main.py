@@ -1,4 +1,5 @@
 import os
+import json
 import re
 import secrets
 import shutil
@@ -27,6 +28,10 @@ class Settings:
     repo_path: str = os.getenv("APP_REPO_PATH", "/opt/proxmox_backup_orchestrator")
     compose_file: str = os.getenv("APP_COMPOSE_FILE", "infra/docker/docker-compose.yml")
     timeout_seconds: float = float(os.getenv("APP_MAINTENANCE_TIMEOUT_SECONDS", "300"))
+    service_name: str = os.getenv(
+        "APP_MAINTENANCE_AGENT_SERVICE",
+        "proxmox-backup-orchestrator-app-maintenance-agent.service",
+    )
 
 
 app = FastAPI(title="Proxmox Backup Orchestrator App Maintenance Agent", version="0.1.0")
@@ -69,8 +74,17 @@ def maintenance_check(
     return {
         "ok": status_payload["status"] != "error",
         "message": "App VM maintenance status checked.",
+        "compose": _compose_commands_payload(settings),
         "status": status_payload,
     }
+
+
+@app.get("/maintenance/compose-command")
+def maintenance_compose_command(
+    _: None = Depends(require_token),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    return _compose_commands_payload(settings)
 
 
 @app.post("/maintenance/update")
@@ -109,11 +123,14 @@ def maintenance_update(
             ["git", "rev-parse", "@{u}"],
             ["git", "pull", "--ff-only"],
             _compose_command(settings),
-            _compose_verify_notifications_command(settings),
         ],
         settings.timeout_seconds,
     )
+    if all(item["return_code"] == 0 for item in logs):
+        logs.append(_verify_api_notification_env(repo, settings))
     status_payload = _git_status(settings)
+    if all(item["return_code"] == 0 for item in logs) and status_payload["status"] != "error":
+        logs.append(_restart_agent_service(repo, settings))
     ok = all(item["return_code"] == 0 for item in logs) and status_payload["status"] != "error"
     return {
         "ok": ok,
@@ -225,8 +242,14 @@ def _compose_config_command(settings: Settings) -> list[str]:
 
 def _compose_verify_notifications_command(settings: Settings) -> list[str]:
     verify_script = (
-        "import os; "
-        "print(os.getenv('NOTIFICATIONS_ENABLED'), os.getenv('NTFY_BASE_URL'))"
+        "import json, os; "
+        "print(json.dumps({"
+        "'NOTIFICATIONS_ENABLED': os.getenv('NOTIFICATIONS_ENABLED'), "
+        "'NTFY_BASE_URL': os.getenv('NTFY_BASE_URL'), "
+        "'NTFY_USERNAME': os.getenv('NTFY_USERNAME'), "
+        "'NTFY_TOPIC_SET': bool(os.getenv('NTFY_TOPIC')), "
+        "'NTFY_TOPIC_IS_DEFAULT': os.getenv('NTFY_TOPIC') == 'proxmox-backup-orchestrator'"
+        "}))"
     )
     if shutil.which("docker-compose"):
         return [
@@ -260,6 +283,100 @@ def _compose_verify_notifications_command(settings: Settings) -> list[str]:
 
 def _env_file_check_command() -> list[str]:
     return ["check-env-file", ".env"]
+
+
+def _restart_agent_service_command(settings: Settings) -> list[str]:
+    if shutil.which("systemd-run"):
+        return [
+            "systemd-run",
+            "--on-active=10",
+            "--unit",
+            "pbo-app-maintenance-agent-restart",
+            "systemctl",
+            "restart",
+            settings.service_name,
+        ]
+    return ["systemctl", "try-restart", settings.service_name, "--no-block"]
+
+
+def _verify_api_notification_env(repo: Path, settings: Settings) -> dict[str, Any]:
+    expected = _read_env_file(repo / ".env")
+    command = _compose_verify_notifications_command(settings)
+    result = _run(repo, command, settings.timeout_seconds)
+    if result["return_code"] != 0:
+        return result
+
+    try:
+        actual = json.loads(result["stdout"] or "{}")
+    except json.JSONDecodeError as exc:
+        result["stderr"] = f"Unable to parse API notification env verification output: {exc}"
+        result["return_code"] = 1
+        return result
+
+    errors: list[str] = []
+    expected_enabled = expected.get("NOTIFICATIONS_ENABLED")
+    expected_base_url = expected.get("NTFY_BASE_URL")
+    expected_username = expected.get("NTFY_USERNAME")
+    expected_topic = expected.get("NTFY_TOPIC")
+
+    if expected_enabled and actual.get("NOTIFICATIONS_ENABLED") != expected_enabled:
+        errors.append(
+            f"NOTIFICATIONS_ENABLED expected {expected_enabled!r} but API has {actual.get('NOTIFICATIONS_ENABLED')!r}"
+        )
+    if expected_base_url and actual.get("NTFY_BASE_URL") != expected_base_url:
+        errors.append(f"NTFY_BASE_URL expected {expected_base_url!r} but API has {actual.get('NTFY_BASE_URL')!r}")
+    if expected_username and actual.get("NTFY_USERNAME") != expected_username:
+        errors.append(f"NTFY_USERNAME expected {expected_username!r} but API has {actual.get('NTFY_USERNAME')!r}")
+    if expected_topic and (not actual.get("NTFY_TOPIC_SET") or actual.get("NTFY_TOPIC_IS_DEFAULT")):
+        errors.append("NTFY_TOPIC from .env is not visible in API container.")
+
+    result["stdout"] = (
+        "API notification env verified: "
+        f"NOTIFICATIONS_ENABLED={actual.get('NOTIFICATIONS_ENABLED')!r}, "
+        f"NTFY_BASE_URL={actual.get('NTFY_BASE_URL')!r}, "
+        f"NTFY_USERNAME={actual.get('NTFY_USERNAME')!r}, "
+        f"NTFY_TOPIC_SET={actual.get('NTFY_TOPIC_SET')!r}, "
+        f"NTFY_TOPIC_IS_DEFAULT={actual.get('NTFY_TOPIC_IS_DEFAULT')!r}"
+    )
+    if errors:
+        result["stderr"] = "Production .env values are not visible inside API container: " + "; ".join(errors)
+        result["return_code"] = 1
+    return result
+
+
+def _restart_agent_service(repo: Path, settings: Settings) -> dict[str, Any]:
+    command = _restart_agent_service_command(settings)
+    if not shutil.which("systemctl"):
+        return {
+            "command": _command_text(command),
+            "stdout": None,
+            "stderr": "systemctl is not available; restart app maintenance agent manually.",
+            "return_code": 1,
+        }
+    return _run(repo, command, settings.timeout_seconds)
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'").strip('"')
+        values[key] = value
+    return values
+
+
+def _compose_commands_payload(settings: Settings) -> dict[str, str]:
+    return {
+        "config": _command_text(_compose_config_command(settings)),
+        "update": _command_text(_compose_command(settings)),
+        "verify_notifications": _command_text(_compose_verify_notifications_command(settings)),
+    }
 
 
 def _command_text(command: list[str]) -> str:
