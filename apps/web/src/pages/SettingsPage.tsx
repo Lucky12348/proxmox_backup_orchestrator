@@ -34,6 +34,7 @@ const COMPONENTS: { id: MaintenanceComponent; backend: string; label: string }[]
   { id: "proxmox-agent", backend: "proxmox-agent", label: "Proxmox agent" },
   { id: "pbs-agent", backend: "pbs-agent", label: "PBS agent" },
 ];
+const UPDATE_ALL_ORDER: MaintenanceComponent[] = ["proxmox-agent", "pbs-agent", "app"];
 
 const initialMeta: Record<MaintenanceComponent, ComponentMeta> = {
   app: { uiState: "idle", lastCheckedAt: null, lastUpdatedAt: null, message: null, logs: [] },
@@ -186,17 +187,9 @@ export function SettingsPage({ t }: SettingsPageProps) {
   }
 
   useEffect(() => {
-    void loadStatus();
+    void loadStatus().then(() => void checkAllComponents());
     void loadNotificationStatus();
   }, []);
-
-  useEffect(() => {
-    if (!anyBusy) return;
-    const intervalId = window.setInterval(() => {
-      void loadStatus({ silent: true });
-    }, 3000);
-    return () => window.clearInterval(intervalId);
-  }, [anyBusy]);
 
   async function checkComponent(component: MaintenanceComponent) {
     setComponentMeta(component, { uiState: "checking", message: null });
@@ -217,44 +210,27 @@ export function SettingsPage({ t }: SettingsPageProps) {
     }
   }
 
+  async function checkAllComponents() {
+    await Promise.all(COMPONENTS.map((component) => checkComponent(component.id)));
+  }
+
   async function updateComponent(component: MaintenanceComponent) {
     const warning = component === "app" ? t.maintenanceAppRestartWarning : t.maintenanceConfirmUpdate;
     if (!window.confirm(warning)) return;
 
     setBanner(null);
-    setComponentMeta(component, { uiState: "update_running", message: t.maintenanceUpdating, logs: meta[component].logs });
     try {
-      const result = await updateMaintenanceComponent(component);
-      applyActionResult(result);
-      const noOp = result.action_status === "up_to_date";
-      if (noOp) {
-        const checked = await waitForComponentUpToDate(component);
-        setComponentMeta(component, {
-          uiState: "update_success",
-          lastUpdatedAt: result.finished_at ?? nowIso(),
-          message: t.maintenanceAlreadyUpToDate,
-          logs: result.logs.length > 0 ? result.logs : checked.logs,
-        });
-        setBanner({ message: t.maintenanceAlreadyUpToDate, tone: "info" });
-        await loadStatus({ silent: true });
-        return;
+      const outcome = await runComponentUpdate(component);
+      if (component === "app" && outcome.updated) {
+        scheduleAppReload();
       }
-      const actionSucceeded = result.action_status !== "error" && !logsHaveErrors(result.logs);
-      const checked = actionSucceeded ? await waitForComponentUpToDate(component) : null;
-      const success = Boolean(actionSucceeded && checked);
-      setComponentMeta(component, {
-        uiState: success ? "update_success" : "update_error",
-        lastUpdatedAt: result.finished_at ?? nowIso(),
-        message: success ? t.maintenanceUpdateSuccess : t.maintenanceUpdateError,
-        logs: result.logs.length > 0 ? result.logs : checked?.logs ?? [],
-      });
-      setBanner({ message: noOp ? t.maintenanceAlreadyUpToDate : success ? t.maintenanceUpdateSuccess : t.maintenanceUpdateError, tone: success ? "info" : "error" });
-      await loadStatus({ silent: true });
     } catch (updateError) {
       if (isNetworkRestartError(updateError)) {
         const recovered = await recoverAfterInterruptedUpdate(component);
         if (recovered) {
-          await loadStatus({ silent: true });
+          if (component === "app") {
+            scheduleAppReload();
+          }
         }
         return;
       }
@@ -272,72 +248,46 @@ export function SettingsPage({ t }: SettingsPageProps) {
 
     setBanner(null);
     const counts = { already: 0, updated: 0, failed: 0 };
-    const candidates = COMPONENTS.filter((component) => {
-      const status = findStatus(component.id);
-      if (isUpToDate(status)) {
-        counts.already += 1;
-        setComponentMeta(component.id, { message: t.maintenanceAlreadyUpToDate });
-        return false;
-      }
-      return true;
-    });
-
-    if (candidates.length === 0) {
-      await loadStatus({ silent: true });
-      setBanner({ message: formatUpdateAllSummary(counts), tone: "info" });
-      return;
-    }
-
-    for (const component of candidates) {
-      setComponentMeta(component.id, { uiState: "update_running", message: t.maintenanceUpdating });
+    for (const component of UPDATE_ALL_ORDER) {
+      setComponentMeta(component, { uiState: "idle", message: null });
     }
 
     try {
-      for (const component of candidates) {
+      for (const component of UPDATE_ALL_ORDER) {
+        if (component === "app" && counts.failed > 0) {
+          setComponentMeta("app", { uiState: "idle", message: t.maintenanceSkippedDueToAgentFailure });
+          break;
+        }
         try {
-          const result = await updateMaintenanceComponent(component.id);
-          applyActionResult(result);
-          const noOp = result.action_status === "up_to_date";
-          if (noOp) {
-            const checked = await waitForComponentUpToDate(component.id);
-            counts.already += 1;
-            setComponentMeta(component.id, {
-              uiState: "update_success",
-              lastUpdatedAt: result.finished_at ?? nowIso(),
-              message: t.maintenanceAlreadyUpToDate,
-              logs: result.logs.length > 0 ? result.logs : checked.logs,
-            });
-            continue;
+          const outcome = await runComponentUpdate(component);
+          if (outcome.already) counts.already += 1;
+          else if (outcome.updated) counts.updated += 1;
+
+          if (component === "app" && outcome.updated) {
+            scheduleAppReload();
+            return;
           }
-          const actionSucceeded = result.action_status !== "error" && !logsHaveErrors(result.logs);
-          const checked = actionSucceeded ? await waitForComponentUpToDate(component.id) : null;
-          const success = Boolean(actionSucceeded && checked);
-          if (success) counts.updated += 1;
-          else counts.failed += 1;
-          setComponentMeta(component.id, {
-            uiState: success ? "update_success" : "update_error",
-            lastUpdatedAt: result.finished_at ?? nowIso(),
-            message: success ? t.maintenanceUpdateSuccess : t.maintenanceUpdateError,
-            logs: result.logs.length > 0 ? result.logs : checked?.logs ?? [],
-          });
         } catch (updateError) {
           if (isNetworkRestartError(updateError)) {
-            const recovered = await recoverAfterInterruptedUpdate(component.id);
+            const recovered = await recoverAfterInterruptedUpdate(component);
             if (recovered) {
               counts.updated += 1;
             } else {
               counts.failed += 1;
             }
+            if (component === "app" && recovered) {
+              scheduleAppReload();
+              return;
+            }
             continue;
           }
           counts.failed += 1;
-          setComponentMeta(component.id, {
+          setComponentMeta(component, {
             uiState: "update_error",
             message: updateError instanceof Error ? updateError.message : t.maintenanceUpdateError,
           });
         }
       }
-      await loadStatus({ silent: true });
       const message = formatUpdateAllSummary(counts);
       setBanner({ message, tone: counts.failed > 0 ? "error" : "info" });
     } catch (updateError) {
@@ -352,6 +302,50 @@ export function SettingsPage({ t }: SettingsPageProps) {
       for (const component of COMPONENTS) {
         setComponentMeta(component.id, { uiState: "update_error", message: t.maintenanceUpdateError });
       }
+    }
+  }
+
+  async function runComponentUpdate(component: MaintenanceComponent): Promise<{ already: boolean; updated: boolean }> {
+    setComponentMeta(component, {
+      uiState: "update_running",
+      message: t.maintenanceUpdating,
+      logs: [clientLog(t.maintenanceUpdating)],
+    });
+
+    const result = await updateMaintenanceComponent(component);
+    applyActionResult(result);
+    const updateReturnedError = result.action_status === "error" || logsHaveErrors(result.logs);
+    const already = result.action_status === "up_to_date";
+
+    setComponentMeta(component, {
+      uiState: "post_update_checking",
+      message: t.maintenancePostUpdateChecking,
+      logs: [...result.logs, clientLog(t.maintenancePostUpdateChecking)],
+    });
+
+    try {
+      const checked = await waitForComponentUpToDate(component);
+      const completedAt = nowIso();
+      const message = already
+        ? t.maintenanceAlreadyUpToDate
+        : updateReturnedError
+          ? t.maintenancePostCheckRecovered
+          : t.maintenanceUpdateSuccess;
+      setComponentMeta(component, {
+        uiState: "update_success",
+        lastCheckedAt: completedAt,
+        lastUpdatedAt: result.finished_at ?? completedAt,
+        message,
+        logs: mergeLogs(result.logs, checked.logs),
+      });
+      return { already, updated: !already };
+    } catch (error) {
+      setComponentMeta(component, {
+        uiState: "update_error",
+        message: error instanceof Error ? error.message : t.maintenanceUpdateError,
+        logs: result.logs,
+      });
+      throw error;
     }
   }
 
@@ -392,12 +386,33 @@ export function SettingsPage({ t }: SettingsPageProps) {
     throw new Error(`${t.maintenancePostUpdateTimeout}${suffix}`);
   }
 
+  function scheduleAppReload() {
+    setComponentMeta("app", { uiState: "update_success", message: t.maintenanceAppReloading });
+    setBanner({ message: t.maintenanceAppReloading, tone: "info" });
+    window.setTimeout(() => window.location.reload(), 2500);
+  }
+
   function formatUpdateAllSummary(counts: { updated: number; already: number; failed: number }) {
     return t.maintenanceUpdateAllSummary
       .replace("{updated}", String(counts.updated))
       .replace("{already}", String(counts.already))
       .replace("{skipped}", String(counts.already))
       .replace("{failed}", String(counts.failed));
+  }
+
+  function mergeLogs(first: MaintenanceCommandResult[], second: MaintenanceCommandResult[]) {
+    if (first.length === 0) return second;
+    if (second.length === 0) return first;
+    return [...first, clientLog(t.maintenancePostUpdateChecking), ...second];
+  }
+
+  function clientLog(message: string): MaintenanceCommandResult {
+    return {
+      command: "ui",
+      return_code: 0,
+      stdout: message,
+      stderr: null,
+    };
   }
 
   async function recoverAfterInterruptedUpdate(component: MaintenanceComponent): Promise<boolean> {
