@@ -918,6 +918,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
   .stats-grid, .stats-grid-compact, .integration-grid, .filters-bar { grid-template-columns: 1fr; }
 }
 
+
 /* Planning calendar final layout overrides */
 .calendar-shell {
   min-width: 0;
@@ -1542,4 +1543,47 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
   .calendar-shell .calendar-year-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.planning-modal .planning-form-grid input:not([type="checkbox"]),
+.planning-modal .planning-form-grid select,
+.planning-modal .planning-form-grid textarea {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  background: #0b1220;
+  color: #e5edf7;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+  padding: 10px 12px;
+  outline: none;
+  color-scheme: dark;
+}
+
+.planning-modal .planning-form-grid input:not([type="checkbox"]):focus,
+.planning-modal .planning-form-grid select:focus,
+.planning-modal .planning-form-grid textarea:focus {
+  border-color: rgba(59, 130, 246, 0.75);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.planning-modal .planning-form-grid input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #3b82f6;
+  margin: 0;
+}
+
+.planning-modal .planning-form-grid .checkbox-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.planning-modal .planning-form-grid select option {
+  background: #0b1220;
+  color: #e5edf7;
 }
