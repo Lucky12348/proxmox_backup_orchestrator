@@ -8,7 +8,7 @@ Configure the App VM API environment:
 
 ```env
 NOTIFICATIONS_ENABLED=true
-NTFY_BASE_URL=https://ntfy.sofianechaoui.fr
+NTFY_BASE_URL=https://ntfy.YOURDOMAINE.com
 NTFY_TOPIC=replace-with-secret-topic
 NTFY_USERNAME=pbo
 NTFY_PASSWORD=replace-with-ntfy-password
