@@ -141,6 +141,11 @@ def ensure_disk_preparation_run_schema() -> None:
 
 def ensure_scheduled_backup_schema() -> None:
     Base.metadata.create_all(bind=engine, tables=[ScheduledBackupEvent.__table__, ScheduledBackupRun.__table__])
+    inspector = inspect(engine)
+    existing_columns = {column["name"] for column in inspector.get_columns("scheduled_backup_events")}
+    if "deleted_at" not in existing_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE scheduled_backup_events ADD COLUMN deleted_at TIMESTAMP"))
 
 
 def seed_database() -> None:

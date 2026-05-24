@@ -57,6 +57,7 @@ class ScheduledBackupEvent(Base):
     last_status: Mapped[str | None] = mapped_column(String(32))
     last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
     last_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
 

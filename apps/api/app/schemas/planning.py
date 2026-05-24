@@ -74,6 +74,7 @@ class ScheduledBackupEventRead(UTCDateTimeModel, ScheduledBackupEventBase):
     last_status: str | None = None
     last_triggered_at: datetime | None = None
     last_completed_at: datetime | None = None
+    deleted_at: datetime | None = None
     next_occurrence_at: datetime | None = None
     active_run: "ScheduledBackupRunRead | None" = None
     created_at: datetime

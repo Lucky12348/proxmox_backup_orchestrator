@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, status
@@ -24,6 +25,13 @@ from app.services.planning_scheduler import (
 
 
 router = APIRouter(prefix="/planning", tags=["planning"])
+logger = logging.getLogger(__name__)
+ACTIVE_RUN_STATUSES = {
+    ScheduledBackupRunStatus.PENDING,
+    ScheduledBackupRunStatus.WAITING_FOR_DISK,
+    ScheduledBackupRunStatus.WAITING_FOR_CONFIRMATION,
+    ScheduledBackupRunStatus.RUNNING,
+}
 
 
 @router.get("/disks", response_model=list[DiskPlanningRead])
@@ -52,7 +60,13 @@ def get_overview(db: DbSession) -> PlanningOverviewRead:
 
 @router.get("/events", response_model=list[ScheduledBackupEventRead])
 def list_events(db: DbSession) -> list[ScheduledBackupEventRead]:
-    events = list(db.scalars(select(ScheduledBackupEvent).order_by(ScheduledBackupEvent.window_starts_at.asc())))
+    events = list(
+        db.scalars(
+            select(ScheduledBackupEvent)
+            .where(ScheduledBackupEvent.deleted_at.is_(None))
+            .order_by(ScheduledBackupEvent.window_starts_at.asc())
+        )
+    )
     return [_event_read(db, event) for event in events]
 
 
@@ -73,7 +87,7 @@ def create_event(payload: ScheduledBackupEventCreate, db: DbSession) -> Schedule
 @router.get("/events/{event_id}", response_model=ScheduledBackupEventRead)
 def get_event(event_id: int, db: DbSession) -> ScheduledBackupEventRead:
     event = db.get(ScheduledBackupEvent, event_id)
-    if event is None:
+    if event is None or event.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scheduled event not found")
     return _event_read(db, event)
 
@@ -81,7 +95,7 @@ def get_event(event_id: int, db: DbSession) -> ScheduledBackupEventRead:
 @router.patch("/events/{event_id}", response_model=ScheduledBackupEventRead)
 def update_event(event_id: int, payload: ScheduledBackupEventUpdate, db: DbSession) -> ScheduledBackupEventRead:
     event = db.get(ScheduledBackupEvent, event_id)
-    if event is None:
+    if event is None or event.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scheduled event not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(event, field, value)
@@ -95,12 +109,27 @@ def update_event(event_id: int, payload: ScheduledBackupEventUpdate, db: DbSessi
 @router.delete("/events/{event_id}", status_code=204)
 def delete_event(event_id: int, db: DbSession) -> None:
     event = db.get(ScheduledBackupEvent, event_id)
-    if event is None:
+    if event is None or event.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scheduled event not found")
-    for run in db.scalars(select(ScheduledBackupRun).where(ScheduledBackupRun.event_id == event.id)):
-        db.delete(run)
-    db.delete(event)
+    active_run = db.scalar(
+        select(ScheduledBackupRun.id)
+        .where(
+            ScheduledBackupRun.event_id == event.id,
+            ScheduledBackupRun.status.in_(list(ACTIVE_RUN_STATUSES)),
+        )
+        .limit(1)
+    )
+    if active_run is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete event while a run is active. Cancel the run first.",
+        )
+    event.enabled = False
+    event.deleted_at = datetime.utcnow()
+    event.updated_at = event.deleted_at
+    db.add(event)
     db.commit()
+    logger.info("planning event soft-deleted event_id=%s", event.id)
 
 
 @router.get("/runs", response_model=list[ScheduledBackupRunRead])
@@ -144,10 +173,7 @@ def _event_read(db, event: ScheduledBackupEvent) -> ScheduledBackupEventRead:
             ScheduledBackupRun.event_id == event.id,
             ScheduledBackupRun.status.in_(
                 [
-                    ScheduledBackupRunStatus.PENDING,
-                    ScheduledBackupRunStatus.WAITING_FOR_DISK,
-                    ScheduledBackupRunStatus.WAITING_FOR_CONFIRMATION,
-                    ScheduledBackupRunStatus.RUNNING,
+                    *ACTIVE_RUN_STATUSES,
                 ]
             ),
         )

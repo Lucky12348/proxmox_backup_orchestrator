@@ -69,12 +69,17 @@ def scheduler_tick(now: datetime | None = None) -> None:
 
 def create_due_runs(db: Session, now: datetime) -> None:
     horizon = now + timedelta(hours=24)
-    events = list(db.scalars(select(ScheduledBackupEvent).where(ScheduledBackupEvent.enabled.is_(True))))
+    events = list(
+        db.scalars(
+            select(ScheduledBackupEvent).where(
+                ScheduledBackupEvent.enabled.is_(True),
+                ScheduledBackupEvent.deleted_at.is_(None),
+            )
+        )
+    )
     for event in events:
-        occurrence = next_occurrence(event, now - timedelta(hours=24))
-        if occurrence is None or occurrence > horizon:
-            continue
-        _ensure_run(db, event, occurrence)
+        for occurrence in expand_occurrences(event, now - timedelta(hours=24), horizon):
+            _ensure_run(db, event, occurrence)
     db.commit()
 
 
@@ -95,7 +100,7 @@ def process_runs(db: Session, now: datetime) -> None:
     )
     for run in runs:
         event = db.get(ScheduledBackupEvent, run.event_id)
-        if event is None or not event.enabled:
+        if event is None or not event.enabled or event.deleted_at is not None:
             continue
         _process_run(db, event, run, now)
     db.commit()
@@ -107,13 +112,13 @@ def handle_disk_detected(db: Session, disk: ExternalDisk, now: datetime | None =
         db.scalars(
             select(ScheduledBackupEvent).where(
                 ScheduledBackupEvent.enabled.is_(True),
+                ScheduledBackupEvent.deleted_at.is_(None),
                 ScheduledBackupEvent.disk_serial == disk.serial_number,
             )
         )
     )
     for event in events:
-        occurrence = next_occurrence(event, current_time - timedelta(hours=24))
-        if occurrence is not None:
+        for occurrence in expand_occurrences(event, current_time - timedelta(hours=24), current_time + timedelta(hours=1)):
             _ensure_run(db, event, occurrence)
     db.commit()
 
@@ -128,7 +133,7 @@ def handle_disk_detected(db: Session, disk: ExternalDisk, now: datetime | None =
     )
     for run in runs:
         event = db.get(ScheduledBackupEvent, run.event_id)
-        if event is None or event.disk_serial != disk.serial_number:
+        if event is None or event.deleted_at is not None or event.disk_serial != disk.serial_number:
             continue
         if not (run.window_starts_at <= current_time <= run.window_ends_at):
             continue
@@ -177,7 +182,7 @@ def cancel_planning_run(db: Session, run_id: int) -> ScheduledBackupRun:
 
 def run_event_now(db: Session, event_id: int) -> ScheduledBackupRun:
     event = db.get(ScheduledBackupEvent, event_id)
-    if event is None:
+    if event is None or event.deleted_at is not None:
         raise ValueError("Scheduled event not found.")
     now = datetime.utcnow()
     run = ScheduledBackupRun(
@@ -199,34 +204,54 @@ def run_event_now(db: Session, event_id: int) -> ScheduledBackupRun:
 
 
 def next_occurrence(event: ScheduledBackupEvent, after: datetime) -> datetime | None:
+    return next(iter(expand_occurrences(event, after, after + timedelta(days=370))), None)
+
+
+def expand_occurrences(event: ScheduledBackupEvent, range_start: datetime, range_end: datetime) -> list[datetime]:
+    if event.deleted_at is not None:
+        return []
     start = event.window_starts_at
+    occurrences: list[datetime] = []
     if event.recurrence_type == ScheduledBackupRecurrenceType.ONCE:
-        return start if start >= after else None
-    if event.recurrence_type == ScheduledBackupRecurrenceType.DAILY:
-        if start >= after:
-            return start
-        days = max(0, (after.date() - start.date()).days)
+        occurrences = [start] if range_start <= start <= range_end else []
+    elif event.recurrence_type == ScheduledBackupRecurrenceType.DAILY:
+        days = max(0, (range_start.date() - start.date()).days)
         candidate = start + timedelta(days=days)
-        if candidate < after:
+        if candidate < range_start:
             candidate += timedelta(days=1)
-        return candidate
-    if event.recurrence_type == ScheduledBackupRecurrenceType.WEEKLY:
-        if start >= after:
-            return start
-        weeks = max(0, (after.date() - start.date()).days // 7)
+        while candidate <= range_end:
+            occurrences.append(candidate)
+            candidate += timedelta(days=1)
+    elif event.recurrence_type == ScheduledBackupRecurrenceType.WEEKLY:
+        weeks = max(0, (range_start.date() - start.date()).days // 7)
         candidate = start + timedelta(weeks=weeks)
-        while candidate < after:
+        while candidate < range_start:
             candidate += timedelta(weeks=1)
-        return candidate
-    if event.recurrence_type == ScheduledBackupRecurrenceType.MONTHLY:
+        while candidate <= range_end:
+            occurrences.append(candidate)
+            candidate += timedelta(weeks=1)
+    elif event.recurrence_type == ScheduledBackupRecurrenceType.MONTHLY:
         candidate = start
-        while candidate < after:
+        while candidate < range_start:
             year = candidate.year + (1 if candidate.month == 12 else 0)
             month = 1 if candidate.month == 12 else candidate.month + 1
             day = min(start.day, _days_in_month(year, month))
             candidate = candidate.replace(year=year, month=month, day=day)
-        return candidate
-    return None
+        while candidate <= range_end:
+            occurrences.append(candidate)
+            year = candidate.year + (1 if candidate.month == 12 else 0)
+            month = 1 if candidate.month == 12 else candidate.month + 1
+            day = min(start.day, _days_in_month(year, month))
+            candidate = candidate.replace(year=year, month=month, day=day)
+    logger.info(
+        "planning occurrence expansion event_id=%s recurrence=%s count=%s range_start=%s range_end=%s",
+        event.id,
+        event.recurrence_type.value,
+        len(occurrences),
+        range_start.isoformat(timespec="seconds"),
+        range_end.isoformat(timespec="seconds"),
+    )
+    return occurrences
 
 
 def _process_run(db: Session, event: ScheduledBackupEvent, run: ScheduledBackupRun, now: datetime) -> None:
