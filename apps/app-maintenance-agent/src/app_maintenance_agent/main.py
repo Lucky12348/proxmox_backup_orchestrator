@@ -102,12 +102,14 @@ def maintenance_update(
     logs = _run_sequence(
         repo,
         [
+            _env_file_check_command(),
             ["git", "status", "--short"],
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             ["git", "rev-parse", "HEAD"],
             ["git", "rev-parse", "@{u}"],
             ["git", "pull", "--ff-only"],
             _compose_command(settings),
+            _compose_verify_notifications_command(settings),
         ],
         settings.timeout_seconds,
     )
@@ -127,7 +129,7 @@ def _git_status(settings: Settings) -> dict[str, Any]:
     repo = Path(settings.repo_path)
     logs = _run_sequence(
         repo,
-        [["git", "fetch"], ["git", "status", "--short"]],
+        [_env_file_check_command(), _compose_config_command(settings), ["git", "fetch"], ["git", "status", "--short"]],
         settings.timeout_seconds,
     )
     branch = _run(repo, ["git", "rev-parse", "--abbrev-ref", "HEAD"], settings.timeout_seconds)
@@ -164,6 +166,21 @@ def _run(repo: Path, command: list[str], timeout_seconds: float) -> dict[str, An
             "stderr": f"Repository path does not exist: {repo}",
             "return_code": 1,
         }
+    if command == _env_file_check_command():
+        env_file = repo / ".env"
+        if not env_file.exists():
+            return {
+                "command": _command_text(command),
+                "stdout": None,
+                "stderr": ".env not found at APP_REPO_PATH",
+                "return_code": 1,
+            }
+        return {
+            "command": _command_text(command),
+            "stdout": ".env found at APP_REPO_PATH",
+            "stderr": None,
+            "return_code": 0,
+        }
 
     try:
         completed = subprocess.run(
@@ -196,8 +213,53 @@ def _run(repo: Path, command: list[str], timeout_seconds: float) -> dict[str, An
 
 def _compose_command(settings: Settings) -> list[str]:
     if shutil.which("docker-compose"):
-        return ["docker-compose", "-f", settings.compose_file, "up", "--build", "-d"]
-    return ["docker", "compose", "-f", settings.compose_file, "up", "--build", "-d"]
+        return ["docker-compose", "--env-file", ".env", "-f", settings.compose_file, "up", "--build", "-d"]
+    return ["docker", "compose", "--env-file", ".env", "-f", settings.compose_file, "up", "--build", "-d"]
+
+
+def _compose_config_command(settings: Settings) -> list[str]:
+    if shutil.which("docker-compose"):
+        return ["docker-compose", "--env-file", ".env", "-f", settings.compose_file, "config", "--quiet"]
+    return ["docker", "compose", "--env-file", ".env", "-f", settings.compose_file, "config", "--quiet"]
+
+
+def _compose_verify_notifications_command(settings: Settings) -> list[str]:
+    verify_script = (
+        "import os; "
+        "print(os.getenv('NOTIFICATIONS_ENABLED'), os.getenv('NTFY_BASE_URL'))"
+    )
+    if shutil.which("docker-compose"):
+        return [
+            "docker-compose",
+            "--env-file",
+            ".env",
+            "-f",
+            settings.compose_file,
+            "exec",
+            "-T",
+            "api",
+            "python",
+            "-c",
+            verify_script,
+        ]
+    return [
+        "docker",
+        "compose",
+        "--env-file",
+        ".env",
+        "-f",
+        settings.compose_file,
+        "exec",
+        "-T",
+        "api",
+        "python",
+        "-c",
+        verify_script,
+    ]
+
+
+def _env_file_check_command() -> list[str]:
+    return ["check-env-file", ".env"]
 
 
 def _command_text(command: list[str]) -> str:

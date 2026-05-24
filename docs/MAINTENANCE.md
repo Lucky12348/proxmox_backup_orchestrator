@@ -46,16 +46,28 @@ systemctl enable --now proxmox-backup-orchestrator-app-maintenance-agent.service
 The app maintenance agent uses `APP_REPO_PATH` and runs:
 
 ```bash
+test -f .env
+docker-compose --env-file .env -f infra/docker/docker-compose.yml config --quiet
 git fetch
 git status --short
 git rev-parse --abbrev-ref HEAD
 git rev-parse HEAD
 git rev-parse @{u}
 git pull --ff-only
-docker-compose -f infra/docker/docker-compose.yml up --build -d
+docker-compose --env-file .env -f infra/docker/docker-compose.yml up --build -d
+docker-compose --env-file .env -f infra/docker/docker-compose.yml exec -T api \
+  python -c "import os; print(os.getenv('NOTIFICATIONS_ENABLED'), os.getenv('NTFY_BASE_URL'))"
 ```
 
-If `docker-compose` is not available, the API falls back to `docker compose`.
+If `docker-compose` is not available, the agent falls back to `docker compose` with the same `--env-file .env` arguments.
+
+The command working directory is always `APP_REPO_PATH`. The production `.env` must exist at `APP_REPO_PATH/.env`; otherwise the update fails before `git pull` with:
+
+```text
+.env not found at APP_REPO_PATH
+```
+
+The post-update verification prints only `NOTIFICATIONS_ENABLED` and `NTFY_BASE_URL` from inside the recreated API container. It does not print `NTFY_PASSWORD`, `NTFY_TOPIC`, tokens, or other secrets.
 
 Updating the app VM can rebuild containers and restart the Web UI.
 
