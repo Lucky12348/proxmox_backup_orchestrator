@@ -1381,6 +1381,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
   width: min(760px, calc(100vw - 32px));
   max-height: 90vh;
   overflow: auto;
+  color-scheme: dark;
 }
 
 .planning-form-grid {
@@ -1393,17 +1394,87 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 
 .planning-form-grid label {
   display: grid;
-  gap: 6px;
+  align-content: start;
+  gap: 7px;
   min-width: 0;
+  color: var(--t2);
+  font-size: 13px;
+  font-weight: 600;
 }
 
-.planning-form-grid input,
-.planning-form-grid select,
-.truncate-select {
+.planning-modal input,
+.planning-modal select,
+.planning-modal textarea,
+.planning-modal input[type="datetime-local"],
+.planning-modal input[type="number"] {
   width: 100%;
   min-width: 0;
+  min-height: 40px;
+  padding: 9px 11px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r8);
+  outline: none;
+  background: var(--bg1);
+  color: var(--t1);
+  font: inherit;
+  color-scheme: dark;
+  transition: border-color 120ms, box-shadow 120ms, background 120ms;
+}
+
+.planning-modal textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.planning-modal input:focus,
+.planning-modal select:focus,
+.planning-modal textarea:focus {
+  border-color: var(--ac);
+  box-shadow: 0 0 0 2px rgba(88,166,255,.16);
+  background: var(--bg2);
+}
+
+.planning-modal select,
+.planning-modal .truncate-select {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planning-modal select option {
+  background: var(--bg1);
+  color: var(--t1);
+}
+
+.planning-modal input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: .75;
+}
+
+.planning-modal input[type="number"] {
+  font-variant-numeric: tabular-nums;
+}
+
+.planning-modal input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  margin: 0;
+  accent-color: var(--ac);
+  flex: 0 0 auto;
+}
+
+.planning-form-grid .checkbox-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  min-height: 40px;
+  padding-top: 22px;
+  color: var(--t1);
+  font-weight: 500;
+  line-height: 1.35;
 }
 
 .truncate-cell {
