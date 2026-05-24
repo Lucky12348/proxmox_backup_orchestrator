@@ -8,6 +8,7 @@ from app.schemas.agent import (
     AgentStatusRead,
 )
 from app.services.disks import get_agent_status, ingest_agent_disk_report, record_agent_heartbeat
+from app.services.notifications import notify_agent_degraded
 from app.schemas.external_disk import ExternalDiskRead
 
 
@@ -28,4 +29,6 @@ def post_disk_report(payload: AgentDiskReportCreate, db: DbSession) -> list[Exte
 
 @router.get("/status", response_model=AgentStatusRead)
 def get_status(db: DbSession) -> AgentStatusRead:
-    return AgentStatusRead(**get_agent_status(db))
+    status = get_agent_status(db)
+    notify_agent_degraded(status)
+    return AgentStatusRead(**status)

@@ -8,6 +8,7 @@ from app.api.routes import (
     integrations_pbs,
     integrations_proxmox,
     maintenance,
+    notifications,
     overview,
     planning,
     system,
@@ -36,6 +37,7 @@ protected_router.include_router(integrations_pbs.router)
 protected_router.include_router(planning.router)
 protected_router.include_router(system.router)
 protected_router.include_router(maintenance.router)
+protected_router.include_router(notifications.router)
 
 api_router = APIRouter()
 api_router.include_router(public_router)

@@ -597,6 +597,27 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .toggle input:checked + .toggle-slider { background: var(--gr-d); border-color: rgba(63,185,80,.4); }
 .toggle input:checked + .toggle-slider::before { transform: translateX(14px); background: var(--gr); }
 
+.settings-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255,255,255,.02);
+  color: var(--t1);
+  font-size: 13px;
+}
+
 /* â”€â”€ Capacity bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .cap-wrap { display: grid; gap: 4px; min-width: 100px; }
 .cap-nums { display: flex; justify-content: space-between; font-size: 11px; color: var(--t3); }

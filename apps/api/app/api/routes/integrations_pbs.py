@@ -6,6 +6,8 @@ from app.core.config import get_settings
 from app.schemas import PBSInventoryRead, PBSStatusRead, PBSSyncRead
 from app.services.pbs_client import PBSClient
 from app.services.pbs_sync import list_pbs_inventory
+from app.services.overview import get_overview_metrics
+from app.services.notifications import notify_low_coverage
 from app.services.sync_state import get_pbs_sync_state, run_pbs_sync_guarded
 
 
@@ -53,7 +55,7 @@ def get_pbs_status() -> PBSStatusRead:
 
 
 @router.post("/sync", response_model=PBSSyncRead)
-def sync_pbs() -> PBSSyncRead:
+def sync_pbs(db: DbSession) -> PBSSyncRead:
     try:
         summary = run_pbs_sync_guarded()
     except RuntimeError as exc:
@@ -71,6 +73,9 @@ def sync_pbs() -> PBSSyncRead:
             total_snapshots_seen=0,
             already_running=True,
         )
+
+    metrics = get_overview_metrics(db)
+    notify_low_coverage(metrics.coverage_percent, metrics.protected_vms, metrics.total_vms)
 
     return PBSSyncRead(
         matched_vms=summary.matched_vms,

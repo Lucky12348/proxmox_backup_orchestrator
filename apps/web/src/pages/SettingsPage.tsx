@@ -3,14 +3,16 @@ import { useEffect, useMemo, useState } from "react";
 import {
   checkMaintenanceComponent,
   getMaintenanceStatus,
+  getNotificationStatus,
   getSystemTime,
+  sendTestNotification,
   updateMaintenanceComponent,
 } from "../api";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import type { SettingsPageProps } from "./shared";
-import type { MaintenanceAction, MaintenanceCommandResult, MaintenanceComponentStatus } from "../types";
+import type { MaintenanceAction, MaintenanceCommandResult, MaintenanceComponentStatus, NotificationStatus } from "../types";
 import { formatDateTimeLocal } from "../utils";
 
 type MaintenanceComponent = "app" | "proxmox-agent" | "pbs-agent";
@@ -35,6 +37,15 @@ const initialMeta: Record<MaintenanceComponent, ComponentMeta> = {
   "proxmox-agent": { uiState: "idle", lastCheckedAt: null, lastUpdatedAt: null, message: null, logs: [] },
   "pbs-agent": { uiState: "idle", lastCheckedAt: null, lastUpdatedAt: null, message: null, logs: [] },
 };
+
+const NOTIFICATION_EVENTS = [
+  ["backup_success", "notificationEventBackupSuccess"],
+  ["backup_failure", "notificationEventBackupFailure"],
+  ["disk_eject_ready", "notificationEventDiskEjectReady"],
+  ["update_result", "notificationEventUpdateResult"],
+  ["agent_degraded", "notificationEventAgentDegraded"],
+  ["low_coverage", "notificationEventLowCoverage"],
+] as const;
 
 function shortCommit(value: string | null) {
   return value ? value.slice(0, 12) : "N/A";
@@ -116,6 +127,10 @@ function renderLogs(logs: MaintenanceCommandResult[], t: SettingsPageProps["t"])
 export function SettingsPage({ t }: SettingsPageProps) {
   const [components, setComponents] = useState<MaintenanceComponentStatus[]>([]);
   const [meta, setMeta] = useState<Record<MaintenanceComponent, ComponentMeta>>(initialMeta);
+  const [notificationStatus, setNotificationStatus] = useState<NotificationStatus | null>(null);
+  const [notificationLoading, setNotificationLoading] = useState(false);
+  const [notificationTestRunning, setNotificationTestRunning] = useState(false);
+  const [notificationResult, setNotificationResult] = useState<{ message: string; tone: "info" | "error" } | null>(null);
   const [loading, setLoading] = useState(false);
   const [banner, setBanner] = useState<{ message: string; tone: "info" | "error" } | null>(null);
 
@@ -155,6 +170,7 @@ export function SettingsPage({ t }: SettingsPageProps) {
 
   useEffect(() => {
     void loadStatus();
+    void loadNotificationStatus();
   }, []);
 
   useEffect(() => {
@@ -288,6 +304,40 @@ export function SettingsPage({ t }: SettingsPageProps) {
     }
   }
 
+  async function loadNotificationStatus() {
+    setNotificationLoading(true);
+    try {
+      setNotificationStatus(await getNotificationStatus());
+      setNotificationResult(null);
+    } catch (error) {
+      setNotificationResult({
+        message: error instanceof Error ? error.message : "Unknown error",
+        tone: "error",
+      });
+    } finally {
+      setNotificationLoading(false);
+    }
+  }
+
+  async function testNotification() {
+    setNotificationTestRunning(true);
+    setNotificationResult(null);
+    try {
+      const result = await sendTestNotification();
+      setNotificationResult({
+        message: result.message,
+        tone: result.sent ? "info" : "error",
+      });
+    } catch (error) {
+      setNotificationResult({
+        message: error instanceof Error ? error.message : "Unknown error",
+        tone: "error",
+      });
+    } finally {
+      setNotificationTestRunning(false);
+    }
+  }
+
   async function waitForAppRestart(component: MaintenanceComponent) {
     setComponentMeta(component, { uiState: "restarting", message: t.maintenanceRestarting });
     setBanner({ message: t.maintenanceRestarting, tone: "info" });
@@ -354,6 +404,70 @@ export function SettingsPage({ t }: SettingsPageProps) {
   return (
     <div className="page-stack">
       <PageHeader title={t.nav.settings} description={t.settingsIntro} />
+
+      <section className="panel-card">
+        <div className="panel-card-header">
+          <h2>{t.notificationsTitle}</h2>
+          <div className="button-row">
+            <button className="ghost-button" disabled={notificationLoading} onClick={() => void loadNotificationStatus()} type="button">
+              {notificationLoading ? <><span className="inline-spinner" /> {t.maintenanceChecking}</> : t.refresh}
+            </button>
+            <button
+              className="action-button"
+              disabled={notificationTestRunning || !notificationStatus?.enabled || !notificationStatus.configured}
+              onClick={() => void testNotification()}
+              type="button"
+            >
+              {notificationTestRunning ? <><span className="inline-spinner" /> {t.notificationTestSending}</> : t.notificationTestAction}
+            </button>
+          </div>
+        </div>
+        <p className="integration-message">{t.notificationsDescription}</p>
+        {notificationResult ? (
+          <ErrorBanner dismissLabel={t.dismiss} message={notificationResult.message} onDismiss={() => setNotificationResult(null)} tone={notificationResult.tone} />
+        ) : null}
+        <div className="integration-details">
+          <div className="summary-row">
+            <span>{t.notificationStatus}</span>
+            <strong>{notificationStatus?.enabled ? t.enabled : t.disabled}</strong>
+          </div>
+          <div className="summary-row">
+            <span>{t.notificationConfigured}</span>
+            <strong>{notificationStatus?.configured ? t.yes : t.no}</strong>
+          </div>
+          <div className="summary-row">
+            <span>{t.notificationProvider}</span>
+            <strong>{notificationStatus?.provider ?? t.notAvailable}</strong>
+          </div>
+          <div className="summary-row">
+            <span>{t.notificationBaseUrl}</span>
+            <strong>{notificationStatus?.base_url ?? t.notAvailable}</strong>
+          </div>
+          <div className="summary-row">
+            <span>{t.notificationTopic}</span>
+            <strong>{notificationStatus?.topic ?? t.notAvailable}</strong>
+          </div>
+          <div className="summary-row">
+            <span>{t.notificationUsername}</span>
+            <strong>{notificationStatus?.username ?? t.notAvailable}</strong>
+          </div>
+          <div className="summary-row">
+            <span>{t.notificationLowCoverageThreshold}</span>
+            <strong>{notificationStatus ? `${notificationStatus.low_coverage_threshold_percent}%` : t.notAvailable}</strong>
+          </div>
+        </div>
+        <div className="settings-toggle-grid">
+          {NOTIFICATION_EVENTS.map(([event, labelKey]) => (
+            <label className="settings-toggle-row" key={event}>
+              <span>{t[labelKey]}</span>
+              <span className="toggle">
+                <input checked={Boolean(notificationStatus?.events[event])} disabled readOnly type="checkbox" />
+                <span className="toggle-slider" />
+              </span>
+            </label>
+          ))}
+        </div>
+      </section>
 
       <section className="panel-card">
         <div className="panel-card-header">

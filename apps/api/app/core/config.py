@@ -30,8 +30,18 @@ class Settings:
     )
     frontend_origin: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
     frontend_origin_alt: str = os.getenv("FRONTEND_ORIGIN_ALT", "http://127.0.0.1:5173")
+    notifications_enabled: bool = parse_bool(os.getenv("NOTIFICATIONS_ENABLED"), default=False)
     ntfy_base_url: str = os.getenv("NTFY_BASE_URL", "https://ntfy.sh")
-    ntfy_topic: str = os.getenv("NTFY_TOPIC", "proxmox-backup-orchestrator")
+    ntfy_topic: str = os.getenv("NTFY_TOPIC", "")
+    ntfy_username: str = os.getenv("NTFY_USERNAME", "")
+    ntfy_password: str = os.getenv("NTFY_PASSWORD", "")
+    notify_on_backup_success: bool = parse_bool(os.getenv("NOTIFY_ON_BACKUP_SUCCESS"), default=True)
+    notify_on_backup_failure: bool = parse_bool(os.getenv("NOTIFY_ON_BACKUP_FAILURE"), default=True)
+    notify_on_disk_eject_ready: bool = parse_bool(os.getenv("NOTIFY_ON_DISK_EJECT_READY"), default=True)
+    notify_on_update_result: bool = parse_bool(os.getenv("NOTIFY_ON_UPDATE_RESULT"), default=True)
+    notify_on_agent_degraded: bool = parse_bool(os.getenv("NOTIFY_ON_AGENT_DEGRADED"), default=True)
+    notify_on_low_coverage: bool = parse_bool(os.getenv("NOTIFY_ON_LOW_COVERAGE"), default=True)
+    low_coverage_threshold_percent: float = float(os.getenv("LOW_COVERAGE_THRESHOLD_PERCENT", "100"))
     pve_api_url: str = os.getenv(
         "PVE_API_URL",
         "https://proxmox.example.local:8006/api2/json",

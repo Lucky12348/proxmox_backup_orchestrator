@@ -11,6 +11,7 @@ from app.services.disk_handoff import _detach_usb_slot_via_host_agent, _get_qemu
 from app.services.external_backup_agent import AgentCommandError, get_external_backup_agent_bridge
 from app.services.external_backup_execution import build_dedicated_datastore_name
 from app.services.external_backups import append_external_backup_run_log
+from app.services.notifications import notify_disk_eject_ready
 
 
 RUNNING_EJECT_REFUSAL = "Impossible d’éjecter le disque: une tâche PBS est en cours."
@@ -98,6 +99,7 @@ def eject_dedicated_external_disk(db: Session, disk_id: int) -> ExternalDisk:
         db.add(run)
         db.commit()
         db.refresh(disk)
+        notify_disk_eject_ready(disk.serial_number)
         return disk
     except AgentCommandError as exc:
         _finish_eject_activity_failed(db, run, str(exc), exc.stdout_log, exc.stderr_log, exc.command_summary, exc.execution_cwd, exc.return_code)

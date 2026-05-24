@@ -14,6 +14,7 @@ from app.services.disk_handoff import handoff_disk_to_pbs
 from app.services.external_backup_agent import AgentCommandError
 from app.services.external_backup_agent import get_external_backup_agent_bridge
 from app.services.external_backup_execution import build_export_target_path, get_external_backup_execution_service
+from app.services.notifications import notify_backup_failure, notify_backup_success
 
 
 @dataclass(frozen=True)
@@ -202,6 +203,7 @@ def execute_external_backup_run(run_id: int) -> None:
                 line="Disk no longer exists.",
             )
             _finish_run(db, run, BackupRunStatus.FAILED, "Disk no longer exists.", return_code=None)
+            notify_backup_failure(f"Disk {run.disk_id}", "failure", "Disk no longer exists.")
             return
 
         execution_service = get_external_backup_execution_service()
@@ -211,6 +213,11 @@ def execute_external_backup_run(run_id: int) -> None:
         run.progress_message = "Starting external backup execution."
         db.add(run)
         db.commit()
+        disk_label = disk.display_name or disk.serial_number
+        if run.status == BackupRunStatus.SUCCESS:
+            notify_backup_success(disk_label)
+        elif run.status == BackupRunStatus.FAILED:
+            notify_backup_failure(disk_label, run.current_step, run.message)
         db.refresh(run)
         append_external_backup_run_log(db, run.id, step="starting", message="Starting external backup execution.")
 

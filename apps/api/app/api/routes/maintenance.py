@@ -21,6 +21,7 @@ from app.services.maintenance import (
     update_all,
     update_app,
 )
+from app.services.notifications import notify_update_result
 
 
 router = APIRouter(prefix="/maintenance/updates", tags=["maintenance"])
@@ -38,7 +39,7 @@ def check_app_updates() -> MaintenanceComponentStatusRead:
 
 @router.post("/app/update", response_model=MaintenanceActionRead)
 def update_app_vm() -> MaintenanceActionRead:
-    return _action_read(update_app())
+    return _action_read_with_notification(update_app())
 
 
 @router.post("/proxmox-agent/check", response_model=MaintenanceComponentStatusRead)
@@ -48,7 +49,7 @@ def check_proxmox_agent_updates() -> MaintenanceComponentStatusRead:
 
 @router.post("/proxmox-agent/update", response_model=MaintenanceActionRead)
 def update_proxmox_agent() -> MaintenanceActionRead:
-    return _action_read(update_agent("proxmox-agent", get_maintenance_host_agent_client()))
+    return _action_read_with_notification(update_agent("proxmox-agent", get_maintenance_host_agent_client()))
 
 
 @router.post("/pbs-agent/check", response_model=MaintenanceComponentStatusRead)
@@ -58,12 +59,23 @@ def check_pbs_agent_updates() -> MaintenanceComponentStatusRead:
 
 @router.post("/pbs-agent/update", response_model=MaintenanceActionRead)
 def update_pbs_agent() -> MaintenanceActionRead:
-    return _action_read(update_agent("pbs-agent", get_maintenance_pbs_agent_client()))
+    return _action_read_with_notification(update_agent("pbs-agent", get_maintenance_pbs_agent_client()))
 
 
 @router.post("/update-all", response_model=list[MaintenanceActionRead])
 def update_all_components() -> list[MaintenanceActionRead]:
-    return [_action_read(item) for item in update_all()]
+    return [_action_read_with_notification(item) for item in update_all()]
+
+
+def _action_read_with_notification(result: MaintenanceActionResult) -> MaintenanceActionRead:
+    read = _action_read(result)
+    success = read.action_status != "error"
+    notify_update_result(
+        result.component,
+        success,
+        read.status.error or _first_error_log(read.logs),
+    )
+    return read
 
 
 def _status_read(status: MaintenanceComponentStatus) -> MaintenanceComponentStatusRead:
@@ -98,3 +110,10 @@ def _command_read(result: MaintenanceCommandResult) -> MaintenanceCommandResultR
         stderr=result.stderr,
         return_code=result.return_code,
     )
+
+
+def _first_error_log(logs: list[MaintenanceCommandResultRead]) -> str | None:
+    for log in logs:
+        if log.return_code != 0:
+            return log.stderr or log.stdout or log.command
+    return None

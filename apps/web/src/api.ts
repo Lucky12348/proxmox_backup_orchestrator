@@ -12,6 +12,8 @@ import type {
   MaintenanceAction,
   MaintenanceComponentStatus,
   MaintenanceStatus,
+  NotificationStatus,
+  NotificationTestResult,
   Overview,
   PBSInventoryItem,
   PBSStatus,
@@ -271,6 +273,16 @@ export function updateMaintenanceComponent(component: "app" | "proxmox-agent" | 
 
 export function updateAllMaintenanceComponents() {
   return request<MaintenanceAction[]>("/maintenance/updates/update-all", {
+    method: "POST",
+  });
+}
+
+export function getNotificationStatus() {
+  return request<NotificationStatus>("/notifications/status");
+}
+
+export function sendTestNotification() {
+  return request<NotificationTestResult>("/notifications/test", {
     method: "POST",
   });
 }

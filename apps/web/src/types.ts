@@ -251,3 +251,19 @@ export interface MaintenanceAction {
 export interface MaintenanceStatus {
   components: MaintenanceComponentStatus[];
 }
+
+export interface NotificationStatus {
+  enabled: boolean;
+  provider: string;
+  configured: boolean;
+  base_url: string | null;
+  topic: string | null;
+  username: string | null;
+  events: Record<string, boolean>;
+  low_coverage_threshold_percent: number;
+}
+
+export interface NotificationTestResult {
+  sent: boolean;
+  message: string;
+}
