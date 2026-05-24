@@ -340,11 +340,13 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
 
 function DayView({ date, occurrences, onCreate, onOpen }: { date: Date; occurrences: ScheduledBackupCalendarOccurrence[]; onCreate: (date: Date) => void; onOpen: (occurrence: ScheduledBackupCalendarOccurrence) => void }) {
   const dayOccurrences = occurrences.filter((item) => localDateKey(new Date(item.window_starts_at)) === localDateKey(date));
+  const today = isToday(date);
   return (
     <div className="calendar-time-grid calendar-day-view">
       <div className="calendar-time-labels">{HOURS.map((hour) => <div key={hour}>{hourLabel(hour)}</div>)}</div>
-      <div className="calendar-time-column" onDoubleClick={(event) => onCreate(slotDateFromClick(date, event))}>
+      <div className={today ? "calendar-time-column calendar-today-column" : "calendar-time-column"} onDoubleClick={(event) => onCreate(slotDateFromClick(date, event))}>
         {HOURS.map((hour) => <button aria-label={`Creer a ${hourLabel(hour)}`} className="calendar-hour-line" key={hour} onClick={() => onCreate(withHour(date, hour))} type="button" />)}
+        {today ? <CurrentTimeIndicator /> : null}
         {dayOccurrences.map((occurrence) => <OccurrenceBlock key={occurrence.occurrence_id} occurrence={occurrence} onOpen={onOpen} />)}
       </div>
     </div>
@@ -357,15 +359,21 @@ function WeekView({ start, occurrences, onCreate, onOpen }: { start: Date; occur
     <div className="calendar-week-wrap">
       <div className="calendar-week-header">
         <div />
-        {days.map((day) => <button className="calendar-week-day-title" key={localDateKey(day)} onClick={() => onCreate(defaultEventDate(day))} type="button">{weekdayTitle(day)}</button>)}
+        {days.map((day) => (
+          <button className={isToday(day) ? "calendar-week-day-title calendar-today-header" : "calendar-week-day-title"} key={localDateKey(day)} onClick={() => onCreate(defaultEventDate(day))} type="button">
+            <span>{weekdayTitle(day)}</span>
+            <span className={isToday(day) ? "calendar-today-number" : "calendar-day-number-inline"}>{day.getDate()}</span>
+          </button>
+        ))}
       </div>
       <div className="calendar-week-grid">
         <div className="calendar-time-labels">{HOURS.map((hour) => <div key={hour}>{hourLabel(hour)}</div>)}</div>
         {days.map((day) => {
           const dayOccurrences = occurrences.filter((item) => localDateKey(new Date(item.window_starts_at)) === localDateKey(day));
           return (
-            <div className="calendar-time-column" key={localDateKey(day)}>
+            <div className={isToday(day) ? "calendar-time-column calendar-today-column" : "calendar-time-column"} key={localDateKey(day)}>
               {HOURS.map((hour) => <button aria-label={`Creer ${localDateKey(day)} ${hourLabel(hour)}`} className="calendar-hour-line" key={hour} onClick={() => onCreate(withHour(day, hour))} type="button" />)}
+              {isToday(day) ? <CurrentTimeIndicator compact /> : null}
               {dayOccurrences.map((occurrence) => <OccurrenceBlock key={occurrence.occurrence_id} occurrence={occurrence} onOpen={onOpen} />)}
             </div>
           );
@@ -393,11 +401,16 @@ function MonthView({ month, occurrences, onCreate, onOpen }: { month: Date; occu
         {days.map((day) => {
           const items = occurrences.filter((item) => localDateKey(new Date(item.window_starts_at)) === localDateKey(day));
           const visibleItems = items.slice(0, 3);
+          const dayClasses = [
+            "calendar-day",
+            day.getMonth() === currentMonth ? "" : "calendar-day-muted",
+            isToday(day) ? "calendar-today-cell" : "",
+          ].filter(Boolean).join(" ");
           return (
-            <button className={day.getMonth() === currentMonth ? "calendar-day" : "calendar-day calendar-day-muted"} key={localDateKey(day)} onClick={() => onCreate(day)} type="button">
-              <span className="calendar-day-number">{day.getDate()}</span>
+            <button className={dayClasses} key={localDateKey(day)} onClick={() => onCreate(day)} type="button">
+              <span className={isToday(day) ? "calendar-day-number calendar-today-number" : "calendar-day-number"}>{day.getDate()}</span>
               {visibleItems.map((occurrence) => (
-                <span className="calendar-event" key={occurrence.occurrence_id} onClick={(event) => { event.stopPropagation(); onOpen(occurrence); }}>
+                <span className={`calendar-event calendar-event-${occurrence.status ?? "planned"}`} key={occurrence.occurrence_id} onClick={(event) => { event.stopPropagation(); onOpen(occurrence); }}>
                   <span className="calendar-event-title">{timeLabel(occurrence.window_starts_at)} {occurrence.title}</span>
                   {occurrence.status ? <RunStatusBadge status={occurrence.status} compact /> : null}
                 </span>
@@ -416,17 +429,22 @@ function YearView({ year, occurrences, onDay, onMonth }: { year: number; occurre
     <div className="calendar-year-grid">
       {Array.from({ length: 12 }, (_, monthIndex) => {
         const month = new Date(year, monthIndex, 1);
-        const range = monthGridRange(month);
-        const days = Array.from({ length: 42 }, (_, index) => addDays(range.start, index));
+        const firstDayOffset = (month.getDay() || 7) - 1;
+        const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+        const cells = Array.from({ length: firstDayOffset + daysInMonth }, (_, index) => index < firstDayOffset ? null : new Date(year, monthIndex, index - firstDayOffset + 1));
         return (
           <section className="calendar-mini-month" key={monthIndex}>
             <button className="calendar-mini-title" onClick={() => onMonth(month)} type="button">{month.toLocaleDateString("fr-FR", { month: "long" })}</button>
+            <div className="calendar-mini-weekdays">
+              {["L", "M", "M", "J", "V", "S", "D"].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}
+            </div>
             <div className="calendar-mini-grid">
-              {days.map((day) => {
+              {cells.map((day, index) => {
+                if (!day) return <span className="calendar-mini-blank" key={`blank-${monthIndex}-${index}`} />;
                 const hasEvent = occurrences.some((item) => localDateKey(new Date(item.window_starts_at)) === localDateKey(day));
                 return (
                   <button
-                    className={[day.getMonth() === monthIndex ? "calendar-mini-day" : "calendar-mini-day calendar-day-muted", hasEvent ? "calendar-mini-day-event" : ""].join(" ")}
+                    className={["calendar-mini-day", hasEvent ? "calendar-mini-day-event" : "", isToday(day) ? "calendar-today-mini" : ""].filter(Boolean).join(" ")}
                     key={localDateKey(day)}
                     onClick={() => onDay(day)}
                     type="button"
@@ -451,7 +469,7 @@ function OccurrenceBlock({ occurrence, onOpen }: { occurrence: ScheduledBackupCa
   const disk = occurrence.disk_label || occurrence.disk_serial;
   return (
     <button
-      className="calendar-time-event"
+      className={`calendar-time-event calendar-event-${occurrence.status ?? "planned"}`}
       onClick={() => onOpen(occurrence)}
       style={{ top: `${top}%`, height: `${height}%` }}
       title={`${occurrence.title} - ${disk}`}
@@ -461,6 +479,16 @@ function OccurrenceBlock({ occurrence, onOpen }: { occurrence: ScheduledBackupCa
       <span className="calendar-event-disk">{disk}</span>
       {occurrence.status ? <RunStatusBadge status={occurrence.status} compact /> : null}
     </button>
+  );
+}
+
+function CurrentTimeIndicator({ compact = false }: { compact?: boolean }) {
+  const now = new Date();
+  const top = ((now.getHours() * 60 + now.getMinutes()) / 1440) * 100;
+  return (
+    <div className="calendar-now-line" style={{ top: `${top}%` }}>
+      <span>{compact ? "" : timeLabel(now.toISOString())}</span>
+    </div>
   );
 }
 
@@ -613,6 +641,10 @@ function localDateKey(value: Date) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
+function isToday(value: Date) {
+  return localDateKey(value) === localDateKey(new Date());
+}
+
 function toLocalInputValue(value: string | Date) {
   const date = value instanceof Date ? value : new Date(value);
   const offset = date.getTimezoneOffset() * 60000;
@@ -633,7 +665,7 @@ function hourLabel(hour: number) {
 }
 
 function weekdayTitle(date: Date) {
-  return date.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+  return date.toLocaleDateString("fr-FR", { weekday: "short" });
 }
 
 function shortStatus(status: string) {
