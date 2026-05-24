@@ -100,7 +100,7 @@ function stateLabel(state: ComponentUiState, t: SettingsPageProps["t"]) {
 
 function isNetworkRestartError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return /fetch|network|failed|load|timeout|aborted|reset|connexion|connection/i.test(message);
+  return /fetch|network|failed|load|timeout|aborted|reset|connexion|connection|internal server error|request failed with status 5\d\d|\b5\d\d\b/i.test(message);
 }
 
 function logsHaveErrors(logs: MaintenanceCommandResult[]) {
@@ -309,7 +309,7 @@ export function SettingsPage({ t }: SettingsPageProps) {
     setComponentMeta(component, {
       uiState: "update_running",
       message: t.maintenanceUpdating,
-      logs: [clientLog(t.maintenanceUpdating)],
+      logs: [clientLog(t.maintenanceUpdateStarted)],
     });
 
     const result = await updateMaintenanceComponent(component);
@@ -320,7 +320,7 @@ export function SettingsPage({ t }: SettingsPageProps) {
     setComponentMeta(component, {
       uiState: "post_update_checking",
       message: t.maintenancePostUpdateChecking,
-      logs: [...result.logs, clientLog(t.maintenancePostUpdateChecking)],
+      logs: [clientLog(t.maintenanceUpdateStarted), ...result.logs, clientLog(t.maintenanceUpdateCommandResult), clientLog(t.maintenancePostUpdateChecking)],
     });
 
     try {
@@ -336,7 +336,7 @@ export function SettingsPage({ t }: SettingsPageProps) {
         lastCheckedAt: completedAt,
         lastUpdatedAt: result.finished_at ?? completedAt,
         message,
-        logs: mergeLogs(result.logs, checked.logs),
+        logs: mergeLogs([clientLog(t.maintenanceUpdateStarted), ...result.logs, clientLog(t.maintenanceUpdateCommandResult)], checked.logs),
       });
       return { already, updated: !already };
     } catch (error) {
@@ -373,8 +373,10 @@ export function SettingsPage({ t }: SettingsPageProps) {
       } catch (error) {
         lastError = error;
         if (isNetworkRestartError(error)) {
+          appendComponentLog(component, t.maintenanceTemporaryErrorTolerated);
           setComponentMeta(component, { uiState: "restarting", message: t.maintenanceAgentRestarting });
         } else {
+          appendComponentLog(component, error instanceof Error ? error.message : String(error));
           setComponentMeta(component, { uiState: "post_update_checking", message: t.maintenancePostUpdateChecking });
         }
       }
@@ -403,7 +405,7 @@ export function SettingsPage({ t }: SettingsPageProps) {
   function mergeLogs(first: MaintenanceCommandResult[], second: MaintenanceCommandResult[]) {
     if (first.length === 0) return second;
     if (second.length === 0) return first;
-    return [...first, clientLog(t.maintenancePostUpdateChecking), ...second];
+    return [...first, clientLog(t.maintenancePostUpdateChecking), ...second, clientLog(t.maintenancePostCheckSuccess)];
   }
 
   function clientLog(message: string): MaintenanceCommandResult {
@@ -415,12 +417,31 @@ export function SettingsPage({ t }: SettingsPageProps) {
     };
   }
 
+  function appendComponentLog(component: MaintenanceComponent, message: string) {
+    setMeta((current) => {
+      const previous = current[component];
+      const lastLog = previous.logs[previous.logs.length - 1];
+      if (lastLog?.command === "ui" && lastLog.stdout === message) return current;
+      return {
+        ...current,
+        [component]: {
+          ...previous,
+          logs: [...previous.logs, clientLog(message)].slice(-20),
+        },
+      };
+    });
+  }
+
   async function recoverAfterInterruptedUpdate(component: MaintenanceComponent): Promise<boolean> {
     if (component === "app") {
       return waitForAppRestart(component);
     }
 
-    setComponentMeta(component, { uiState: "restarting", message: t.maintenanceAgentRestarting });
+    setComponentMeta(component, {
+      uiState: "restarting",
+      message: t.maintenanceAgentRestarting,
+      logs: [clientLog(t.maintenanceUpdateStarted), clientLog(t.maintenanceTemporaryErrorTolerated), clientLog(t.maintenancePostUpdateChecking)],
+    });
     try {
       const checked = await waitForComponentUpToDate(component);
       const completedAt = nowIso();
@@ -428,8 +449,8 @@ export function SettingsPage({ t }: SettingsPageProps) {
         uiState: "update_success",
         lastCheckedAt: completedAt,
         lastUpdatedAt: completedAt,
-        message: t.maintenanceUpdateSuccess,
-        logs: checked.logs,
+        message: t.maintenancePostCheckRecovered,
+        logs: mergeLogs([clientLog(t.maintenanceTemporaryErrorTolerated)], checked.logs),
       });
       return true;
     } catch (error) {
