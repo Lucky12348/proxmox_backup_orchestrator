@@ -11,7 +11,12 @@ from app.schemas.external_backup import (
 )
 from app.schemas.integrations_proxmox import ProxmoxStatusRead, ProxmoxSyncRead
 from app.schemas.integrations_pbs import PBSInventoryRead, PBSStatusRead, PBSSyncRead
-from app.schemas.notifications import NotificationStatusRead, NotificationTestRead
+from app.schemas.notifications import (
+    NotificationPreferencesRead,
+    NotificationPreferencesUpdate,
+    NotificationStatusRead,
+    NotificationTestRead,
+)
 from app.schemas.overview import OverviewRead
 from app.schemas.planning import (
     DiskPlanningRead,
@@ -43,6 +48,8 @@ __all__ = [
     "PBSStatusRead",
     "PBSSyncRead",
     "NotificationStatusRead",
+    "NotificationPreferencesRead",
+    "NotificationPreferencesUpdate",
     "NotificationTestRead",
     "PlanningOverviewRead",
     "ScheduledBackupEventCreate",

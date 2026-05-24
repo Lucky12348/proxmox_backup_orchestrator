@@ -6,7 +6,11 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models import AgentHeartbeat, ExternalDisk
 from app.schemas.agent import AgentDiskReportCreate, AgentHeartbeatCreate
-from app.services.notifications import notify_known_disk_detected, notify_new_disk_detected
+from app.services.notifications import (
+    get_disk_detection_notify_cooldown_seconds,
+    notify_known_disk_detected,
+    notify_new_disk_detected,
+)
 from app.services.planning_scheduler import handle_disk_detected
 
 
@@ -232,7 +236,7 @@ def _disk_detection_cooldown_elapsed(disk: ExternalDisk, observed_at: datetime) 
     previous = disk.last_detection_notified_at
     if previous is None:
         return True
-    return (observed_at - previous).total_seconds() >= get_settings().disk_detection_notify_cooldown_seconds
+    return (observed_at - previous).total_seconds() >= get_disk_detection_notify_cooldown_seconds()
 
 
 def _format_disk_detection_description(disk: ExternalDisk) -> str:

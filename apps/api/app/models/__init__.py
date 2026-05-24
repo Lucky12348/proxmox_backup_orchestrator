@@ -4,6 +4,7 @@ from app.models.disk_assignment import DiskAssignment
 from app.models.disk_preparation_run import DiskPreparationMode, DiskPreparationRun
 from app.models.external_disk import ExternalDisk
 from app.models.external_backup_run import ExternalBackupMode, ExternalBackupRun
+from app.models.notification_preferences import NotificationPreferences
 from app.models.scheduled_backup import (
     ScheduledBackupEvent,
     ScheduledBackupRecurrenceType,
@@ -23,6 +24,7 @@ __all__ = [
     "ExternalDisk",
     "ExternalBackupMode",
     "ExternalBackupRun",
+    "NotificationPreferences",
     "ScheduledBackupEvent",
     "ScheduledBackupRecurrenceType",
     "ScheduledBackupRun",

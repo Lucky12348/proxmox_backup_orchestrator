@@ -12,6 +12,7 @@ import type {
   MaintenanceAction,
   MaintenanceComponentStatus,
   MaintenanceStatus,
+  NotificationPreferences,
   NotificationStatus,
   NotificationTestResult,
   ScheduledBackupEvent,
@@ -212,6 +213,21 @@ export function cancelScheduledBackupRun(runId: number) {
 
 export function getUnplannedAssets() {
   return request<UnplannedAsset[]>("/planning/unplanned-assets");
+}
+
+export function getNotificationPreferences() {
+  return request<NotificationPreferences>("/notifications/preferences");
+}
+
+export function updateNotificationPreferences(payload: Partial<NotificationPreferences>) {
+  return request<NotificationPreferences>("/notifications/preferences", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function resetNotificationPreferences() {
+  return request<NotificationPreferences>("/notifications/preferences/reset", { method: "POST" });
 }
 
 export function getExternalBackupPreview(diskId: number) {

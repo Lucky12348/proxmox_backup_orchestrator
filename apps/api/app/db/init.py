@@ -13,6 +13,7 @@ from app.models import (
     ExternalBackupMode,
     ExternalBackupRun,
     ExternalDisk,
+    NotificationPreferences,
     ScheduledBackupEvent,
     ScheduledBackupRun,
     VMType,
@@ -27,6 +28,7 @@ def create_tables() -> None:
     ensure_external_backup_run_schema()
     ensure_disk_preparation_run_schema()
     ensure_scheduled_backup_schema()
+    ensure_notification_preferences_schema()
 
 
 def ensure_virtual_machine_schema() -> None:
@@ -146,6 +148,28 @@ def ensure_scheduled_backup_schema() -> None:
     if "deleted_at" not in existing_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE scheduled_backup_events ADD COLUMN deleted_at TIMESTAMP"))
+
+
+def ensure_notification_preferences_schema() -> None:
+    Base.metadata.create_all(bind=engine, tables=[NotificationPreferences.__table__])
+    inspector = inspect(engine)
+    if "notification_preferences" not in inspector.get_table_names():
+        return
+    existing_columns = {column["name"] for column in inspector.get_columns("notification_preferences")}
+    column_statements = {
+        "notifications_enabled_override": "ALTER TABLE notification_preferences ADD COLUMN notifications_enabled_override BOOLEAN",
+        "notify_on_disk_new_detected": "ALTER TABLE notification_preferences ADD COLUMN notify_on_disk_new_detected BOOLEAN NOT NULL DEFAULT TRUE",
+        "notify_on_disk_known_detected": "ALTER TABLE notification_preferences ADD COLUMN notify_on_disk_known_detected BOOLEAN NOT NULL DEFAULT TRUE",
+        "notify_on_planned_disk_detected": "ALTER TABLE notification_preferences ADD COLUMN notify_on_planned_disk_detected BOOLEAN NOT NULL DEFAULT TRUE",
+        "notify_on_planned_backup_reminder": "ALTER TABLE notification_preferences ADD COLUMN notify_on_planned_backup_reminder BOOLEAN NOT NULL DEFAULT TRUE",
+        "notify_on_planned_backup_started": "ALTER TABLE notification_preferences ADD COLUMN notify_on_planned_backup_started BOOLEAN NOT NULL DEFAULT TRUE",
+        "notify_on_planned_confirmation_required": "ALTER TABLE notification_preferences ADD COLUMN notify_on_planned_confirmation_required BOOLEAN NOT NULL DEFAULT TRUE",
+        "notify_on_planned_backup_missed": "ALTER TABLE notification_preferences ADD COLUMN notify_on_planned_backup_missed BOOLEAN NOT NULL DEFAULT TRUE",
+    }
+    with engine.begin() as connection:
+        for column_name, statement in column_statements.items():
+            if column_name not in existing_columns:
+                connection.execute(text(statement))
 
 
 def seed_database() -> None:

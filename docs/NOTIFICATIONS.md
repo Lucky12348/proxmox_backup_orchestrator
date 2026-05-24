@@ -18,6 +18,13 @@ NOTIFY_ON_DISK_EJECT_READY=true
 NOTIFY_ON_UPDATE_RESULT=true
 NOTIFY_ON_AGENT_DEGRADED=true
 NOTIFY_ON_LOW_COVERAGE=true
+NOTIFY_ON_DISK_NEW_DETECTED=true
+NOTIFY_ON_DISK_KNOWN_DETECTED=true
+NOTIFY_ON_PLANNED_DISK_DETECTED=true
+NOTIFY_ON_PLANNED_BACKUP_REMINDER=true
+NOTIFY_ON_PLANNED_BACKUP_STARTED=true
+NOTIFY_ON_PLANNED_CONFIRMATION_REQUIRED=true
+NOTIFY_ON_PLANNED_BACKUP_MISSED=true
 LOW_COVERAGE_THRESHOLD_PERCENT=100
 DISK_DETECTION_NOTIFY_COOLDOWN_SECONDS=1800
 ```
@@ -25,6 +32,15 @@ DISK_DETECTION_NOTIFY_COOLDOWN_SECONDS=1800
 `NTFY_TOPIC` should be treated as a secret. Use a long random topic name and do not publish it in documentation, screenshots, logs, or issue reports.
 
 `NTFY_PASSWORD` is only used server-side for ntfy basic auth. The API status endpoint and UI never return or display it.
+
+Provider configuration stays environment-only:
+
+- `NTFY_BASE_URL`
+- `NTFY_TOPIC`
+- `NTFY_USERNAME`
+- `NTFY_PASSWORD`
+
+The Settings UI can edit only non-sensitive preferences. Those preferences are stored in the database and override the event toggles, low coverage threshold, and disk detection cooldown from the environment. If no database preference exists, PBO uses the environment defaults. If `NOTIFICATIONS_ENABLED=false`, the UI cannot force notifications on.
 
 ## ntfy Auth
 
@@ -41,6 +57,9 @@ When `NTFY_USERNAME` or `NTFY_PASSWORD` is set, requests use HTTP basic authenti
 All notification settings endpoints are behind the normal admin JWT auth:
 
 - `GET /api/v1/notifications/status`
+- `GET /api/v1/notifications/preferences`
+- `PATCH /api/v1/notifications/preferences`
+- `POST /api/v1/notifications/preferences/reset`
 - `POST /api/v1/notifications/test`
 
 The status endpoint returns whether notifications are enabled, whether ntfy is configured, the base URL, a masked topic, the username, event toggles, and the low coverage threshold. It never returns the password.

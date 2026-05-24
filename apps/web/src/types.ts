@@ -343,6 +343,29 @@ export interface NotificationStatus {
   username: string | null;
   events: Record<string, boolean>;
   low_coverage_threshold_percent: number;
+  environment_enabled: boolean;
+  preferences_enabled: boolean | null;
+  disk_detection_notify_cooldown_seconds: number;
+}
+
+export interface NotificationPreferences {
+  notifications_enabled_override: boolean | null;
+  notify_on_backup_success: boolean;
+  notify_on_backup_failure: boolean;
+  notify_on_disk_eject_ready: boolean;
+  notify_on_update_result: boolean;
+  notify_on_agent_degraded: boolean;
+  notify_on_low_coverage: boolean;
+  notify_on_disk_new_detected: boolean;
+  notify_on_disk_known_detected: boolean;
+  notify_on_planned_disk_detected: boolean;
+  notify_on_planned_backup_reminder: boolean;
+  notify_on_planned_backup_started: boolean;
+  notify_on_planned_confirmation_required: boolean;
+  notify_on_planned_backup_missed: boolean;
+  low_coverage_threshold_percent: number;
+  disk_detection_notify_cooldown_seconds: number;
+  updated_at: string | null;
 }
 
 export interface NotificationTestResult {

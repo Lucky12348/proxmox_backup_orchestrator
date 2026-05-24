@@ -3,10 +3,14 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime
 
 import httpx
+from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.db.session import SessionLocal
+from app.models import NotificationPreferences
 
 
 logger = logging.getLogger(__name__)
@@ -14,6 +18,22 @@ _last_agent_degraded_sent_at: dict[str, float] = {}
 _last_low_coverage_sent_at: float | None = None
 _AGENT_DEGRADED_COOLDOWN_SECONDS = 3600
 _LOW_COVERAGE_COOLDOWN_SECONDS = 3600
+PREFERENCE_ID = 1
+EVENT_FIELDS = {
+    "backup_success": "notify_on_backup_success",
+    "backup_failure": "notify_on_backup_failure",
+    "disk_eject_ready": "notify_on_disk_eject_ready",
+    "update_result": "notify_on_update_result",
+    "agent_degraded": "notify_on_agent_degraded",
+    "low_coverage": "notify_on_low_coverage",
+    "disk_new_detected": "notify_on_disk_new_detected",
+    "disk_known_detected": "notify_on_disk_known_detected",
+    "planned_disk_detected": "notify_on_planned_disk_detected",
+    "planned_backup_reminder": "notify_on_planned_backup_reminder",
+    "planned_backup_started": "notify_on_planned_backup_started",
+    "planned_confirmation_required": "notify_on_planned_confirmation_required",
+    "planned_backup_missed": "notify_on_planned_backup_missed",
+}
 
 
 @dataclass(frozen=True)
@@ -26,6 +46,21 @@ class NotificationStatus:
     username: str | None
     events: dict[str, bool]
     low_coverage_threshold_percent: float
+    environment_enabled: bool
+    preferences_enabled: bool | None
+    disk_detection_notify_cooldown_seconds: int
+
+
+@dataclass(frozen=True)
+class EffectiveNotificationPreferences:
+    notifications_enabled_override: bool | None
+    events: dict[str, bool]
+    low_coverage_threshold_percent: float
+    disk_detection_notify_cooldown_seconds: int
+    updated_at: datetime | None = None
+
+    def event_enabled(self, event_name: str) -> bool:
+        return self.events.get(event_name, True)
 
 
 class NotificationService:
@@ -41,7 +76,8 @@ class NotificationService:
         priority: str = "default",
         tags: list[str] | tuple[str, ...] | str | None = None,
     ) -> bool:
-        if not self.settings.notifications_enabled:
+        preferences = get_effective_notification_preferences()
+        if not self.settings.notifications_enabled or preferences.notifications_enabled_override is False:
             return False
         if not self._configured:
             logger.warning("Notification skipped: ntfy is enabled but NTFY_BASE_URL or NTFY_TOPIC is missing.")
@@ -74,22 +110,19 @@ class NotificationService:
             return False
 
     def status(self) -> NotificationStatus:
+        preferences = get_effective_notification_preferences(self.settings)
         return NotificationStatus(
-            enabled=self.settings.notifications_enabled,
+            enabled=self.settings.notifications_enabled and preferences.notifications_enabled_override is not False,
             provider=self.provider,
             configured=self._configured,
             base_url=self.settings.ntfy_base_url.rstrip("/") if self.settings.ntfy_base_url else None,
             topic=_mask_secret(self.settings.ntfy_topic),
             username=self.settings.ntfy_username or None,
-            events={
-                "backup_success": self.settings.notify_on_backup_success,
-                "backup_failure": self.settings.notify_on_backup_failure,
-                "disk_eject_ready": self.settings.notify_on_disk_eject_ready,
-                "update_result": self.settings.notify_on_update_result,
-                "agent_degraded": self.settings.notify_on_agent_degraded,
-                "low_coverage": self.settings.notify_on_low_coverage,
-            },
-            low_coverage_threshold_percent=self.settings.low_coverage_threshold_percent,
+            events=preferences.events,
+            low_coverage_threshold_percent=preferences.low_coverage_threshold_percent,
+            environment_enabled=self.settings.notifications_enabled,
+            preferences_enabled=preferences.notifications_enabled_override,
+            disk_detection_notify_cooldown_seconds=preferences.disk_detection_notify_cooldown_seconds,
         )
 
     @property
@@ -105,10 +138,63 @@ def get_notification_service(settings: Settings | None = None) -> NotificationSe
     return NotificationService(settings)
 
 
+def get_effective_notification_preferences(
+    settings: Settings | None = None,
+    db: Session | None = None,
+) -> EffectiveNotificationPreferences:
+    current_settings = settings or get_settings()
+    defaults = _preferences_from_settings(current_settings)
+    try:
+        if db is not None:
+            stored = db.get(NotificationPreferences, PREFERENCE_ID)
+            return _merge_preferences(defaults, stored)
+        with SessionLocal() as session:
+            stored = session.get(NotificationPreferences, PREFERENCE_ID)
+            return _merge_preferences(defaults, stored)
+    except Exception as exc:
+        logger.warning("Notification preferences unavailable, using environment defaults: %s", _sanitize_error(exc, current_settings.ntfy_password))
+        return defaults
+
+
+def get_notification_preferences(db: Session, settings: Settings | None = None) -> EffectiveNotificationPreferences:
+    return get_effective_notification_preferences(settings, db)
+
+
+def update_notification_preferences(
+    db: Session,
+    values: dict[str, object],
+    settings: Settings | None = None,
+) -> EffectiveNotificationPreferences:
+    stored = db.get(NotificationPreferences, PREFERENCE_ID)
+    if stored is None:
+        stored = _model_from_effective(_preferences_from_settings(settings or get_settings()))
+        db.add(stored)
+    for field, value in values.items():
+        if value is not None or field == "notifications_enabled_override":
+            setattr(stored, field, value)
+    stored.updated_at = datetime.utcnow()
+    db.add(stored)
+    db.commit()
+    db.refresh(stored)
+    return get_effective_notification_preferences(settings, db)
+
+
+def reset_notification_preferences(db: Session, settings: Settings | None = None) -> EffectiveNotificationPreferences:
+    stored = db.get(NotificationPreferences, PREFERENCE_ID)
+    if stored is not None:
+        db.delete(stored)
+        db.commit()
+    return get_effective_notification_preferences(settings, db)
+
+
+def get_disk_detection_notify_cooldown_seconds() -> int:
+    return get_effective_notification_preferences().disk_detection_notify_cooldown_seconds
+
+
 def notify_backup_success(disk_label_or_serial: str) -> None:
     try:
         settings = get_settings()
-        if not settings.notify_on_backup_success:
+        if not _event_enabled("backup_success", settings):
             _log_event("backup_success", False, reason="disabled")
             return
         sent = get_notification_service(settings).send(
@@ -124,7 +210,7 @@ def notify_backup_success(disk_label_or_serial: str) -> None:
 def notify_backup_failure(disk_label_or_serial: str, step: str | None, error: str | None) -> None:
     try:
         settings = get_settings()
-        if not settings.notify_on_backup_failure:
+        if not _event_enabled("backup_failure", settings):
             _log_event("backup_failure", False, reason="disabled")
             return
         short_error = _shorten(error or "Erreur inconnue.")
@@ -143,7 +229,7 @@ def notify_backup_failure(disk_label_or_serial: str, step: str | None, error: st
 def notify_disk_eject_ready(serial: str) -> None:
     try:
         settings = get_settings()
-        if not settings.notify_on_disk_eject_ready:
+        if not _event_enabled("disk_eject_ready", settings):
             _log_event("disk_eject_ready", False, reason="disabled")
             return
         sent = get_notification_service(settings).send(
@@ -159,7 +245,7 @@ def notify_disk_eject_ready(serial: str) -> None:
 def notify_update_result(component: str, success: bool, message: str | None = None) -> None:
     try:
         settings = get_settings()
-        if not settings.notify_on_update_result:
+        if not _event_enabled("update_result", settings):
             _log_event("update_result", False, reason="disabled")
             return
         if success:
@@ -184,7 +270,7 @@ def notify_update_result(component: str, success: bool, message: str | None = No
 def notify_agent_degraded(status_payload: dict[str, object]) -> None:
     try:
         settings = get_settings()
-        if not settings.notify_on_agent_degraded:
+        if not _event_enabled("agent_degraded", settings):
             _log_event("agent_degraded", False, reason="disabled")
             return
         status = str(status_payload.get("status") or "")
@@ -217,10 +303,11 @@ def notify_low_coverage(coverage_percent: float, protected_vms: int, total_vms: 
     global _last_low_coverage_sent_at
     try:
         settings = get_settings()
-        if not settings.notify_on_low_coverage:
+        preferences = get_effective_notification_preferences(settings)
+        if not preferences.event_enabled("low_coverage"):
             _log_event("low_coverage", False, reason="disabled")
             return
-        threshold = settings.low_coverage_threshold_percent
+        threshold = preferences.low_coverage_threshold_percent
         if total_vms <= 0 or coverage_percent >= threshold:
             return
 
@@ -313,6 +400,9 @@ def _send_event_notification(
     tags: list[str] | tuple[str, ...] | str | None = None,
 ) -> None:
     try:
+        if not _event_enabled(event_name):
+            _log_event(event_name, False, reason="disabled")
+            return
         service = get_notification_service()
         sent = service.send(title, message, priority=priority, tags=tags)
         _log_event(event_name, sent)
@@ -326,6 +416,60 @@ def _format_tags(tags: list[str] | tuple[str, ...] | str | None) -> str | None:
     if isinstance(tags, str):
         return tags
     return ",".join(tag for tag in tags if tag)
+
+
+def _event_enabled(event_name: str, settings: Settings | None = None) -> bool:
+    return get_effective_notification_preferences(settings).event_enabled(event_name)
+
+
+def _preferences_from_settings(settings: Settings) -> EffectiveNotificationPreferences:
+    return EffectiveNotificationPreferences(
+        notifications_enabled_override=None,
+        events={
+            "backup_success": settings.notify_on_backup_success,
+            "backup_failure": settings.notify_on_backup_failure,
+            "disk_eject_ready": settings.notify_on_disk_eject_ready,
+            "update_result": settings.notify_on_update_result,
+            "agent_degraded": settings.notify_on_agent_degraded,
+            "low_coverage": settings.notify_on_low_coverage,
+            "disk_new_detected": settings.notify_on_disk_new_detected,
+            "disk_known_detected": settings.notify_on_disk_known_detected,
+            "planned_disk_detected": settings.notify_on_planned_disk_detected,
+            "planned_backup_reminder": settings.notify_on_planned_backup_reminder,
+            "planned_backup_started": settings.notify_on_planned_backup_started,
+            "planned_confirmation_required": settings.notify_on_planned_confirmation_required,
+            "planned_backup_missed": settings.notify_on_planned_backup_missed,
+        },
+        low_coverage_threshold_percent=settings.low_coverage_threshold_percent,
+        disk_detection_notify_cooldown_seconds=settings.disk_detection_notify_cooldown_seconds,
+    )
+
+
+def _merge_preferences(
+    defaults: EffectiveNotificationPreferences,
+    stored: NotificationPreferences | None,
+) -> EffectiveNotificationPreferences:
+    if stored is None:
+        return defaults
+    return EffectiveNotificationPreferences(
+        notifications_enabled_override=stored.notifications_enabled_override,
+        events={event: bool(getattr(stored, field)) for event, field in EVENT_FIELDS.items()},
+        low_coverage_threshold_percent=stored.low_coverage_threshold_percent,
+        disk_detection_notify_cooldown_seconds=stored.disk_detection_notify_cooldown_seconds,
+        updated_at=stored.updated_at,
+    )
+
+
+def _model_from_effective(preferences: EffectiveNotificationPreferences) -> NotificationPreferences:
+    values = {
+        "id": PREFERENCE_ID,
+        "notifications_enabled_override": preferences.notifications_enabled_override,
+        "low_coverage_threshold_percent": preferences.low_coverage_threshold_percent,
+        "disk_detection_notify_cooldown_seconds": preferences.disk_detection_notify_cooldown_seconds,
+    }
+    for event, field in EVENT_FIELDS.items():
+        values[field] = preferences.events[event]
+    return NotificationPreferences(**values)
 
 
 def _mask_secret(value: str) -> str | None:

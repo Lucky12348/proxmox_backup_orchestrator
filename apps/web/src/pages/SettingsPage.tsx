@@ -3,16 +3,19 @@ import { useEffect, useMemo, useState } from "react";
 import {
   checkMaintenanceComponent,
   getMaintenanceStatus,
+  getNotificationPreferences,
   getNotificationStatus,
   getSystemTime,
+  resetNotificationPreferences,
   sendTestNotification,
+  updateNotificationPreferences,
   updateMaintenanceComponent,
 } from "../api";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import type { SettingsPageProps } from "./shared";
-import type { MaintenanceAction, MaintenanceCommandResult, MaintenanceComponentStatus, NotificationStatus } from "../types";
+import type { MaintenanceAction, MaintenanceCommandResult, MaintenanceComponentStatus, NotificationPreferences, NotificationStatus } from "../types";
 import { formatDateTimeLocal } from "../utils";
 
 type MaintenanceComponent = "app" | "proxmox-agent" | "pbs-agent";
@@ -39,12 +42,19 @@ const initialMeta: Record<MaintenanceComponent, ComponentMeta> = {
 };
 
 const NOTIFICATION_EVENTS = [
-  ["backup_success", "notificationEventBackupSuccess"],
-  ["backup_failure", "notificationEventBackupFailure"],
-  ["disk_eject_ready", "notificationEventDiskEjectReady"],
-  ["update_result", "notificationEventUpdateResult"],
-  ["agent_degraded", "notificationEventAgentDegraded"],
-  ["low_coverage", "notificationEventLowCoverage"],
+  ["notify_on_backup_success", "notificationEventBackupSuccess"],
+  ["notify_on_backup_failure", "notificationEventBackupFailure"],
+  ["notify_on_disk_eject_ready", "notificationEventDiskEjectReady"],
+  ["notify_on_update_result", "notificationEventUpdateResult"],
+  ["notify_on_agent_degraded", "notificationEventAgentDegraded"],
+  ["notify_on_low_coverage", "notificationEventLowCoverage"],
+  ["notify_on_disk_new_detected", "notificationEventDiskNewDetected"],
+  ["notify_on_disk_known_detected", "notificationEventDiskKnownDetected"],
+  ["notify_on_planned_disk_detected", "notificationEventPlannedDiskDetected"],
+  ["notify_on_planned_backup_reminder", "notificationEventPlannedBackupReminder"],
+  ["notify_on_planned_backup_started", "notificationEventPlannedBackupStarted"],
+  ["notify_on_planned_confirmation_required", "notificationEventPlannedConfirmationRequired"],
+  ["notify_on_planned_backup_missed", "notificationEventPlannedBackupMissed"],
 ] as const;
 
 function shortCommit(value: string | null) {
@@ -128,8 +138,11 @@ export function SettingsPage({ t }: SettingsPageProps) {
   const [components, setComponents] = useState<MaintenanceComponentStatus[]>([]);
   const [meta, setMeta] = useState<Record<MaintenanceComponent, ComponentMeta>>(initialMeta);
   const [notificationStatus, setNotificationStatus] = useState<NotificationStatus | null>(null);
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences | null>(null);
+  const [notificationDraft, setNotificationDraft] = useState<NotificationPreferences | null>(null);
   const [notificationLoading, setNotificationLoading] = useState(false);
   const [notificationTestRunning, setNotificationTestRunning] = useState(false);
+  const [notificationSaving, setNotificationSaving] = useState(false);
   const [notificationResult, setNotificationResult] = useState<{ message: string; tone: "info" | "error" } | null>(null);
   const [loading, setLoading] = useState(false);
   const [banner, setBanner] = useState<{ message: string; tone: "info" | "error" } | null>(null);
@@ -137,6 +150,10 @@ export function SettingsPage({ t }: SettingsPageProps) {
   const anyBusy = useMemo(
     () => Object.values(meta).some((item) => item.uiState === "checking" || item.uiState === "update_running" || item.uiState === "post_update_checking" || item.uiState === "restarting"),
     [meta],
+  );
+  const notificationDirty = useMemo(
+    () => JSON.stringify(notificationDraft) !== JSON.stringify(notificationPreferences),
+    [notificationDraft, notificationPreferences],
   );
 
   async function loadStatus(options: { silent?: boolean } = {}) {
@@ -412,7 +429,10 @@ export function SettingsPage({ t }: SettingsPageProps) {
   async function loadNotificationStatus() {
     setNotificationLoading(true);
     try {
-      setNotificationStatus(await getNotificationStatus());
+      const [status, preferences] = await Promise.all([getNotificationStatus(), getNotificationPreferences()]);
+      setNotificationStatus(status);
+      setNotificationPreferences(preferences);
+      setNotificationDraft(preferences);
       setNotificationResult(null);
     } catch (error) {
       setNotificationResult({
@@ -422,6 +442,44 @@ export function SettingsPage({ t }: SettingsPageProps) {
     } finally {
       setNotificationLoading(false);
     }
+  }
+
+  async function saveNotificationPreferences() {
+    if (!notificationDraft) return;
+    setNotificationSaving(true);
+    setNotificationResult(null);
+    try {
+      const saved = await updateNotificationPreferences(notificationDraft);
+      setNotificationPreferences(saved);
+      setNotificationDraft(saved);
+      setNotificationStatus(await getNotificationStatus());
+      setNotificationResult({ message: t.notificationPreferencesSaved, tone: "info" });
+    } catch (error) {
+      setNotificationResult({ message: error instanceof Error ? error.message : "Unknown error", tone: "error" });
+    } finally {
+      setNotificationSaving(false);
+    }
+  }
+
+  async function resetNotificationPreferenceDefaults() {
+    if (!window.confirm(t.notificationResetConfirm)) return;
+    setNotificationSaving(true);
+    setNotificationResult(null);
+    try {
+      const defaults = await resetNotificationPreferences();
+      setNotificationPreferences(defaults);
+      setNotificationDraft(defaults);
+      setNotificationStatus(await getNotificationStatus());
+      setNotificationResult({ message: t.notificationPreferencesReset, tone: "info" });
+    } catch (error) {
+      setNotificationResult({ message: error instanceof Error ? error.message : "Unknown error", tone: "error" });
+    } finally {
+      setNotificationSaving(false);
+    }
+  }
+
+  function patchNotificationDraft(patch: Partial<NotificationPreferences>) {
+    setNotificationDraft((current) => current ? { ...current, ...patch } : current);
   }
 
   async function testNotification() {
@@ -539,6 +597,12 @@ export function SettingsPage({ t }: SettingsPageProps) {
             <span>{t.notificationStatus}</span>
             <strong>{notificationStatus?.enabled ? t.enabled : t.disabled}</strong>
           </div>
+          {notificationStatus && !notificationStatus.environment_enabled ? (
+            <div className="summary-row">
+              <span>{t.notificationEnvironmentDisabled}</span>
+              <strong>{t.yes}</strong>
+            </div>
+          ) : null}
           <div className="summary-row">
             <span>{t.notificationConfigured}</span>
             <strong>{notificationStatus?.configured ? t.yes : t.no}</strong>
@@ -561,19 +625,67 @@ export function SettingsPage({ t }: SettingsPageProps) {
           </div>
           <div className="summary-row">
             <span>{t.notificationLowCoverageThreshold}</span>
-            <strong>{notificationStatus ? `${notificationStatus.low_coverage_threshold_percent}%` : t.notAvailable}</strong>
+            <strong>{notificationDraft ? `${notificationDraft.low_coverage_threshold_percent}%` : t.notAvailable}</strong>
           </div>
         </div>
+        <h3 className="settings-subtitle">{t.notificationPreferencesTitle}</h3>
         <div className="settings-toggle-grid">
-          {NOTIFICATION_EVENTS.map(([event, labelKey]) => (
-            <label className="settings-toggle-row" key={event}>
+          <label className="settings-toggle-row">
+            <span>{t.notificationGlobalEnabled}</span>
+            <span className="toggle">
+              <input
+                checked={notificationStatus?.environment_enabled ? notificationDraft?.notifications_enabled_override !== false : false}
+                disabled={!notificationStatus?.environment_enabled || notificationSaving}
+                onChange={(event) => patchNotificationDraft({ notifications_enabled_override: event.target.checked })}
+                type="checkbox"
+              />
+              <span className="toggle-slider" />
+            </span>
+          </label>
+          {NOTIFICATION_EVENTS.map(([field, labelKey]) => (
+            <label className="settings-toggle-row" key={field}>
               <span>{t[labelKey]}</span>
               <span className="toggle">
-                <input checked={Boolean(notificationStatus?.events[event])} disabled readOnly type="checkbox" />
+                <input
+                  checked={Boolean(notificationDraft?.[field])}
+                  disabled={notificationSaving}
+                  onChange={(event) => patchNotificationDraft({ [field]: event.target.checked } as Partial<NotificationPreferences>)}
+                  type="checkbox"
+                />
                 <span className="toggle-slider" />
               </span>
             </label>
           ))}
+        </div>
+        <div className="settings-input-grid">
+          <label>
+            <span>{t.notificationLowCoverageThreshold}</span>
+            <input
+              min={0}
+              max={100}
+              type="number"
+              value={notificationDraft?.low_coverage_threshold_percent ?? 100}
+              onChange={(event) => patchNotificationDraft({ low_coverage_threshold_percent: Number(event.target.value) })}
+            />
+          </label>
+          <label>
+            <span>{t.notificationDiskDetectionCooldown}</span>
+            <input
+              min={0}
+              type="number"
+              value={notificationDraft?.disk_detection_notify_cooldown_seconds ?? 1800}
+              onChange={(event) => patchNotificationDraft({ disk_detection_notify_cooldown_seconds: Number(event.target.value) })}
+            />
+          </label>
+        </div>
+        {notificationDirty ? <p className="integration-message">{t.notificationUnsavedChanges}</p> : null}
+        <div className="button-row">
+          <button className="action-button" disabled={!notificationDirty || notificationSaving || !notificationDraft} onClick={() => void saveNotificationPreferences()} type="button">
+            {notificationSaving ? <><span className="inline-spinner" /> {t.maintenanceUpdating}</> : t.save}
+          </button>
+          <button className="ghost-button" disabled={notificationSaving} onClick={() => void resetNotificationPreferenceDefaults()} type="button">
+            {t.notificationResetDefaults}
+          </button>
         </div>
       </section>
 
