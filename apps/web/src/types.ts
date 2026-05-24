@@ -17,6 +17,18 @@ export interface VirtualMachine {
   runtime_status: string | null;
   last_seen_at: string | null;
   last_backup_at: string | null;
+  ignored: boolean;
+  ignore_reason: string | null;
+}
+
+export interface AssetIgnore {
+  id: number;
+  source: string;
+  node: string;
+  vmid: string;
+  ignored: boolean;
+  reason: string | null;
+  updated_at: string;
 }
 
 export interface ExternalDisk {
@@ -75,6 +87,7 @@ export interface BackupRun {
 export interface Overview {
   total_vms: number;
   protected_vms: number;
+  ignored_vms: number;
   coverage_percent: number;
   connected_disks: number;
   latest_backup_status: BackupRunStatus | null;
@@ -96,6 +109,32 @@ export interface ProxmoxSyncSummary {
   synced_cts_count: number;
   total_seen: number;
   already_running: boolean;
+}
+
+export interface ProxmoxBackupJobAsset {
+  vmid: number;
+  name: string;
+  vm_type: string;
+  node: string | null;
+  included: boolean;
+  ignored: boolean;
+}
+
+export interface ProxmoxBackupJob {
+  job_id: string;
+  enabled: boolean;
+  node: string | null;
+  schedule: string | null;
+  storage: string | null;
+  retention: string | null;
+  selection_mode: string;
+  selected_vmids: number[];
+  comment: string | null;
+  next_run: string | null;
+  supported: boolean;
+  unsupported_reason: string | null;
+  included_assets: ProxmoxBackupJobAsset[];
+  available_assets: ProxmoxBackupJobAsset[];
 }
 
 export interface PBSStatus {

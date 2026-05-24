@@ -1587,3 +1587,119 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
   background: #0b1220;
   color: #e5edf7;
 }
+
+/* Protection / asset ignore management */
+.protection-jobs-card {
+  overflow: hidden;
+}
+
+.compact-select {
+  min-width: 220px;
+  max-width: 100%;
+  background: var(--bg2);
+  color: var(--t1);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.protection-job-list {
+  display: grid;
+  gap: 12px;
+}
+
+.protection-job {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.protection-job-title,
+.asset-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.asset-name-cell span,
+.selection-main strong,
+.selection-main small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-row-ignored {
+  opacity: 0.62;
+}
+
+.tiny-action {
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--t1);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tiny-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.selection-modal {
+  max-width: 820px;
+  width: min(820px, calc(100vw - 28px));
+}
+
+.selection-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  max-height: 56vh;
+  overflow: auto;
+  margin-top: 14px;
+}
+
+.selection-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(11, 18, 32, 0.72);
+}
+
+.selection-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--ac);
+  flex: 0 0 auto;
+}
+
+.selection-main {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+@media (max-width: 780px) {
+  .protection-job {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .selection-grid {
+    grid-template-columns: 1fr;
+  }
+}

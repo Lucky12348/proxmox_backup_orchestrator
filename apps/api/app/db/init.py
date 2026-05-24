@@ -5,6 +5,7 @@ from sqlalchemy import inspect, select, text
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models import (
+    AssetIgnore,
     BackupRun,
     BackupRunStatus,
     DiskAssignment,
@@ -29,6 +30,7 @@ def create_tables() -> None:
     ensure_disk_preparation_run_schema()
     ensure_scheduled_backup_schema()
     ensure_notification_preferences_schema()
+    ensure_asset_ignore_schema()
 
 
 def ensure_virtual_machine_schema() -> None:
@@ -170,6 +172,33 @@ def ensure_notification_preferences_schema() -> None:
         for column_name, statement in column_statements.items():
             if column_name not in existing_columns:
                 connection.execute(text(statement))
+
+
+def ensure_asset_ignore_schema() -> None:
+    Base.metadata.create_all(bind=engine, tables=[AssetIgnore.__table__])
+    inspector = inspect(engine)
+    if "asset_ignores" not in inspector.get_table_names():
+        return
+    existing_columns = {column["name"] for column in inspector.get_columns("asset_ignores")}
+    column_statements = {
+        "source": "ALTER TABLE asset_ignores ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'proxmox'",
+        "node": "ALTER TABLE asset_ignores ADD COLUMN node VARCHAR(255) NOT NULL DEFAULT ''",
+        "vmid": "ALTER TABLE asset_ignores ADD COLUMN vmid VARCHAR(64) NOT NULL DEFAULT ''",
+        "ignored": "ALTER TABLE asset_ignores ADD COLUMN ignored BOOLEAN NOT NULL DEFAULT FALSE",
+        "reason": "ALTER TABLE asset_ignores ADD COLUMN reason TEXT",
+        "updated_at": "ALTER TABLE asset_ignores ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+    }
+    with engine.begin() as connection:
+        for column_name, statement in column_statements.items():
+            if column_name not in existing_columns:
+                connection.execute(text(statement))
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "ix_asset_ignores_source_node_vmid "
+                "ON asset_ignores (source, node, vmid)"
+            )
+        )
 
 
 def seed_database() -> None:

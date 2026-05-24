@@ -11,7 +11,8 @@ export interface PageCommonProps {
 export interface AssetPageProps extends PageCommonProps {
   pbsInventoryByVmId: Map<number, { protected: boolean; last_backup_at: string | null }>;
   savingKey: string | null;
-  onVmCriticalChange: (vmId: number, critical: boolean) => void;
+  onAssetIgnoreChange: (vm: VirtualMachine, ignored: boolean) => void;
+  onBackupJobSelectionChange: (jobId: string, selectedVmids: number[]) => void;
 }
 
 export interface DiskActionRequest {

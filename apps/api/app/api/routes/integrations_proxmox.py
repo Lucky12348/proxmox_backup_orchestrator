@@ -7,6 +7,7 @@ from app.core.config import get_settings
 from app.models import VirtualMachine
 from app.schemas import ProxmoxStatusRead, ProxmoxSyncRead, VirtualMachineRead
 from app.services.proxmox_client import ProxmoxClient
+from app.services.asset_ignores import get_asset_ignore_map, vm_read_payload
 from app.services.sync_state import get_proxmox_sync_state, run_proxmox_sync_guarded
 
 
@@ -81,11 +82,13 @@ def sync_proxmox() -> ProxmoxSyncRead:
 
 
 @router.get("/inventory", response_model=list[VirtualMachineRead])
-def list_proxmox_inventory(db: DbSession) -> list[VirtualMachine]:
-    return list(
+def list_proxmox_inventory(db: DbSession) -> list[dict]:
+    vms = list(
         db.scalars(
             select(VirtualMachine)
             .where(VirtualMachine.source == "proxmox")
             .order_by(VirtualMachine.name.asc())
         )
     )
+    ignore_map = get_asset_ignore_map(db, vms)
+    return [vm_read_payload(vm, ignore_map) for vm in vms]

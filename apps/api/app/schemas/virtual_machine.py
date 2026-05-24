@@ -21,6 +21,8 @@ class VirtualMachineRead(UTCDateTimeModel):
     runtime_status: str | None
     last_seen_at: datetime | None
     last_backup_at: datetime | None
+    ignored: bool = False
+    ignore_reason: str | None = None
 
 
 class VirtualMachineUpdate(BaseModel):

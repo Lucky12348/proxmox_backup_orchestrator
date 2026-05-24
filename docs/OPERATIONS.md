@@ -2,6 +2,8 @@
 
 Use this runbook for routine external backups and safe disk handling.
 
+For asset ignore rules and existing Proxmox backup job selection management, see [Protection Management](PROTECTION.md).
+
 ## Login
 
 Open the Web UI:

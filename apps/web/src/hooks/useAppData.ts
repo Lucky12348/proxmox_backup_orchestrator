@@ -9,6 +9,7 @@ import {
   getExternalBackupRuns,
   getPBSInventory,
   getPBSStatus,
+  getProxmoxBackupJobs,
   getPlanningDisks,
   getPlanningOverview,
   getScheduledBackupEvents,
@@ -25,6 +26,8 @@ import {
   triggerAutoSync,
   runExternalBackup,
   updateDisk,
+  updateAssetIgnore,
+  updateProxmoxBackupJobSelection,
   updateVM,
 } from "../api";
 import type {
@@ -37,6 +40,7 @@ import type {
   PBSStatus,
   PlanningOverview,
   ProxmoxStatus,
+  ProxmoxBackupJob,
   VirtualMachine,
   DiskPlanningSummary,
   UnplannedAsset,
@@ -59,6 +63,7 @@ export interface AppDataState {
   pbsInventory: PBSInventoryItem[];
   pbsStatus: PBSStatus;
   proxmoxStatus: ProxmoxStatus;
+  proxmoxBackupJobs: ProxmoxBackupJob[];
 }
 
 async function fetchAppData(): Promise<AppDataState> {
@@ -75,6 +80,7 @@ async function fetchAppData(): Promise<AppDataState> {
     scheduledBackupEvents,
     scheduledBackupRuns,
     proxmoxStatus,
+    proxmoxBackupJobs,
     proxmoxInventory,
     pbsStatus,
     pbsInventory,
@@ -91,6 +97,7 @@ async function fetchAppData(): Promise<AppDataState> {
     getScheduledBackupEvents(),
     getScheduledBackupRuns(),
     getProxmoxStatus(),
+    getProxmoxBackupJobs().catch(() => []),
     getProxmoxInventory(),
     getPBSStatus(),
     getPBSInventory(),
@@ -111,6 +118,7 @@ async function fetchAppData(): Promise<AppDataState> {
     pbsInventory,
     pbsStatus,
     proxmoxStatus,
+    proxmoxBackupJobs,
   };
 }
 
@@ -337,6 +345,37 @@ export function useAppData() {
     return null;
   }
 
+  async function mutateAssetIgnore(vm: VirtualMachine, ignored: boolean, reason?: string | null) {
+    const vmid = vm.external_id ?? String(vm.id);
+    setSavingKey(`vm-ignore-${vm.id}`);
+    setBannerError(null);
+
+    try {
+      await updateAssetIgnore(vm.source, vm.node_name ?? "-", vmid, { ignored, reason });
+      await refresh();
+    } catch (mutationError) {
+      setBannerError(mutationError instanceof Error ? mutationError.message : "Unknown error");
+    } finally {
+      setSavingKey(null);
+    }
+  }
+
+  async function mutateBackupJobSelection(jobId: string, selectedVmids: number[]) {
+    setSavingKey(`backup-job-${jobId}`);
+    setBannerError(null);
+    setSyncMessage(null);
+
+    try {
+      await updateProxmoxBackupJobSelection(jobId, selectedVmids);
+      await refresh();
+      setSyncMessage("Sélection du job Proxmox mise à jour.");
+    } catch (mutationError) {
+      setBannerError(mutationError instanceof Error ? mutationError.message : "Unknown error");
+    } finally {
+      setSavingKey(null);
+    }
+  }
+
   async function ejectDisk(diskId: number, successMessage: string) {
     setSavingKey(`disk-eject-${diskId}`);
     setBannerError(null);
@@ -397,6 +436,8 @@ export function useAppData() {
     clearBannerError: () => setBannerError(null),
     clearSyncMessage: () => setSyncMessage(null),
     mutateVmCritical,
+    mutateAssetIgnore,
+    mutateBackupJobSelection,
     mutateDisk,
     runProxmoxSync,
     runPBSSync,

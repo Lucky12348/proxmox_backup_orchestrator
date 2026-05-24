@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models import DiskAssignment, ExternalDisk, VirtualMachine
 from app.services.disks import list_preferred_disks
+from app.services.asset_ignores import get_asset_ignore_map, is_vm_ignored
 from app.services.proxmox_sync import list_preferred_inventory
 
 
@@ -37,7 +38,9 @@ def get_available_capacity_gb(disk: ExternalDisk) -> int:
 def get_disk_planning(db: Session) -> list[DiskPlanningSummary]:
     preferred_disks = list_preferred_disks(db)
     trusted_disks = [disk for disk in preferred_disks if disk.trusted]
-    plannable_vms = [vm for vm in list_preferred_inventory(db) if vm.enabled]
+    inventory = [vm for vm in list_preferred_inventory(db) if vm.enabled]
+    ignore_map = get_asset_ignore_map(db, inventory)
+    plannable_vms = [vm for vm in inventory if not is_vm_ignored(vm, ignore_map)]
     assignments = list(db.scalars(select(DiskAssignment)))
 
     pinned_by_vm = {assignment.vm_id: assignment.disk_id for assignment in assignments if assignment.pinned}
@@ -87,7 +90,9 @@ def get_disk_planning(db: Session) -> list[DiskPlanningSummary]:
 def get_unplanned_assets(db: Session) -> list[VirtualMachine]:
     preferred_disks = list_preferred_disks(db)
     trusted_disks = [disk for disk in preferred_disks if disk.trusted]
-    plannable_vms = [vm for vm in list_preferred_inventory(db) if vm.enabled]
+    inventory = [vm for vm in list_preferred_inventory(db) if vm.enabled]
+    ignore_map = get_asset_ignore_map(db, inventory)
+    plannable_vms = [vm for vm in inventory if not is_vm_ignored(vm, ignore_map)]
     assignments = list(db.scalars(select(DiskAssignment)))
     pinned_by_vm = {assignment.vm_id: assignment.disk_id for assignment in assignments if assignment.pinned}
     disk_capacity = {disk.id: get_available_capacity_gb(disk) for disk in trusted_disks}
@@ -115,7 +120,9 @@ def get_unplanned_assets(db: Session) -> list[VirtualMachine]:
 
 def get_planning_overview(db: Session) -> PlanningOverview:
     trusted_disks = [disk for disk in list_preferred_disks(db) if disk.trusted]
-    plannable_vms = [vm for vm in list_preferred_inventory(db) if vm.enabled]
+    inventory = [vm for vm in list_preferred_inventory(db) if vm.enabled]
+    ignore_map = get_asset_ignore_map(db, inventory)
+    plannable_vms = [vm for vm in inventory if not is_vm_ignored(vm, ignore_map)]
     unplanned = get_unplanned_assets(db)
     planned_vm_count = len(plannable_vms) - len(unplanned)
     coverage = 0.0

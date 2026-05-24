@@ -63,7 +63,8 @@ function AuthenticatedApp() {
     load,
     clearBannerError,
     clearSyncMessage,
-    mutateVmCritical,
+    mutateAssetIgnore,
+    mutateBackupJobSelection,
     mutateDisk,
     runProxmoxSync,
     runPBSSync,
@@ -247,7 +248,8 @@ function AuthenticatedApp() {
             element={
               <AssetsPage
                 data={data} language={language}
-                onVmCriticalChange={(vmId, critical) => void mutateVmCritical(vmId, critical)}
+                onAssetIgnoreChange={(vm, ignored) => void mutateAssetIgnore(vm, ignored)}
+                onBackupJobSelectionChange={(jobId, vmids) => void mutateBackupJobSelection(jobId, vmids)}
                 pbsInventoryByVmId={pbsInventoryByVmId}
                 savingKey={savingKey} t={t}
               />

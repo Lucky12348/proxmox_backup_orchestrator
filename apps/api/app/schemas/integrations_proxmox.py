@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 from app.schemas.base import UTCDateTimeModel
@@ -20,3 +20,33 @@ class ProxmoxSyncRead(BaseModel):
     synced_cts_count: int
     total_seen: int
     already_running: bool = False
+
+
+class ProxmoxBackupJobAssetRead(BaseModel):
+    vmid: int
+    name: str
+    vm_type: str
+    node: str | None = None
+    included: bool
+    ignored: bool = False
+
+
+class ProxmoxBackupJobRead(BaseModel):
+    job_id: str
+    enabled: bool
+    node: str | None
+    schedule: str | None
+    storage: str | None
+    retention: str | None
+    selection_mode: str
+    selected_vmids: list[int]
+    comment: str | None
+    next_run: str | None = None
+    supported: bool
+    unsupported_reason: str | None = None
+    included_assets: list[ProxmoxBackupJobAssetRead] = Field(default_factory=list)
+    available_assets: list[ProxmoxBackupJobAssetRead] = Field(default_factory=list)
+
+
+class ProxmoxBackupJobSelectionUpdate(BaseModel):
+    selected_vmids: list[int]

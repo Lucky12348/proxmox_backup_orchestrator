@@ -66,6 +66,7 @@ Ports `8090` and `8091` must not be exposed broadly. The Proxmox firewall should
 - [Installation](docs/INSTALLATION.md)
 - [Maintenance](docs/MAINTENANCE.md)
 - [Operations](docs/OPERATIONS.md)
+- [Protection Management](docs/PROTECTION.md)
 - [Disaster Recovery](docs/DISASTER_RECOVERY.md)
 - [Security](docs/SECURITY.md)
 

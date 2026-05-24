@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.routes import (
     agent,
+    assets,
     backup_runs,
     disks,
     external_backups,
@@ -11,6 +12,7 @@ from app.api.routes import (
     notifications,
     overview,
     planning,
+    proxmox,
     system,
     vms,
 )
@@ -28,6 +30,7 @@ protected_router = APIRouter(
 )
 
 protected_router.include_router(overview.router)
+protected_router.include_router(assets.router)
 protected_router.include_router(vms.router)
 protected_router.include_router(disks.router)
 protected_router.include_router(external_backups.router)
@@ -35,6 +38,7 @@ protected_router.include_router(backup_runs.router)
 protected_router.include_router(integrations_proxmox.router)
 protected_router.include_router(integrations_pbs.router)
 protected_router.include_router(planning.router)
+protected_router.include_router(proxmox.router)
 protected_router.include_router(system.router)
 protected_router.include_router(maintenance.router)
 protected_router.include_router(notifications.router)

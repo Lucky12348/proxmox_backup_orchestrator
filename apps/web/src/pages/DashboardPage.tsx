@@ -125,7 +125,7 @@ export function DashboardPage({ data, t, latestBackupLabel }: DashboardPageProps
         <AnimatedStatCard
           label={t.coveragePercent}
           value={`${data.overview.coverage_percent}%`}
-          hint={`${data.overview.protected_vms} / ${data.overview.total_vms} ${t.coverageDetail}`}
+          hint={`${data.overview.protected_vms} / ${data.overview.total_vms} ${t.coverageDetail} - ${data.overview.ignored_vms} ignores`}
           valueClass="stat-value-accent"
         />
         <AnimatedStatCard

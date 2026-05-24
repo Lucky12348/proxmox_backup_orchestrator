@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.db.base import Base
-from app.models import BackupRunStatus, ExternalBackupMode, ExternalBackupRun, ExternalDisk, VMType, VirtualMachine
+from app.models import AssetIgnore, BackupRunStatus, ExternalBackupMode, ExternalBackupRun, ExternalDisk, VMType, VirtualMachine
 from app.services.overview import get_overview_metrics
 from app.services.pbs_sync import sync_pbs_inventory
 
@@ -91,3 +91,36 @@ class PBSCoverageTests(TestCase):
         self.assertEqual(metrics.total_vms, 3)
         self.assertEqual(metrics.protected_vms, 2)
         self.assertEqual(metrics.coverage_percent, 66.7)
+
+    def test_coverage_excludes_ignored_assets(self):
+        self.session.add_all(
+            [
+                VirtualMachine(
+                    name="vm-100",
+                    vm_type=VMType.VM,
+                    enabled=True,
+                    source="proxmox",
+                    node_name="pve",
+                    external_id="100",
+                    last_backup_at=datetime(2026, 5, 21, 20, 0, 0),
+                ),
+                VirtualMachine(
+                    name="vm-200",
+                    vm_type=VMType.VM,
+                    enabled=True,
+                    source="proxmox",
+                    node_name="pve",
+                    external_id="200",
+                    last_backup_at=None,
+                ),
+                AssetIgnore(source="proxmox", node="pve", vmid="200", ignored=True),
+            ]
+        )
+        self.session.commit()
+
+        metrics = get_overview_metrics(self.session)
+
+        self.assertEqual(metrics.total_vms, 1)
+        self.assertEqual(metrics.protected_vms, 1)
+        self.assertEqual(metrics.ignored_vms, 1)
+        self.assertEqual(metrics.coverage_percent, 100.0)

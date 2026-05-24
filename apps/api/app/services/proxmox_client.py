@@ -62,6 +62,30 @@ class ProxmoxClient:
         data = self._get(f"nodes/{node_name}/hardware/usb")
         return data if isinstance(data, list) else []
 
+    def list_backup_jobs(self) -> list[dict]:
+        data = self._get("cluster/backup")
+        return data if isinstance(data, list) else []
+
+    def get_backup_job(self, job_id: str) -> dict:
+        data = self._get(f"cluster/backup/{quote(job_id, safe='')}")
+        return data if isinstance(data, dict) else {}
+
+    def update_backup_job_selection(self, job_id: str, selected_vmids: list[int]) -> Any:
+        current = self.get_backup_job(job_id)
+        if not current:
+            raise RuntimeError(f"Proxmox backup job `{job_id}` was not found")
+        if not is_include_selected_backup_job(current):
+            raise RuntimeError("Backup job selection mode is not supported for modification in PBO")
+
+        data = {
+            key: value
+            for key, value in current.items()
+            if key not in {"id", "digest", "next-run", "next_run"}
+        }
+        data["vmid"] = ",".join(str(vmid) for vmid in sorted(set(selected_vmids)))
+        data["all"] = 0
+        return self._put(f"cluster/backup/{quote(job_id, safe='')}", data=data)
+
     def get_qemu_config(self, node_name: str, vm_id: int) -> dict:
         data = self._get(f"nodes/{node_name}/qemu/{vm_id}/config")
         return data if isinstance(data, dict) else {}
@@ -128,3 +152,39 @@ class ProxmoxClient:
             return self._get(f"nodes/{node_name}/tasks/{quoted_upid}/log")
         except Exception as exc:
             return f"Unable to fetch task log: {exc}"
+
+
+def parse_backup_job_vmids(job: Mapping[str, Any]) -> list[int]:
+    value = job.get("vmid")
+    if value is None:
+        return []
+    if isinstance(value, (int, float)):
+        return [int(value)]
+    if isinstance(value, list):
+        result: list[int] = []
+        for item in value:
+            try:
+                result.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return sorted(set(result))
+    if isinstance(value, str):
+        result = []
+        for part in value.replace(";", ",").split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                result.append(int(part))
+            except ValueError:
+                continue
+        return sorted(set(result))
+    return []
+
+
+def is_include_selected_backup_job(job: Mapping[str, Any]) -> bool:
+    if str(job.get("all", "0")).lower() in {"1", "true", "yes"}:
+        return False
+    if job.get("pool") or job.get("exclude"):
+        return False
+    return bool(parse_backup_job_vmids(job))

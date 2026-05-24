@@ -1,6 +1,7 @@
 import { getStoredToken } from "./AuthContext";
 import type {
   AgentStatus,
+  AssetIgnore,
   AutoSyncResult,
   BackupRun,
   DiskHandoffStatus,
@@ -24,6 +25,7 @@ import type {
   PBSStatus,
   PBSSyncSummary,
   ProxmoxStatus,
+  ProxmoxBackupJob,
   ProxmoxSyncSummary,
   PlanningOverview,
   SystemTime,
@@ -94,6 +96,25 @@ export function updateVM(
   });
 }
 
+export function getAssetIgnores() {
+  return request<AssetIgnore[]>("/assets/ignore");
+}
+
+export function updateAssetIgnore(
+  source: string,
+  node: string,
+  vmid: string,
+  payload: { ignored: boolean; reason?: string | null },
+) {
+  return request<AssetIgnore>(
+    `/assets/${encodeURIComponent(source)}/${encodeURIComponent(node || "-")}/${encodeURIComponent(vmid)}/ignore`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export function getDisks() {
   return request<ExternalDisk[]>("/disks");
 }
@@ -140,6 +161,17 @@ export function syncProxmoxInventory() {
 
 export function getProxmoxInventory() {
   return request<VirtualMachine[]>("/integrations/proxmox/inventory");
+}
+
+export function getProxmoxBackupJobs() {
+  return request<ProxmoxBackupJob[]>("/proxmox/backup-jobs");
+}
+
+export function updateProxmoxBackupJobSelection(jobId: string, selectedVmids: number[]) {
+  return request<ProxmoxBackupJob>(`/proxmox/backup-jobs/${encodeURIComponent(jobId)}/selection`, {
+    method: "PATCH",
+    body: JSON.stringify({ selected_vmids: selectedVmids }),
+  });
 }
 
 export function getPBSStatus() {

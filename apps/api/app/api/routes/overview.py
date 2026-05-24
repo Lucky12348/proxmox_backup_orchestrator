@@ -15,6 +15,7 @@ def get_overview(db: DbSession) -> OverviewRead:
     return OverviewRead(
         total_vms=metrics.total_vms,
         protected_vms=metrics.protected_vms,
+        ignored_vms=metrics.ignored_vms,
         coverage_percent=metrics.coverage_percent,
         connected_disks=metrics.connected_disks,
         latest_backup_status=metrics.latest_backup_status,
