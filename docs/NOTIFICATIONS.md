@@ -1,10 +1,10 @@
 # Notifications ntfy
 
-PBO can send production notifications to a self-hosted ntfy server. Notification delivery is best-effort: ntfy errors are logged and never stop backup, eject, sync, or update workflows.
+PBO sends best-effort notifications through ntfy. Delivery errors are logged without secrets and never stop backup, eject, sync, planning, or update workflows.
 
 ## Environment
 
-Configure the App VM API environment :):
+Configure the App VM API environment:
 
 ```env
 NOTIFICATIONS_ENABLED=true
@@ -19,6 +19,7 @@ NOTIFY_ON_UPDATE_RESULT=true
 NOTIFY_ON_AGENT_DEGRADED=true
 NOTIFY_ON_LOW_COVERAGE=true
 LOW_COVERAGE_THRESHOLD_PERCENT=100
+DISK_DETECTION_NOTIFY_COOLDOWN_SECONDS=1800
 ```
 
 `NTFY_TOPIC` should be treated as a secret. Use a long random topic name and do not publish it in documentation, screenshots, logs, or issue reports.
@@ -54,3 +55,19 @@ PBO sends notifications for these events when enabled:
 - Maintenance update success or failure.
 - Host agent degraded or disconnected status, rate-limited to avoid repeated alerts.
 - Low PBS backup coverage after a PBS sync when coverage is below `LOW_COVERAGE_THRESHOLD_PERCENT`.
+- New USB disk first seen by the agent.
+- Known USB disk changing from absent to present, rate-limited by `DISK_DETECTION_NOTIFY_COOLDOWN_SECONDS`.
+- Expected disk detected for an active planned backup window.
+- Planned backup reminders, auto-starts, confirmation requests, and missed windows.
+
+Disk detection uses the exact disk serial reported by the agent. PBO stores `presence_state` as `present` or `absent` and only notifies on transitions into `present`.
+
+## Troubleshooting
+
+If the Settings test works but real events do not fire, check that the API container has the notification and planning env vars, then inspect API logs for `notification event=<name> sent=true|false`.
+
+If disk detection notifications repeat, verify the agent is not reporting changing serial numbers and that `DISK_DETECTION_NOTIFY_COOLDOWN_SECONDS` is present inside the API container.
+
+If planned disk detection does not trigger a backup, confirm the scheduled event uses the exact serial number shown in the Disks page and that the current time is inside the event window.
+
+If a phone receives notifications only on Wi-Fi and not 5G, verify the public ntfy URL is reachable externally and that DNS does not resolve to a LAN-only address outside the network.

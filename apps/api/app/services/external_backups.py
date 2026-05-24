@@ -131,7 +131,12 @@ def cleanup_legacy_external_export_objects() -> dict[str, object]:
     }
 
 
-def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> ExternalBackupRun:
+def run_external_backup(
+    db: Session,
+    disk_id: int,
+    confirmation: bool,
+    datastore_name: str | None = None,
+) -> ExternalBackupRun:
     if not confirmation:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -160,7 +165,7 @@ def run_external_backup(db: Session, disk_id: int, confirmation: bool) -> Extern
         started_at=now,
         finished_at=None,
         target_path=plan.target_path,
-        datastore_name=settings.pbs_datastore,
+        datastore_name=datastore_name or settings.pbs_datastore,
         message=None,
         stdout_log=None,
         stderr_log=None,

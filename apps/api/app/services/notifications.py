@@ -240,6 +240,86 @@ def notify_low_coverage(coverage_percent: float, protected_vms: int, total_vms: 
         _log_event_error("low_coverage", exc)
 
 
+def notify_new_disk_detected(description: str) -> None:
+    _send_event_notification(
+        "disk_new_detected",
+        "PBO: Nouveau disque detecte",
+        description,
+        tags=["mag", "floppy_disk"],
+    )
+
+
+def notify_known_disk_detected(description: str) -> None:
+    _send_event_notification(
+        "disk_known_detected",
+        "PBO: Disque connu detecte",
+        description,
+        tags=["floppy_disk", "white_check_mark"],
+    )
+
+
+def notify_expected_disk_detected(serial: str, event_title: str) -> None:
+    _send_event_notification(
+        "planned_disk_detected",
+        "PBO: Disque attendu detecte",
+        f"Le disque {serial} est branche pour {event_title}.",
+        tags=["calendar", "floppy_disk", "white_check_mark"],
+    )
+
+
+def notify_planned_backup_reminder(serial: str, event_title: str, start: str, end: str) -> None:
+    _send_event_notification(
+        "planned_backup_reminder",
+        "PBO: Backup planifie",
+        f"Branche le disque {serial} pour {event_title}. Fenetre: {start} -> {end}.",
+        tags=["calendar", "bell", "floppy_disk"],
+    )
+
+
+def notify_planned_backup_started(event_title: str) -> None:
+    _send_event_notification(
+        "planned_backup_started",
+        "PBO: Backup planifie demarre",
+        f"{event_title} demarre automatiquement.",
+        tags=["calendar", "arrow_forward", "floppy_disk"],
+    )
+
+
+def notify_planned_confirmation_required(event_title: str) -> None:
+    _send_event_notification(
+        "planned_confirmation_required",
+        "PBO: Confirmation requise",
+        f"Le disque est branche pour {event_title}. Confirme le demarrage dans PBO.",
+        priority="high",
+        tags=["warning", "calendar"],
+    )
+
+
+def notify_planned_backup_missed(event_title: str) -> None:
+    _send_event_notification(
+        "planned_backup_missed",
+        "PBO: Backup planifie manque",
+        f"{event_title}: disque non detecte ou confirmation absente avant la fin de la fenetre.",
+        priority="high",
+        tags=["warning", "calendar"],
+    )
+
+
+def _send_event_notification(
+    event_name: str,
+    title: str,
+    message: str,
+    priority: str = "default",
+    tags: list[str] | tuple[str, ...] | str | None = None,
+) -> None:
+    try:
+        service = get_notification_service()
+        sent = service.send(title, message, priority=priority, tags=tags)
+        _log_event(event_name, sent)
+    except Exception as exc:
+        _log_event_error(event_name, exc)
+
+
 def _format_tags(tags: list[str] | tuple[str, ...] | str | None) -> str | None:
     if tags is None:
         return None

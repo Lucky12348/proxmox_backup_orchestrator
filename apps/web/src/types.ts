@@ -252,6 +252,73 @@ export interface MaintenanceStatus {
   components: MaintenanceComponentStatus[];
 }
 
+export type ScheduledBackupRecurrenceType = "once" | "daily" | "weekly" | "monthly";
+export type ScheduledBackupStartMode = "auto_on_disk_detected" | "manual_confirmation";
+export type ScheduledBackupRunStatus =
+  | "pending"
+  | "waiting_for_disk"
+  | "waiting_for_confirmation"
+  | "running"
+  | "success"
+  | "failure"
+  | "missed"
+  | "cancelled";
+
+export interface ScheduledBackupRun {
+  id: number;
+  event_id: number;
+  event_title: string | null;
+  disk_serial: string | null;
+  scheduled_for: string;
+  window_starts_at: string;
+  window_ends_at: string;
+  status: ScheduledBackupRunStatus;
+  disk_seen_at: string | null;
+  reminder_sent_at: string | null;
+  backup_run_id: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScheduledBackupEvent {
+  id: number;
+  title: string;
+  enabled: boolean;
+  disk_serial: string;
+  disk_label_or_model: string | null;
+  datastore: string;
+  recurrence_type: ScheduledBackupRecurrenceType;
+  recurrence_config: Record<string, unknown> | null;
+  timezone: string;
+  window_starts_at: string;
+  window_duration_minutes: number;
+  notify_before_minutes: number;
+  start_mode: ScheduledBackupStartMode;
+  auto_eject_after_success: boolean;
+  last_status: string | null;
+  last_triggered_at: string | null;
+  last_completed_at: string | null;
+  next_occurrence_at: string | null;
+  active_run: ScheduledBackupRun | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ScheduledBackupEventPayload = Omit<
+  ScheduledBackupEvent,
+  | "id"
+  | "last_status"
+  | "last_triggered_at"
+  | "last_completed_at"
+  | "next_occurrence_at"
+  | "active_run"
+  | "created_at"
+  | "updated_at"
+>;
+
 export interface NotificationStatus {
   enabled: boolean;
   provider: string;

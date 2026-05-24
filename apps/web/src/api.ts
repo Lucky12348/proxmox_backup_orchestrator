@@ -14,6 +14,9 @@ import type {
   MaintenanceStatus,
   NotificationStatus,
   NotificationTestResult,
+  ScheduledBackupEvent,
+  ScheduledBackupEventPayload,
+  ScheduledBackupRun,
   Overview,
   PBSInventoryItem,
   PBSStatus,
@@ -161,6 +164,44 @@ export function getPlanningDisks() {
 
 export function getPlanningOverview() {
   return request<PlanningOverview>("/planning/overview");
+}
+
+export function getScheduledBackupEvents() {
+  return request<ScheduledBackupEvent[]>("/planning/events");
+}
+
+export function createScheduledBackupEvent(payload: ScheduledBackupEventPayload) {
+  return request<ScheduledBackupEvent>("/planning/events", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateScheduledBackupEvent(eventId: number, payload: Partial<ScheduledBackupEventPayload>) {
+  return request<ScheduledBackupEvent>(`/planning/events/${eventId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteScheduledBackupEvent(eventId: number) {
+  return request<void>(`/planning/events/${eventId}`, { method: "DELETE" });
+}
+
+export function getScheduledBackupRuns() {
+  return request<ScheduledBackupRun[]>("/planning/runs");
+}
+
+export function runScheduledBackupNow(eventId: number) {
+  return request<ScheduledBackupRun>(`/planning/events/${eventId}/run-now`, { method: "POST" });
+}
+
+export function confirmScheduledBackupRun(runId: number) {
+  return request<ScheduledBackupRun>(`/planning/runs/${runId}/confirm`, { method: "POST" });
+}
+
+export function cancelScheduledBackupRun(runId: number) {
+  return request<ScheduledBackupRun>(`/planning/runs/${runId}/cancel`, { method: "POST" });
 }
 
 export function getUnplannedAssets() {

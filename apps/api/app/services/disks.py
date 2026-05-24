@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models import AgentHeartbeat, ExternalDisk
 from app.schemas.agent import AgentDiskReportCreate, AgentHeartbeatCreate
+from app.services.notifications import notify_known_disk_detected, notify_new_disk_detected
+from app.services.planning_scheduler import handle_disk_detected
 
 
 def has_agent_disks(db: Session) -> bool:
@@ -68,6 +70,8 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
     observed_at = payload.observed_at.replace(tzinfo=None)
     upserted: list[ExternalDisk] = []
     reported_serials = {item.serial_number for item in payload.disks}
+    detection_notifications: list[tuple[str, ExternalDisk]] = []
+    planning_detections: list[ExternalDisk] = []
 
     report_marker = db.scalar(
         select(ExternalDisk)
@@ -119,6 +123,9 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
                 active=True,
                 trusted=item.trusted,
             )
+            previous_presence = "never_seen"
+        else:
+            previous_presence = disk.presence_state or ("present" if disk.connected else "absent")
 
         disk.display_name = item.display_name
         disk.model_name = item.model_name
@@ -128,6 +135,7 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
         disk.detection_reason = item.detection_reason
         disk.candidate_type = item.candidate_type
         disk.connected = True if _is_pbs_handoff_disk(disk) else item.connected
+        disk.presence_state = "present" if disk.connected else "absent"
         disk.last_seen_at = observed_at
         disk.source = "agent"
         disk.reported_by_hostname = payload.hostname
@@ -135,6 +143,11 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
 
         db.add(disk)
         upserted.append(disk)
+        if disk.connected and previous_presence in {"never_seen", "absent"}:
+            planning_detections.append(disk)
+            if _disk_detection_cooldown_elapsed(disk, observed_at):
+                detection_notifications.append(("new" if previous_presence == "never_seen" else "known", disk))
+                disk.last_detection_notified_at = observed_at
 
     for disk in stale_disks:
         if disk.serial_number in reported_serials:
@@ -142,6 +155,7 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
 
         if _is_pbs_handoff_disk(disk):
             disk.connected = True
+            disk.presence_state = "present"
             disk.active = True
             disk.reported_by_hostname = payload.hostname
             disk.last_seen_at = observed_at
@@ -149,6 +163,7 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
             continue
 
         disk.connected = False
+        disk.presence_state = "absent"
         disk.active = False
         disk.reported_by_hostname = payload.hostname
         db.add(disk)
@@ -157,6 +172,22 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
 
     for disk in upserted:
         db.refresh(disk)
+
+    for detection_type, disk in detection_notifications:
+        try:
+            description = _format_disk_detection_description(disk)
+            if detection_type == "new":
+                notify_new_disk_detected(description)
+            else:
+                notify_known_disk_detected(description)
+        except Exception:
+            continue
+
+    for disk in planning_detections:
+        try:
+            handle_disk_detected(db, disk, observed_at)
+        except Exception:
+            continue
 
     return upserted
 
@@ -195,6 +226,24 @@ def _is_pbs_handoff_disk(disk: ExternalDisk) -> bool:
         or disk.pbs_visible is True
         or disk.pbs_handoff_slot is not None
     )
+
+
+def _disk_detection_cooldown_elapsed(disk: ExternalDisk, observed_at: datetime) -> bool:
+    previous = disk.last_detection_notified_at
+    if previous is None:
+        return True
+    return (observed_at - previous).total_seconds() >= get_settings().disk_detection_notify_cooldown_seconds
+
+
+def _format_disk_detection_description(disk: ExternalDisk) -> str:
+    parts = []
+    if disk.model_name:
+        parts.append(f"Modele: {disk.model_name}")
+    parts.append(f"Serie: {disk.serial_number}")
+    capacity = disk.usable_capacity_gb or disk.capacity_gb
+    if capacity:
+        parts.append(f"Taille: {capacity} GB")
+    return ". ".join(parts)
 
 
 def _preferred_disk_visibility_condition():

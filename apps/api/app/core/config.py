@@ -42,6 +42,9 @@ class Settings:
     notify_on_agent_degraded: bool = parse_bool(os.getenv("NOTIFY_ON_AGENT_DEGRADED"), default=True)
     notify_on_low_coverage: bool = parse_bool(os.getenv("NOTIFY_ON_LOW_COVERAGE"), default=True)
     low_coverage_threshold_percent: float = float(os.getenv("LOW_COVERAGE_THRESHOLD_PERCENT", "100"))
+    planning_scheduler_enabled: bool = parse_bool(os.getenv("PLANNING_SCHEDULER_ENABLED"), default=True)
+    planning_scheduler_interval_seconds: int = int(os.getenv("PLANNING_SCHEDULER_INTERVAL_SECONDS", "60"))
+    disk_detection_notify_cooldown_seconds: int = int(os.getenv("DISK_DETECTION_NOTIFY_COOLDOWN_SECONDS", "1800"))
     pve_api_url: str = os.getenv(
         "PVE_API_URL",
         "https://proxmox.example.local:8006/api2/json",

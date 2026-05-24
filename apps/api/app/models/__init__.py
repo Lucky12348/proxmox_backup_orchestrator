@@ -4,6 +4,13 @@ from app.models.disk_assignment import DiskAssignment
 from app.models.disk_preparation_run import DiskPreparationMode, DiskPreparationRun
 from app.models.external_disk import ExternalDisk
 from app.models.external_backup_run import ExternalBackupMode, ExternalBackupRun
+from app.models.scheduled_backup import (
+    ScheduledBackupEvent,
+    ScheduledBackupRecurrenceType,
+    ScheduledBackupRun,
+    ScheduledBackupRunStatus,
+    ScheduledBackupStartMode,
+)
 from app.models.virtual_machine import VMType, VirtualMachine
 
 __all__ = [
@@ -16,6 +23,11 @@ __all__ = [
     "ExternalDisk",
     "ExternalBackupMode",
     "ExternalBackupRun",
+    "ScheduledBackupEvent",
+    "ScheduledBackupRecurrenceType",
+    "ScheduledBackupRun",
+    "ScheduledBackupRunStatus",
+    "ScheduledBackupStartMode",
     "VMType",
     "VirtualMachine",
 ]

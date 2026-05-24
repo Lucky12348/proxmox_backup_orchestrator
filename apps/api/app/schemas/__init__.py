@@ -13,7 +13,15 @@ from app.schemas.integrations_proxmox import ProxmoxStatusRead, ProxmoxSyncRead
 from app.schemas.integrations_pbs import PBSInventoryRead, PBSStatusRead, PBSSyncRead
 from app.schemas.notifications import NotificationStatusRead, NotificationTestRead
 from app.schemas.overview import OverviewRead
-from app.schemas.planning import DiskPlanningRead, PlanningOverviewRead, UnplannedAssetRead
+from app.schemas.planning import (
+    DiskPlanningRead,
+    PlanningOverviewRead,
+    ScheduledBackupEventCreate,
+    ScheduledBackupEventRead,
+    ScheduledBackupEventUpdate,
+    ScheduledBackupRunRead,
+    UnplannedAssetRead,
+)
 from app.schemas.virtual_machine import VirtualMachineRead, VirtualMachineUpdate
 
 __all__ = [
@@ -36,6 +44,10 @@ __all__ = [
     "NotificationStatusRead",
     "NotificationTestRead",
     "PlanningOverviewRead",
+    "ScheduledBackupEventCreate",
+    "ScheduledBackupEventRead",
+    "ScheduledBackupEventUpdate",
+    "ScheduledBackupRunRead",
     "ProxmoxStatusRead",
     "ProxmoxSyncRead",
     "DiskPlanningRead",

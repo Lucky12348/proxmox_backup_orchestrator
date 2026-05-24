@@ -40,5 +40,7 @@ class ExternalDisk(Base):
     pbs_mount_path: Mapped[str | None] = mapped_column(String(512))
     pbs_filesystem_type: Mapped[str | None] = mapped_column(String(64))
     prepared_as_pbs_datastore: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    presence_state: Mapped[str] = mapped_column(String(16), nullable=False, default="absent")
+    last_detection_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
 
     assignments = relationship("DiskAssignment", back_populates="disk", cascade="all, delete-orphan")

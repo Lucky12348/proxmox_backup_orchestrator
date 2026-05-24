@@ -11,6 +11,8 @@ import {
   getPBSStatus,
   getPlanningDisks,
   getPlanningOverview,
+  getScheduledBackupEvents,
+  getScheduledBackupRuns,
   getPreferredDisks,
   getProxmoxInventory,
   getProxmoxStatus,
@@ -38,6 +40,8 @@ import type {
   VirtualMachine,
   DiskPlanningSummary,
   UnplannedAsset,
+  ScheduledBackupEvent,
+  ScheduledBackupRun,
 } from "../types";
 
 export interface AppDataState {
@@ -50,6 +54,8 @@ export interface AppDataState {
   planningDisks: DiskPlanningSummary[];
   planningOverview: PlanningOverview;
   unplannedAssets: UnplannedAsset[];
+  scheduledBackupEvents: ScheduledBackupEvent[];
+  scheduledBackupRuns: ScheduledBackupRun[];
   pbsInventory: PBSInventoryItem[];
   pbsStatus: PBSStatus;
   proxmoxStatus: ProxmoxStatus;
@@ -66,6 +72,8 @@ async function fetchAppData(): Promise<AppDataState> {
     planningDisks,
     planningOverview,
     unplannedAssets,
+    scheduledBackupEvents,
+    scheduledBackupRuns,
     proxmoxStatus,
     proxmoxInventory,
     pbsStatus,
@@ -80,6 +88,8 @@ async function fetchAppData(): Promise<AppDataState> {
     getPlanningDisks(),
     getPlanningOverview(),
     getUnplannedAssets(),
+    getScheduledBackupEvents(),
+    getScheduledBackupRuns(),
     getProxmoxStatus(),
     getProxmoxInventory(),
     getPBSStatus(),
@@ -96,6 +106,8 @@ async function fetchAppData(): Promise<AppDataState> {
     planningDisks,
     planningOverview,
     unplannedAssets,
+    scheduledBackupEvents,
+    scheduledBackupRuns,
     pbsInventory,
     pbsStatus,
     proxmoxStatus,

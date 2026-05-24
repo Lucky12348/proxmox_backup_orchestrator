@@ -13,6 +13,8 @@ from app.models import (
     ExternalBackupMode,
     ExternalBackupRun,
     ExternalDisk,
+    ScheduledBackupEvent,
+    ScheduledBackupRun,
     VMType,
     VirtualMachine,
 )
@@ -24,6 +26,7 @@ def create_tables() -> None:
     ensure_external_disk_schema()
     ensure_external_backup_run_schema()
     ensure_disk_preparation_run_schema()
+    ensure_scheduled_backup_schema()
 
 
 def ensure_virtual_machine_schema() -> None:
@@ -80,6 +83,8 @@ def ensure_external_disk_schema() -> None:
         "prepared_as_pbs_datastore": (
             "ALTER TABLE external_disks ADD COLUMN prepared_as_pbs_datastore BOOLEAN NOT NULL DEFAULT FALSE"
         ),
+        "presence_state": "ALTER TABLE external_disks ADD COLUMN presence_state VARCHAR(16) NOT NULL DEFAULT 'absent'",
+        "last_detection_notified_at": "ALTER TABLE external_disks ADD COLUMN last_detection_notified_at TIMESTAMP",
     }
 
     with engine.begin() as connection:
@@ -132,6 +137,10 @@ def ensure_disk_preparation_run_schema() -> None:
         for column_name, statement in column_statements.items():
             if column_name not in existing_columns:
                 connection.execute(text(statement))
+
+
+def ensure_scheduled_backup_schema() -> None:
+    Base.metadata.create_all(bind=engine, tables=[ScheduledBackupEvent.__table__, ScheduledBackupRun.__table__])
 
 
 def seed_database() -> None:
