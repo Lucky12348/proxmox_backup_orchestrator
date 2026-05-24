@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import type { MouseEvent } from "react";
 
 import {
   cancelScheduledBackupRun,
   confirmScheduledBackupRun,
   createScheduledBackupEvent,
   deleteScheduledBackupEvent,
+  getScheduledBackupCalendar,
   getScheduledBackupEvents,
   getScheduledBackupRuns,
   runScheduledBackupNow,
@@ -18,24 +20,20 @@ import { StatCard } from "../components/StatCard";
 import { StatusBadge } from "../components/StatusBadge";
 import type {
   ExternalDisk,
+  ScheduledBackupCalendarOccurrence,
   ScheduledBackupEvent,
   ScheduledBackupEventPayload,
   ScheduledBackupRun,
-  ScheduledBackupRunStatus,
 } from "../types";
 import type { PlanningPageProps } from "./shared";
 
+type CalendarView = "day" | "week" | "month" | "year";
 type EventForm = ScheduledBackupEventPayload & { id?: number };
-type CalendarOccurrence = {
-  key: string;
-  event: ScheduledBackupEvent;
-  startsAt: string;
-  endsAt: string;
-  run: ScheduledBackupRun | null;
-};
 
 const ACTIVE_STATUSES = new Set(["pending", "waiting_for_disk", "waiting_for_confirmation", "running"]);
 const DONE_STATUSES = new Set(["success", "failure", "missed", "cancelled"]);
+const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
+const VIEW_LABELS: Record<CalendarView, string> = { day: "Jour", week: "Semaine", month: "Mois", year: "Annee" };
 
 const DEFAULT_FORM: EventForm = {
   title: "Backup externe hebdomadaire",
@@ -56,10 +54,19 @@ const DEFAULT_FORM: EventForm = {
 export function PlanningPage({ data, t }: PlanningPageProps) {
   const [events, setEvents] = useState(data.scheduledBackupEvents);
   const [runs, setRuns] = useState(data.scheduledBackupRuns);
-  const [visibleMonth, setVisibleMonth] = useState(startOfMonth(new Date()));
+  const [occurrences, setOccurrences] = useState<ScheduledBackupCalendarOccurrence[]>([]);
+  const [calendarView, setCalendarView] = useState<CalendarView>(() => readStoredView());
+  const [visibleDate, setVisibleDate] = useState(startOfDay(new Date()));
   const [form, setForm] = useState<EventForm | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ message: string; tone: "info" | "error" } | null>(null);
+
+  const visibleRange = useMemo(() => calendarRange(calendarView, visibleDate), [calendarView, visibleDate]);
+  const activeRuns = runs.filter((run) => ACTIVE_STATUSES.has(run.status)).sort(sortRunsAsc);
+  const historyRuns = runs.filter((run) => DONE_STATUSES.has(run.status)).sort(sortRunsDesc).slice(0, 12);
+  const upcomingRuns = runs.filter((run) => !DONE_STATUSES.has(run.status)).sort(sortRunsAsc).slice(0, 12);
+  const nextOccurrence = occurrences.filter((item) => new Date(item.window_starts_at) >= new Date()).sort(sortOccurrences)[0] ?? null;
+  const lastRun = runs.slice().sort(sortRunsDesc)[0] ?? null;
 
   useEffect(() => {
     setEvents(data.scheduledBackupEvents);
@@ -67,7 +74,12 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
   }, [data.scheduledBackupEvents, data.scheduledBackupRuns]);
 
   useEffect(() => {
+    window.localStorage.setItem("pbo.planning.calendarView", calendarView);
+  }, [calendarView]);
+
+  useEffect(() => {
     let cancelled = false;
+    void refreshPlanning({ silent: true, cancelled: () => cancelled });
     const intervalId = window.setInterval(() => {
       void refreshPlanning({ silent: true, cancelled: () => cancelled });
     }, 15000);
@@ -75,40 +87,38 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, []);
-
-  const monthRange = useMemo(() => calendarRange(visibleMonth), [visibleMonth]);
-  const occurrences = useMemo(
-    () => expandVisibleOccurrences(events, runs, monthRange.start, monthRange.end),
-    [events, runs, monthRange.start, monthRange.end],
-  );
-  const calendarDays = useMemo(() => buildCalendarDays(monthRange.start, occurrences), [monthRange.start, occurrences]);
-  const activeRuns = runs.filter((run) => ACTIVE_STATUSES.has(run.status)).sort(sortRunsAsc);
-  const historyRuns = runs.filter((run) => DONE_STATUSES.has(run.status)).sort(sortRunsDesc).slice(0, 12);
-  const upcomingRuns = runs.filter((run) => !DONE_STATUSES.has(run.status)).sort(sortRunsAsc).slice(0, 12);
-  const nextOccurrence = occurrences.filter((item) => new Date(item.startsAt) >= new Date()).sort((a, b) => a.startsAt.localeCompare(b.startsAt))[0] ?? null;
-  const lastRun = runs.slice().sort(sortRunsDesc)[0] ?? null;
+  }, [visibleRange.startKey, visibleRange.endKey]);
 
   async function refreshPlanning(options: { silent?: boolean; cancelled?: () => boolean } = {}) {
     try {
-      const [nextEvents, nextRuns] = await Promise.all([getScheduledBackupEvents(), getScheduledBackupRuns()]);
+      const [nextEvents, nextRuns, nextOccurrences] = await Promise.all([
+        getScheduledBackupEvents(),
+        getScheduledBackupRuns(),
+        getScheduledBackupCalendar(visibleRange.startKey, visibleRange.endKey),
+      ]);
       if (options.cancelled?.()) return;
       setEvents(nextEvents);
       setRuns(nextRuns);
+      setOccurrences(nextOccurrences);
     } catch (error) {
       if (!options.silent) setBanner({ message: error instanceof Error ? error.message : "Unknown error", tone: "error" });
     }
   }
 
-  function newEvent() {
+  function openNewEvent(date: Date) {
     const firstDisk = data.disks[0];
     setForm({
       ...DEFAULT_FORM,
       disk_serial: firstDisk?.serial_number ?? "",
       disk_label_or_model: firstDisk ? diskLabel(firstDisk) : "",
       datastore: data.pbsStatus.datastore,
-      window_starts_at: toLocalInputValue(nextSundayAtOne()),
+      window_starts_at: toLocalInputValue(date),
     });
+  }
+
+  function editOccurrence(occurrence: ScheduledBackupCalendarOccurrence) {
+    const event = events.find((item) => item.id === occurrence.event_id);
+    if (event) editEvent(event);
   }
 
   function editEvent(event: ScheduledBackupEvent) {
@@ -171,6 +181,20 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
     await action(`delete-${event.id}`, () => deleteScheduledBackupEvent(event.id));
   }
 
+  function movePeriod(delta: number) {
+    setVisibleDate((current) => addPeriod(current, calendarView, delta));
+  }
+
+  function switchToDay(date: Date) {
+    setVisibleDate(startOfDay(date));
+    setCalendarView("day");
+  }
+
+  function switchToMonth(date: Date) {
+    setVisibleDate(startOfMonth(date));
+    setCalendarView("month");
+  }
+
   return (
     <div className="page-stack">
       <PageHeader title={t.nav.planning} description="Calendrier des sauvegardes externes et capacite planifiee." />
@@ -178,37 +202,41 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
       {banner ? <ErrorBanner dismissLabel={t.dismiss} message={banner.message} onDismiss={() => setBanner(null)} tone={banner.tone} /> : null}
 
       <section className="stats-grid stats-grid-compact">
-        <StatCard label="Prochain backup" value={nextOccurrence ? formatDate(nextOccurrence.startsAt) : "Aucun"} />
-        <StatCard label="Actif maintenant" value={activeRuns[0] ? `${activeRuns[0].event_title ?? activeRuns[0].event_id}: ${activeRuns[0].status}` : "Aucun"} />
-        <StatCard label="Dernier run" value={lastRun ? `${lastRun.event_title ?? lastRun.event_id}: ${lastRun.status}` : "Aucun"} />
+        <StatCard label="Prochain backup" value={nextOccurrence ? formatDate(nextOccurrence.window_starts_at) : "Aucun"} />
+        <StatCard label="Actif maintenant" value={activeRuns[0] ? `${activeRuns[0].event_title ?? activeRuns[0].event_id}: ${statusLabel(activeRuns[0].status)}` : "Aucun"} />
+        <StatCard label="Dernier run" value={lastRun ? `${lastRun.event_title ?? lastRun.event_id}: ${statusLabel(lastRun.status)}` : "Aucun"} />
       </section>
 
-      <section className="panel-card">
-        <div className="panel-card-header">
-          <h2>{monthTitle(visibleMonth)}</h2>
+      <section className="panel-card calendar-shell">
+        <div className="calendar-toolbar">
           <div className="button-row">
-            <button className="ghost-button" onClick={() => setVisibleMonth(addMonths(visibleMonth, -1))} type="button">Mois precedent</button>
-            <button className="ghost-button" onClick={() => setVisibleMonth(startOfMonth(new Date()))} type="button">Aujourd'hui</button>
-            <button className="ghost-button" onClick={() => setVisibleMonth(addMonths(visibleMonth, 1))} type="button">Mois suivant</button>
-            <button className="action-button" onClick={newEvent} type="button">Nouvel evenement</button>
+            <button className="ghost-button" onClick={() => setVisibleDate(startOfDay(new Date()))} type="button">Aujourd'hui</button>
+            <button className="ghost-button icon-button" aria-label="Periode precedente" onClick={() => movePeriod(-1)} type="button">‹</button>
+            <button className="ghost-button icon-button" aria-label="Periode suivante" onClick={() => movePeriod(1)} type="button">›</button>
+          </div>
+          <h2>{periodTitle(calendarView, visibleDate)}</h2>
+          <div className="button-row calendar-view-switcher">
+            {(["day", "week", "month", "year"] as CalendarView[]).map((view) => (
+              <button className={calendarView === view ? "action-button" : "ghost-button"} key={view} onClick={() => setCalendarView(view)} type="button">
+                {VIEW_LABELS[view]}
+              </button>
+            ))}
+            <button className="action-button" onClick={() => openNewEvent(defaultEventDate(visibleDate))} type="button">Nouvel evenement</button>
           </div>
         </div>
-        <div className="calendar-grid calendar-grid-header">
-          {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((day) => <div key={day}>{day}</div>)}
-        </div>
-        <div className="calendar-grid">
-          {calendarDays.map((day) => (
-            <div className={day.inMonth ? "calendar-day" : "calendar-day calendar-day-muted"} key={day.date}>
-              <div className="calendar-day-number">{day.label}</div>
-              {day.occurrences.map((occurrence) => (
-                <button className="calendar-event" key={occurrence.key} onClick={() => editEvent(occurrence.event)} type="button">
-                  <span className="calendar-event-title">{occurrence.event.title}</span>
-                  {occurrence.run ? <RunStatusBadge status={occurrence.run.status} compact /> : null}
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
+
+        {calendarView === "day" ? (
+          <DayView date={visibleDate} occurrences={occurrences} onCreate={openNewEvent} onOpen={editOccurrence} />
+        ) : null}
+        {calendarView === "week" ? (
+          <WeekView start={startOfWeek(visibleDate)} occurrences={occurrences} onCreate={openNewEvent} onOpen={editOccurrence} />
+        ) : null}
+        {calendarView === "month" ? (
+          <MonthView month={visibleDate} occurrences={occurrences} onCreate={(date) => openNewEvent(defaultEventDate(date))} onOpen={editOccurrence} />
+        ) : null}
+        {calendarView === "year" ? (
+          <YearView year={visibleDate.getFullYear()} occurrences={occurrences} onDay={switchToDay} onMonth={switchToMonth} />
+        ) : null}
       </section>
 
       <section className="panel-card">
@@ -276,29 +304,29 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
               <button className="ghost-button" onClick={() => setForm(null)} type="button">{t.cancel}</button>
             </div>
             <div className="planning-form-grid">
-              <label>Titre<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-              <label>Disque<select className="truncate-select" value={form.disk_serial} title={selectedDiskTitle(data.disks, form.disk_serial)} onChange={(e) => {
-                const disk = data.disks.find((item) => item.serial_number === e.target.value);
-                setForm({ ...form, disk_serial: e.target.value, disk_label_or_model: disk ? diskLabel(disk) : e.target.value });
+              <label>Titre<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+              <label>Disque<select className="truncate-select" value={form.disk_serial} title={selectedDiskTitle(data.disks, form.disk_serial)} onChange={(event) => {
+                const disk = data.disks.find((item) => item.serial_number === event.target.value);
+                setForm({ ...form, disk_serial: event.target.value, disk_label_or_model: disk ? diskLabel(disk) : event.target.value });
               }}>
                 {data.disks.map((disk) => <option key={disk.serial_number} title={diskLabel(disk, false)} value={disk.serial_number}>{diskOptionLabel(disk)}</option>)}
               </select></label>
-              <label>Datastore<input value={form.datastore} onChange={(e) => setForm({ ...form, datastore: e.target.value })} /></label>
-              <label>Recurrence<select value={form.recurrence_type} onChange={(e) => setForm({ ...form, recurrence_type: e.target.value as EventForm["recurrence_type"] })}>
+              <label>Datastore<input value={form.datastore} onChange={(event) => setForm({ ...form, datastore: event.target.value })} /></label>
+              <label>Recurrence<select value={form.recurrence_type} onChange={(event) => setForm({ ...form, recurrence_type: event.target.value as EventForm["recurrence_type"] })}>
                 <option value="once">Une fois</option>
                 <option value="daily">Tous les jours</option>
                 <option value="weekly">Chaque semaine</option>
                 <option value="monthly">Chaque mois</option>
               </select></label>
-              <label>Debut fenetre<input type="datetime-local" value={form.window_starts_at} onChange={(e) => setForm({ ...form, window_starts_at: e.target.value })} /></label>
-              <label>Duree minutes<input type="number" min={1} value={form.window_duration_minutes} onChange={(e) => setForm({ ...form, window_duration_minutes: Number(e.target.value) })} /></label>
-              <label>Rappel minutes avant<input type="number" min={0} value={form.notify_before_minutes} onChange={(e) => setForm({ ...form, notify_before_minutes: Number(e.target.value) })} /></label>
-              <label>Mode demarrage<select value={form.start_mode} onChange={(e) => setForm({ ...form, start_mode: e.target.value as EventForm["start_mode"] })}>
+              <label>Debut fenetre<input type="datetime-local" value={form.window_starts_at} onChange={(event) => setForm({ ...form, window_starts_at: event.target.value })} /></label>
+              <label>Duree minutes<input type="number" min={1} value={form.window_duration_minutes} onChange={(event) => setForm({ ...form, window_duration_minutes: Number(event.target.value) })} /></label>
+              <label>Rappel minutes avant<input type="number" min={0} value={form.notify_before_minutes} onChange={(event) => setForm({ ...form, notify_before_minutes: Number(event.target.value) })} /></label>
+              <label>Mode demarrage<select value={form.start_mode} onChange={(event) => setForm({ ...form, start_mode: event.target.value as EventForm["start_mode"] })}>
                 <option value="manual_confirmation">Confirmation manuelle</option>
                 <option value="auto_on_disk_detected">Automatique sur detection disque</option>
               </select></label>
-              <label className="checkbox-row"><input checked={form.auto_eject_after_success} onChange={(e) => setForm({ ...form, auto_eject_after_success: e.target.checked })} type="checkbox" /> Auto-eject apres succes</label>
-              <label className="checkbox-row"><input checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} type="checkbox" /> Active</label>
+              <label className="checkbox-row"><input checked={form.auto_eject_after_success} onChange={(event) => setForm({ ...form, auto_eject_after_success: event.target.checked })} type="checkbox" /> Auto-eject apres succes</label>
+              <label className="checkbox-row"><input checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} type="checkbox" /> Active</label>
             </div>
             <div className="button-row">
               <button className="action-button" disabled={busy === "save-event" || !form.disk_serial || !form.window_starts_at} onClick={() => void saveEvent()} type="button">{t.confirm}</button>
@@ -310,21 +338,142 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
   );
 }
 
-function RunTable({
-  runs,
-  t,
-  onAction,
-  busy,
-  emptyTitle,
-  history = false,
-}: {
-  runs: ScheduledBackupRun[];
-  t: PlanningPageProps["t"];
-  onAction: (label: string, callback: () => Promise<unknown>) => Promise<void>;
-  busy: string | null;
-  emptyTitle: string;
-  history?: boolean;
-}) {
+function DayView({ date, occurrences, onCreate, onOpen }: { date: Date; occurrences: ScheduledBackupCalendarOccurrence[]; onCreate: (date: Date) => void; onOpen: (occurrence: ScheduledBackupCalendarOccurrence) => void }) {
+  const dayOccurrences = occurrences.filter((item) => localDateKey(new Date(item.window_starts_at)) === localDateKey(date));
+  return (
+    <div className="calendar-time-grid calendar-day-view">
+      <div className="calendar-time-labels">{HOURS.map((hour) => <div key={hour}>{hourLabel(hour)}</div>)}</div>
+      <div className="calendar-time-column" onDoubleClick={(event) => onCreate(slotDateFromClick(date, event))}>
+        {HOURS.map((hour) => <button aria-label={`Creer a ${hourLabel(hour)}`} className="calendar-hour-line" key={hour} onClick={() => onCreate(withHour(date, hour))} type="button" />)}
+        {dayOccurrences.map((occurrence) => <OccurrenceBlock key={occurrence.occurrence_id} occurrence={occurrence} onOpen={onOpen} />)}
+      </div>
+    </div>
+  );
+}
+
+function WeekView({ start, occurrences, onCreate, onOpen }: { start: Date; occurrences: ScheduledBackupCalendarOccurrence[]; onCreate: (date: Date) => void; onOpen: (occurrence: ScheduledBackupCalendarOccurrence) => void }) {
+  const days = Array.from({ length: 7 }, (_, index) => addDays(start, index));
+  return (
+    <div className="calendar-week-wrap">
+      <div className="calendar-week-header">
+        <div />
+        {days.map((day) => <button className="calendar-week-day-title" key={localDateKey(day)} onClick={() => onCreate(defaultEventDate(day))} type="button">{weekdayTitle(day)}</button>)}
+      </div>
+      <div className="calendar-week-grid">
+        <div className="calendar-time-labels">{HOURS.map((hour) => <div key={hour}>{hourLabel(hour)}</div>)}</div>
+        {days.map((day) => {
+          const dayOccurrences = occurrences.filter((item) => localDateKey(new Date(item.window_starts_at)) === localDateKey(day));
+          return (
+            <div className="calendar-time-column" key={localDateKey(day)}>
+              {HOURS.map((hour) => <button aria-label={`Creer ${localDateKey(day)} ${hourLabel(hour)}`} className="calendar-hour-line" key={hour} onClick={() => onCreate(withHour(day, hour))} type="button" />)}
+              {dayOccurrences.map((occurrence) => <OccurrenceBlock key={occurrence.occurrence_id} occurrence={occurrence} onOpen={onOpen} />)}
+            </div>
+          );
+        })}
+      </div>
+      <div className="calendar-agenda-fallback">
+        {occurrences.length === 0 ? <EmptyState title="Aucun evenement cette semaine" /> : occurrences.map((occurrence) => (
+          <CalendarListItem key={occurrence.occurrence_id} occurrence={occurrence} onOpen={onOpen} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MonthView({ month, occurrences, onCreate, onOpen }: { month: Date; occurrences: ScheduledBackupCalendarOccurrence[]; onCreate: (date: Date) => void; onOpen: (occurrence: ScheduledBackupCalendarOccurrence) => void }) {
+  const range = monthGridRange(month);
+  const days = Array.from({ length: 42 }, (_, index) => addDays(range.start, index));
+  const currentMonth = month.getMonth();
+  return (
+    <>
+      <div className="calendar-grid calendar-grid-header">
+        {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((day) => <div key={day}>{day}</div>)}
+      </div>
+      <div className="calendar-grid">
+        {days.map((day) => {
+          const items = occurrences.filter((item) => localDateKey(new Date(item.window_starts_at)) === localDateKey(day));
+          const visibleItems = items.slice(0, 3);
+          return (
+            <button className={day.getMonth() === currentMonth ? "calendar-day" : "calendar-day calendar-day-muted"} key={localDateKey(day)} onClick={() => onCreate(day)} type="button">
+              <span className="calendar-day-number">{day.getDate()}</span>
+              {visibleItems.map((occurrence) => (
+                <span className="calendar-event" key={occurrence.occurrence_id} onClick={(event) => { event.stopPropagation(); onOpen(occurrence); }}>
+                  <span className="calendar-event-title">{timeLabel(occurrence.window_starts_at)} {occurrence.title}</span>
+                  {occurrence.status ? <RunStatusBadge status={occurrence.status} compact /> : null}
+                </span>
+              ))}
+              {items.length > visibleItems.length ? <span className="calendar-more">+{items.length - visibleItems.length} autres</span> : null}
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function YearView({ year, occurrences, onDay, onMonth }: { year: number; occurrences: ScheduledBackupCalendarOccurrence[]; onDay: (date: Date) => void; onMonth: (date: Date) => void }) {
+  return (
+    <div className="calendar-year-grid">
+      {Array.from({ length: 12 }, (_, monthIndex) => {
+        const month = new Date(year, monthIndex, 1);
+        const range = monthGridRange(month);
+        const days = Array.from({ length: 42 }, (_, index) => addDays(range.start, index));
+        return (
+          <section className="calendar-mini-month" key={monthIndex}>
+            <button className="calendar-mini-title" onClick={() => onMonth(month)} type="button">{month.toLocaleDateString("fr-FR", { month: "long" })}</button>
+            <div className="calendar-mini-grid">
+              {days.map((day) => {
+                const hasEvent = occurrences.some((item) => localDateKey(new Date(item.window_starts_at)) === localDateKey(day));
+                return (
+                  <button
+                    className={[day.getMonth() === monthIndex ? "calendar-mini-day" : "calendar-mini-day calendar-day-muted", hasEvent ? "calendar-mini-day-event" : ""].join(" ")}
+                    key={localDateKey(day)}
+                    onClick={() => onDay(day)}
+                    type="button"
+                  >
+                    {day.getDate()}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function OccurrenceBlock({ occurrence, onOpen }: { occurrence: ScheduledBackupCalendarOccurrence; onOpen: (occurrence: ScheduledBackupCalendarOccurrence) => void }) {
+  const start = new Date(occurrence.window_starts_at);
+  const end = new Date(occurrence.window_ends_at);
+  const top = ((start.getHours() * 60 + start.getMinutes()) / 1440) * 100;
+  const height = Math.max(4, ((end.getTime() - start.getTime()) / 60000 / 1440) * 100);
+  const disk = occurrence.disk_label || occurrence.disk_serial;
+  return (
+    <button
+      className="calendar-time-event"
+      onClick={() => onOpen(occurrence)}
+      style={{ top: `${top}%`, height: `${height}%` }}
+      title={`${occurrence.title} - ${disk}`}
+      type="button"
+    >
+      <span className="calendar-event-title">{occurrence.title}</span>
+      <span className="calendar-event-disk">{disk}</span>
+      {occurrence.status ? <RunStatusBadge status={occurrence.status} compact /> : null}
+    </button>
+  );
+}
+
+function CalendarListItem({ occurrence, onOpen }: { occurrence: ScheduledBackupCalendarOccurrence; onOpen: (occurrence: ScheduledBackupCalendarOccurrence) => void }) {
+  return (
+    <button className="calendar-agenda-item" onClick={() => onOpen(occurrence)} type="button">
+      <span>{formatDate(occurrence.window_starts_at)} - {occurrence.title}</span>
+      {occurrence.status ? <RunStatusBadge status={occurrence.status} /> : null}
+    </button>
+  );
+}
+
+function RunTable({ runs, t, onAction, busy, emptyTitle, history = false }: { runs: ScheduledBackupRun[]; t: PlanningPageProps["t"]; onAction: (label: string, callback: () => Promise<unknown>) => Promise<void>; busy: string | null; emptyTitle: string; history?: boolean }) {
   if (runs.length === 0) return <EmptyState title={emptyTitle} />;
   return (
     <DataTable>
@@ -362,79 +511,86 @@ function RunTable({
 }
 
 function RunStatusBadge({ status, compact = false }: { status: string; compact?: boolean }) {
-  const tone = status === "success" ? "success" : status === "failure" || status === "missed" ? "danger" : status === "running" ? "info" : "warning";
-  return <StatusBadge tone={tone}>{compact ? shortStatus(status) : status}</StatusBadge>;
+  const tone = status === "success" ? "success" : status === "failure" || status === "missed" ? "danger" : status === "running" ? "info" : status === "cancelled" ? "neutral" : "warning";
+  return <StatusBadge tone={tone}>{compact ? shortStatus(status) : statusLabel(status)}</StatusBadge>;
 }
 
-function expandVisibleOccurrences(events: ScheduledBackupEvent[], runs: ScheduledBackupRun[], rangeStart: Date, rangeEnd: Date): CalendarOccurrence[] {
-  const runByEventAndTime = new Map(runs.map((run) => [`${run.event_id}:${new Date(run.scheduled_for).toISOString()}`, run]));
-  const occurrences: CalendarOccurrence[] = [];
-  for (const event of events) {
-    for (const startsAt of expandEventDates(event, rangeStart, rangeEnd)) {
-      const endsAt = new Date(startsAt.getTime() + event.window_duration_minutes * 60000);
-      const iso = startsAt.toISOString();
-      occurrences.push({
-        key: `${event.id}:${iso}`,
-        event,
-        startsAt: iso,
-        endsAt: endsAt.toISOString(),
-        run: runByEventAndTime.get(`${event.id}:${iso}`) ?? null,
-      });
-    }
+function calendarRange(view: CalendarView, date: Date) {
+  if (view === "day") {
+    return range(startOfDay(date), startOfDay(date));
   }
-  return occurrences.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  if (view === "week") {
+    const start = startOfWeek(date);
+    return range(start, addDays(start, 6));
+  }
+  if (view === "year") {
+    return range(new Date(date.getFullYear(), 0, 1), new Date(date.getFullYear(), 11, 31));
+  }
+  const month = monthGridRange(date);
+  return range(month.start, month.end);
 }
 
-function expandEventDates(event: ScheduledBackupEvent, rangeStart: Date, rangeEnd: Date) {
-  const start = new Date(event.window_starts_at);
-  const dates: Date[] = [];
-  if (event.recurrence_type === "once") {
-    if (start >= rangeStart && start <= rangeEnd) dates.push(start);
-    return dates;
-  }
-  let cursor = new Date(start);
-  const stepDays = event.recurrence_type === "daily" ? 1 : event.recurrence_type === "weekly" ? 7 : 0;
-  if (stepDays > 0) {
-    while (cursor < rangeStart) cursor = addDays(cursor, stepDays);
-    while (cursor <= rangeEnd) {
-      dates.push(new Date(cursor));
-      cursor = addDays(cursor, stepDays);
-    }
-    return dates;
-  }
-  while (cursor < rangeStart) cursor = addMonths(cursor, 1);
-  while (cursor <= rangeEnd) {
-    dates.push(new Date(cursor));
-    cursor = addMonths(cursor, 1);
-  }
-  return dates;
+function range(start: Date, end: Date) {
+  return { start, end, startKey: localDateKey(start), endKey: localDateKey(end) };
 }
 
-function buildCalendarDays(rangeStart: Date, occurrences: CalendarOccurrence[]) {
-  return Array.from({ length: 42 }, (_, index) => {
-    const date = addDays(rangeStart, index);
-    const key = localDateKey(date);
-    return {
-      date: key,
-      label: String(date.getDate()),
-      inMonth: date.getMonth() === addDays(rangeStart, 14).getMonth(),
-      occurrences: occurrences.filter((item) => localDateKey(new Date(item.startsAt)) === key),
-    };
-  });
-}
-
-function calendarRange(month: Date) {
+function monthGridRange(month: Date) {
   const first = startOfMonth(month);
   const day = first.getDay() || 7;
   const start = addDays(first, 1 - day);
   return { start, end: addDays(start, 41) };
 }
 
-function nextSundayAtOne() {
-  const date = new Date();
-  date.setDate(date.getDate() + ((7 - date.getDay()) % 7 || 7));
-  date.setHours(1, 0, 0, 0);
+function addPeriod(value: Date, view: CalendarView, delta: number) {
+  if (view === "day") return addDays(value, delta);
+  if (view === "week") return addDays(value, delta * 7);
+  if (view === "year") return new Date(value.getFullYear() + delta, 0, 1);
+  return addMonths(value, delta);
+}
+
+function periodTitle(view: CalendarView, date: Date) {
+  if (view === "day") return date.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+  if (view === "week") {
+    const start = startOfWeek(date);
+    const end = addDays(start, 6);
+    return `${start.toLocaleDateString("fr-FR", { day: "numeric" })} - ${end.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}`;
+  }
+  if (view === "year") return String(date.getFullYear());
+  return date.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+}
+
+function readStoredView(): CalendarView {
+  const value = window.localStorage.getItem("pbo.planning.calendarView");
+  return value === "day" || value === "week" || value === "month" || value === "year" ? value : "month";
+}
+
+function defaultEventDate(date: Date) {
+  const next = new Date(date);
+  next.setHours(1, 0, 0, 0);
+  return next;
+}
+
+function slotDateFromClick(date: Date, event: MouseEvent<HTMLDivElement>) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+  const hour = Math.floor(ratio * 24);
+  return withHour(date, hour);
+}
+
+function withHour(value: Date, hour: number) {
+  const date = new Date(value);
+  date.setHours(hour, 0, 0, 0);
   return date;
+}
+
+function startOfDay(value: Date) {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function startOfWeek(value: Date) {
+  const date = startOfDay(value);
+  const day = date.getDay() || 7;
+  return addDays(date, 1 - day);
 }
 
 function startOfMonth(value: Date) {
@@ -457,10 +613,6 @@ function localDateKey(value: Date) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
-function monthTitle(value: Date) {
-  return value.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
-}
-
 function toLocalInputValue(value: string | Date) {
   const date = value instanceof Date ? value : new Date(value);
   const offset = date.getTimezoneOffset() * 60000;
@@ -472,10 +624,36 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
 }
 
+function timeLabel(value: string) {
+  return new Date(value).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function hourLabel(hour: number) {
+  return `${String(hour).padStart(2, "0")}:00`;
+}
+
+function weekdayTitle(date: Date) {
+  return date.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+}
+
 function shortStatus(status: string) {
-  if (status === "waiting_for_confirmation") return "confirm";
-  if (status === "waiting_for_disk") return "disk";
-  return status;
+  if (status === "waiting_for_confirmation") return "Confirm.";
+  if (status === "waiting_for_disk") return "Disque";
+  return statusLabel(status);
+}
+
+function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: "En attente",
+    waiting_for_disk: "En attente disque",
+    waiting_for_confirmation: "Confirmation requise",
+    running: "En cours",
+    success: "Succes",
+    failure: "Echec",
+    missed: "Manque",
+    cancelled: "Annule",
+  };
+  return labels[status] ?? status;
 }
 
 function diskLabel(disk: ExternalDisk, compact = true) {
@@ -496,6 +674,10 @@ function selectedDiskTitle(disks: ExternalDisk[], serial: string) {
 
 function shortSerial(serial: string) {
   return serial.length <= 12 ? serial : `${serial.slice(0, 6)}...${serial.slice(-4)}`;
+}
+
+function sortOccurrences(a: ScheduledBackupCalendarOccurrence, b: ScheduledBackupCalendarOccurrence) {
+  return a.window_starts_at.localeCompare(b.window_starts_at);
 }
 
 function sortRunsAsc(a: ScheduledBackupRun, b: ScheduledBackupRun) {

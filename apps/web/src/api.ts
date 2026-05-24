@@ -16,6 +16,7 @@ import type {
   NotificationTestResult,
   ScheduledBackupEvent,
   ScheduledBackupEventPayload,
+  ScheduledBackupCalendarOccurrence,
   ScheduledBackupRun,
   Overview,
   PBSInventoryItem,
@@ -168,6 +169,11 @@ export function getPlanningOverview() {
 
 export function getScheduledBackupEvents() {
   return request<ScheduledBackupEvent[]>("/planning/events");
+}
+
+export function getScheduledBackupCalendar(start: string, end: string) {
+  const params = new URLSearchParams({ start, end });
+  return request<ScheduledBackupCalendarOccurrence[]>(`/planning/calendar?${params.toString()}`);
 }
 
 export function createScheduledBackupEvent(payload: ScheduledBackupEventPayload) {

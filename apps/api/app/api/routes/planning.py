@@ -1,7 +1,7 @@
 import logging
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from app.api.dependencies import DbSession
@@ -12,6 +12,7 @@ from app.schemas import (
     ScheduledBackupEventCreate,
     ScheduledBackupEventRead,
     ScheduledBackupEventUpdate,
+    ScheduledBackupCalendarOccurrenceRead,
     ScheduledBackupRunRead,
     UnplannedAssetRead,
 )
@@ -19,6 +20,7 @@ from app.services.planning import get_disk_planning, get_planning_overview, get_
 from app.services.planning_scheduler import (
     cancel_planning_run,
     confirm_planning_run,
+    expand_occurrences,
     next_occurrence,
     run_event_now,
 )
@@ -68,6 +70,67 @@ def list_events(db: DbSession) -> list[ScheduledBackupEventRead]:
         )
     )
     return [_event_read(db, event) for event in events]
+
+
+@router.get("/calendar", response_model=list[ScheduledBackupCalendarOccurrenceRead])
+def get_calendar_occurrences(
+    db: DbSession,
+    start: date = Query(..., description="Visible range start date, inclusive"),
+    end: date = Query(..., description="Visible range end date, inclusive"),
+) -> list[ScheduledBackupCalendarOccurrenceRead]:
+    if end < start:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="end must be on or after start")
+    if (end - start).days > 370:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="calendar range cannot exceed 370 days")
+
+    range_start = datetime.combine(start, time.min)
+    range_end = datetime.combine(end, time.max)
+    events = list(
+        db.scalars(
+            select(ScheduledBackupEvent)
+            .where(ScheduledBackupEvent.deleted_at.is_(None))
+            .order_by(ScheduledBackupEvent.window_starts_at.asc())
+        )
+    )
+    runs = list(
+        db.scalars(
+            select(ScheduledBackupRun).where(
+                ScheduledBackupRun.window_starts_at <= range_end,
+                ScheduledBackupRun.window_ends_at >= range_start,
+            )
+        )
+    )
+    run_by_event_and_schedule = {(run.event_id, run.scheduled_for): run for run in runs}
+    occurrences: list[ScheduledBackupCalendarOccurrenceRead] = []
+    for event in events:
+        if not event.enabled:
+            continue
+        for scheduled_for in expand_occurrences(event, range_start, range_end):
+            run = run_by_event_and_schedule.get((event.id, scheduled_for))
+            window_ends_at = scheduled_for + timedelta(minutes=event.window_duration_minutes)
+            occurrences.append(
+                ScheduledBackupCalendarOccurrenceRead(
+                    event_id=event.id,
+                    occurrence_id=f"{event.id}:{scheduled_for.isoformat()}",
+                    scheduled_for=scheduled_for,
+                    title=event.title,
+                    disk_serial=event.disk_serial,
+                    disk_label=event.disk_label_or_model,
+                    window_starts_at=scheduled_for,
+                    window_ends_at=window_ends_at,
+                    status=run.status if run else None,
+                    run_id=run.id if run else None,
+                    start_mode=event.start_mode,
+                    auto_eject_after_success=event.auto_eject_after_success,
+                )
+            )
+    logger.info(
+        "planning calendar expanded count=%s range_start=%s range_end=%s",
+        len(occurrences),
+        range_start.isoformat(timespec="seconds"),
+        range_end.isoformat(timespec="seconds"),
+    )
+    return sorted(occurrences, key=lambda item: item.window_starts_at)
 
 
 @router.post("/events", response_model=ScheduledBackupEventRead)

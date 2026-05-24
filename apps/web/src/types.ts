@@ -319,6 +319,21 @@ export type ScheduledBackupEventPayload = Omit<
   | "updated_at"
 >;
 
+export interface ScheduledBackupCalendarOccurrence {
+  event_id: number;
+  occurrence_id: string;
+  scheduled_for: string;
+  title: string;
+  disk_serial: string;
+  disk_label: string | null;
+  window_starts_at: string;
+  window_ends_at: string;
+  status: ScheduledBackupRunStatus | null;
+  run_id: number | null;
+  start_mode: ScheduledBackupStartMode;
+  auto_eject_after_success: boolean;
+}
+
 export interface NotificationStatus {
   enabled: boolean;
   provider: string;

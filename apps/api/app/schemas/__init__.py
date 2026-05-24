@@ -19,6 +19,7 @@ from app.schemas.planning import (
     ScheduledBackupEventCreate,
     ScheduledBackupEventRead,
     ScheduledBackupEventUpdate,
+    ScheduledBackupCalendarOccurrenceRead,
     ScheduledBackupRunRead,
     UnplannedAssetRead,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "ScheduledBackupEventCreate",
     "ScheduledBackupEventRead",
     "ScheduledBackupEventUpdate",
+    "ScheduledBackupCalendarOccurrenceRead",
     "ScheduledBackupRunRead",
     "ProxmoxStatusRead",
     "ProxmoxSyncRead",

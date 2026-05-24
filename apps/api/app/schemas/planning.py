@@ -102,3 +102,18 @@ class ScheduledBackupRunRead(UTCDateTimeModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ScheduledBackupCalendarOccurrenceRead(UTCDateTimeModel):
+    event_id: int
+    occurrence_id: str
+    scheduled_for: datetime
+    title: str
+    disk_serial: str
+    disk_label: str | None = None
+    window_starts_at: datetime
+    window_ends_at: datetime
+    status: ScheduledBackupRunStatus | None = None
+    run_id: int | None = None
+    start_mode: ScheduledBackupStartMode
+    auto_eject_after_success: bool

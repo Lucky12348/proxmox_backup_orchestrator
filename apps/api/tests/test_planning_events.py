@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from app.api.routes.planning import delete_event, list_events
+from app.api.routes.planning import delete_event, get_calendar_occurrences, list_events
 from app.db.base import Base
 from app.models import (
     ScheduledBackupEvent,
@@ -70,6 +70,24 @@ class PlanningEventTests(TestCase):
             [item.date().isoformat() for item in occurrences],
             ["2026-05-04", "2026-05-11", "2026-05-18", "2026-05-25"],
         )
+
+    def test_calendar_endpoint_expands_weekly_event_across_month(self):
+        event = _event(window_starts_at=datetime(2026, 5, 4, 1, 0, 0))
+        self.session.add(event)
+        self.session.commit()
+
+        occurrences = get_calendar_occurrences(
+            self.session,
+            start=datetime(2026, 5, 1).date(),
+            end=datetime(2026, 5, 31).date(),
+        )
+
+        self.assertEqual(
+            [item.window_starts_at.date().isoformat() for item in occurrences],
+            ["2026-05-04", "2026-05-11", "2026-05-18", "2026-05-25"],
+        )
+        self.assertEqual(occurrences[0].title, "Weekly backup")
+        self.assertEqual(occurrences[0].disk_serial, "USB-123")
 
     def test_delete_missing_event_returns_not_found_not_500(self):
         with self.assertRaises(HTTPException) as raised:
