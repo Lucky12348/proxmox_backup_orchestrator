@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -11,6 +11,12 @@ class ExternalDisk(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     serial_number: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    reported_serial_number: Mapped[str | None] = mapped_column(String(255))
+    reported_display_name: Mapped[str | None] = mapped_column(String(255))
+    reported_model_name: Mapped[str | None] = mapped_column(String(255))
+    reported_mount_path: Mapped[str | None] = mapped_column(String(255))
+    canonical_serial_number: Mapped[str | None] = mapped_column(String(255), index=True)
+    serial_aliases: Mapped[list[str] | None] = mapped_column(JSON)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     capacity_gb: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     connected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

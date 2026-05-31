@@ -34,6 +34,12 @@ export interface AssetIgnore {
 export interface ExternalDisk {
   id: number;
   serial_number: string;
+  reported_serial_number: string | null;
+  reported_display_name: string | null;
+  reported_model_name: string | null;
+  reported_mount_path: string | null;
+  canonical_serial_number: string | null;
+  serial_aliases: string[] | null;
   display_name: string;
   capacity_gb: number;
   connected: boolean;

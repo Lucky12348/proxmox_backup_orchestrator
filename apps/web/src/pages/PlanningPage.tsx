@@ -106,7 +106,8 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
   }
 
   function openNewEvent(date: Date) {
-    const firstDisk = data.disks[0];
+    const usableDisks = data.disks.filter(isUsablePlanningDisk);
+    const firstDisk = usableDisks[0];
     setForm({
       ...DEFAULT_FORM,
       disk_serial: firstDisk?.serial_number ?? "",
@@ -306,10 +307,10 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
             <div className="planning-form-grid">
               <label>Titre<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
               <label>Disque<select className="truncate-select" value={form.disk_serial} title={selectedDiskTitle(data.disks, form.disk_serial)} onChange={(event) => {
-                const disk = data.disks.find((item) => item.serial_number === event.target.value);
+                const disk = data.disks.filter(isUsablePlanningDisk).find((item) => item.serial_number === event.target.value);
                 setForm({ ...form, disk_serial: event.target.value, disk_label_or_model: disk ? diskLabel(disk) : event.target.value });
               }}>
-                {data.disks.map((disk) => <option key={disk.serial_number} title={diskLabel(disk, false)} value={disk.serial_number}>{diskOptionLabel(disk)}</option>)}
+                {data.disks.filter(isUsablePlanningDisk).map((disk) => <option key={disk.serial_number} title={diskLabel(disk, false)} value={disk.serial_number}>{diskOptionLabel(disk)}</option>)}
               </select></label>
               <label>Datastore<input value={form.datastore} onChange={(event) => setForm({ ...form, datastore: event.target.value })} /></label>
               <label>Recurrence<select value={form.recurrence_type} onChange={(event) => setForm({ ...form, recurrence_type: event.target.value as EventForm["recurrence_type"] })}>
@@ -699,6 +700,10 @@ function diskLabel(disk: ExternalDisk, compact = true) {
 
 function diskOptionLabel(disk: ExternalDisk) {
   return diskLabel(disk, true);
+}
+
+function isUsablePlanningDisk(disk: ExternalDisk) {
+  return disk.capacity_gb > 0 && disk.candidate_type !== "unusable";
 }
 
 function selectedDiskTitle(disks: ExternalDisk[], serial: string) {

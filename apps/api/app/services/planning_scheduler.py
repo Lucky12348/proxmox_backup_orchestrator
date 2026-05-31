@@ -21,6 +21,7 @@ from app.models import (
     ScheduledBackupStartMode,
 )
 from app.services.disk_eject import eject_dedicated_external_disk
+from app.services.disk_identity import serial_aliases, serials_match
 from app.services.external_backups import execute_external_backup_run, run_external_backup
 from app.services.notifications import (
     notify_backup_failure,
@@ -114,10 +115,10 @@ def handle_disk_detected(db: Session, disk: ExternalDisk, now: datetime | None =
             select(ScheduledBackupEvent).where(
                 ScheduledBackupEvent.enabled.is_(True),
                 ScheduledBackupEvent.deleted_at.is_(None),
-                ScheduledBackupEvent.disk_serial == disk.serial_number,
             )
         )
     )
+    events = [event for event in events if _disk_matches_event_serial(disk, event.disk_serial)]
     for event in events:
         for occurrence in expand_occurrences(event, current_time - timedelta(hours=24), current_time + timedelta(hours=1)):
             _ensure_run(db, event, occurrence)
@@ -134,7 +135,7 @@ def handle_disk_detected(db: Session, disk: ExternalDisk, now: datetime | None =
     )
     for run in runs:
         event = db.get(ScheduledBackupEvent, run.event_id)
-        if event is None or event.deleted_at is not None or event.disk_serial != disk.serial_number:
+        if event is None or event.deleted_at is not None or not _disk_matches_event_serial(disk, event.disk_serial):
             continue
         if not (run.window_starts_at <= current_time <= run.window_ends_at):
             continue
@@ -327,7 +328,7 @@ def _start_run(
         run.updated_at = now
         db.add(run)
         return
-    disk = db.scalar(select(ExternalDisk).where(ExternalDisk.serial_number == event.disk_serial).limit(1))
+    disk = _get_present_disk(db, event.disk_serial) or _get_disk_by_serial_identity(db, event.disk_serial)
     if disk is None:
         run.status = ScheduledBackupRunStatus.WAITING_FOR_DISK
         run.updated_at = now
@@ -383,7 +384,7 @@ def _sync_linked_backup_state(db: Session, event: ScheduledBackupEvent, run: Sch
     event.last_completed_at = run.finished_at
     db.add_all([event, run])
     if run.status == ScheduledBackupRunStatus.SUCCESS and event.auto_eject_after_success:
-        disk = db.scalar(select(ExternalDisk).where(ExternalDisk.serial_number == event.disk_serial).limit(1))
+        disk = _get_disk_by_serial_identity(db, event.disk_serial)
         if disk is not None:
             try:
                 eject_dedicated_external_disk(db, disk.id)
@@ -417,14 +418,32 @@ def _ensure_run(db: Session, event: ScheduledBackupEvent, occurrence: datetime) 
 
 
 def _get_present_disk(db: Session, serial: str) -> ExternalDisk | None:
-    return db.scalar(
-        select(ExternalDisk)
-        .where(
-            ExternalDisk.serial_number == serial,
-            ExternalDisk.presence_state == "present",
-        )
-        .limit(1)
-    )
+    for disk in db.scalars(select(ExternalDisk).where(ExternalDisk.presence_state == "present")):
+        if _disk_matches_event_serial(disk, serial):
+            return disk
+    return None
+
+
+def _get_disk_by_serial_identity(db: Session, serial: str) -> ExternalDisk | None:
+    exact = db.scalar(select(ExternalDisk).where(ExternalDisk.serial_number == serial).limit(1))
+    if exact is not None:
+        return exact
+    for disk in db.scalars(select(ExternalDisk)):
+        if _disk_matches_event_serial(disk, serial):
+            return disk
+    return None
+
+
+def _disk_matches_event_serial(disk: ExternalDisk, event_serial: str) -> bool:
+    if serials_match(disk.serial_number, event_serial):
+        return True
+    if disk.reported_serial_number and serials_match(disk.reported_serial_number, event_serial):
+        return True
+    event_aliases = set(serial_aliases(event_serial))
+    disk_aliases = set(disk.serial_aliases or [])
+    if disk.canonical_serial_number:
+        disk_aliases.add(disk.canonical_serial_number)
+    return bool(event_aliases & disk_aliases)
 
 
 def _external_backup_running(db: Session) -> bool:

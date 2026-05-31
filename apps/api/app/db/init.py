@@ -64,6 +64,12 @@ def ensure_external_disk_schema() -> None:
     existing_columns = {column["name"] for column in inspector.get_columns("external_disks")}
     column_statements = {
         "filesystem_type": "ALTER TABLE external_disks ADD COLUMN filesystem_type VARCHAR(64)",
+        "reported_serial_number": "ALTER TABLE external_disks ADD COLUMN reported_serial_number VARCHAR(255)",
+        "reported_display_name": "ALTER TABLE external_disks ADD COLUMN reported_display_name VARCHAR(255)",
+        "reported_model_name": "ALTER TABLE external_disks ADD COLUMN reported_model_name VARCHAR(255)",
+        "reported_mount_path": "ALTER TABLE external_disks ADD COLUMN reported_mount_path VARCHAR(255)",
+        "canonical_serial_number": "ALTER TABLE external_disks ADD COLUMN canonical_serial_number VARCHAR(255)",
+        "serial_aliases": "ALTER TABLE external_disks ADD COLUMN serial_aliases JSON",
         "model_name": "ALTER TABLE external_disks ADD COLUMN model_name VARCHAR(255)",
         "mount_path": "ALTER TABLE external_disks ADD COLUMN mount_path VARCHAR(255)",
         "last_seen_at": "ALTER TABLE external_disks ADD COLUMN last_seen_at TIMESTAMP",
@@ -187,6 +193,13 @@ def ensure_notification_preferences_schema() -> None:
         for column_name, statement in column_statements.items():
             if column_name not in existing_columns:
                 connection.execute(text(statement))
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_external_disks_canonical_serial_number "
+                "ON external_disks (canonical_serial_number)"
+            )
+        )
 
 
 def ensure_asset_ignore_schema() -> None:

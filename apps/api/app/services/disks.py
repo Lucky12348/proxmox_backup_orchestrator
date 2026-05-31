@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models import AgentHeartbeat, ExternalDisk, ScheduledBackupEvent
 from app.schemas.agent import AgentDiskReportCreate, AgentHeartbeatCreate
+from app.services.disk_identity import canonical_serial_number, serial_aliases, serials_match
 from app.services.notifications import (
     get_disk_detection_notify_cooldown_seconds,
     notify_known_disk_detected,
@@ -16,6 +17,7 @@ from app.services.planning_scheduler import handle_disk_detected
 
 
 logger = logging.getLogger(__name__)
+ZERO_SIZE_DISK_MESSAGE = "Disque détecté mais taille 0B — port/câble/initialisation USB probablement défaillant."
 
 
 def has_agent_disks(db: Session) -> bool:
@@ -77,7 +79,7 @@ def record_agent_heartbeat(db: Session, payload: AgentHeartbeatCreate) -> AgentH
 def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> list[ExternalDisk]:
     observed_at = payload.observed_at.replace(tzinfo=None)
     upserted: list[ExternalDisk] = []
-    reported_serials = {item.serial_number for item in payload.disks}
+    reported_aliases = {alias for item in payload.disks for alias in serial_aliases(item.serial_number)}
     detection_notifications: list[tuple[str, ExternalDisk]] = []
     planning_detections: list[ExternalDisk] = []
 
@@ -118,32 +120,54 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
     )
 
     for item in payload.disks:
-        disk = db.scalar(
-            select(ExternalDisk).where(ExternalDisk.serial_number == item.serial_number)
-        )
+        incoming_canonical = canonical_serial_number(item.serial_number)
+        incoming_aliases = serial_aliases(item.serial_number)
+        disk = _find_existing_disk_by_serial_identity(db, item.serial_number)
+        unusable_zero_size = item.capacity_gb <= 0
 
         if disk is None:
             disk = ExternalDisk(
-                serial_number=item.serial_number,
+                serial_number=incoming_canonical or item.serial_number,
                 dedicated_backup_disk=True,
                 allow_existing_data=False,
                 source="agent",
                 active=True,
                 trusted=item.trusted,
             )
+            if unusable_zero_size:
+                disk.dedicated_backup_disk = False
+                disk.trusted = False
             previous_presence = "never_seen"
-            logger.debug("disk classified as new because serial %s was not found", item.serial_number)
+            logger.debug("disk classified as new because serial %s canonical %s was not found", item.serial_number, incoming_canonical)
         else:
             previous_presence = disk.presence_state or ("present" if disk.connected else "absent")
-            logger.debug("disk classified as known because serial %s matched disk id %s", item.serial_number, disk.id)
+            logger.debug(
+                "disk classified as known because serial %s canonical %s matched disk id %s",
+                item.serial_number,
+                incoming_canonical,
+                disk.id,
+            )
 
-        disk.display_name = item.display_name
-        disk.model_name = item.model_name
+        previous_serial = disk.serial_number
+        disk.reported_serial_number = item.serial_number
+        disk.reported_display_name = item.display_name
+        disk.reported_model_name = item.model_name
+        disk.reported_mount_path = item.mount_path
+        disk.canonical_serial_number = incoming_canonical or disk.canonical_serial_number
+        disk.serial_aliases = _merge_aliases(disk.serial_aliases, [*incoming_aliases, *serial_aliases(previous_serial)])
+        if not disk.serial_number or serials_match(disk.serial_number, item.serial_number):
+            disk.serial_number = disk.canonical_serial_number or disk.serial_number or item.serial_number
+        disk.display_name = _reconcile_display_name(disk.display_name, item.display_name)
+        disk.model_name = _reconcile_model_name(disk.model_name, item.model_name)
         disk.capacity_gb = item.capacity_gb
         disk.filesystem_type = _reconcile_filesystem_type(disk, item)
         disk.mount_path = _reconcile_mount_path(disk, item)
-        disk.detection_reason = item.detection_reason
-        disk.candidate_type = item.candidate_type
+        disk.detection_reason = ZERO_SIZE_DISK_MESSAGE if unusable_zero_size else item.detection_reason
+        disk.candidate_type = "unusable" if unusable_zero_size else item.candidate_type
+        if unusable_zero_size:
+            disk.trusted = False
+            disk.dedicated_backup_disk = False
+            disk.allow_existing_data = False
         disk.connected = True if _is_pbs_handoff_disk(disk) else item.connected
         disk.presence_state = "present" if disk.connected else "absent"
         disk.last_seen_at = observed_at
@@ -153,14 +177,15 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
 
         db.add(disk)
         upserted.append(disk)
-        if disk.connected and previous_presence in {"never_seen", "absent"}:
+        if disk.connected and previous_presence in {"never_seen", "absent"} and not _is_unusable_disk(disk):
             planning_detections.append(disk)
             if _disk_detection_cooldown_elapsed(disk, observed_at):
                 detection_notifications.append(("new" if previous_presence == "never_seen" else "known", disk))
                 disk.last_detection_notified_at = observed_at
 
     for disk in stale_disks:
-        if disk.serial_number in reported_serials:
+        existing_aliases = set(serial_aliases(disk.serial_number)) | set(disk.serial_aliases or [])
+        if existing_aliases & reported_aliases:
             continue
 
         if _is_pbs_handoff_disk(disk):
@@ -186,11 +211,13 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
     for detection_type, disk in detection_notifications:
         try:
             matched_planned_disk = bool(
-                db.scalar(
-                    select(exists().where(ScheduledBackupEvent.disk_serial == disk.serial_number))
-                )
+                any(_disk_matches_event_serial(disk, event.disk_serial) for event in db.scalars(select(ScheduledBackupEvent)))
             )
-            description = _format_disk_detection_description(disk, matched_planned_disk=matched_planned_disk)
+            description = _format_disk_detection_description(
+                disk,
+                matched_planned_disk=matched_planned_disk,
+                matched_existing_serial=disk.serial_number,
+            )
             if detection_type == "new":
                 notify_new_disk_detected(description)
             else:
@@ -207,6 +234,43 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
     return upserted
 
 
+def _find_existing_disk_by_serial_identity(db: Session, reported_serial: str) -> ExternalDisk | None:
+    exact = db.scalar(
+        select(ExternalDisk)
+        .where(
+            or_(
+                ExternalDisk.serial_number == reported_serial,
+                ExternalDisk.reported_serial_number == reported_serial,
+            )
+        )
+        .limit(1)
+    )
+    if exact is not None:
+        return exact
+
+    canonical = canonical_serial_number(reported_serial)
+    if canonical:
+        by_canonical = db.scalar(
+            select(ExternalDisk)
+            .where(ExternalDisk.canonical_serial_number == canonical)
+            .limit(1)
+        )
+        if by_canonical is not None:
+            return by_canonical
+
+    incoming_aliases = set(serial_aliases(reported_serial))
+    for disk in db.scalars(select(ExternalDisk).where(ExternalDisk.serial_number.not_like("agent-report::%"))):
+        existing_aliases = set(serial_aliases(disk.serial_number))
+        if disk.reported_serial_number:
+            existing_aliases.update(serial_aliases(disk.reported_serial_number))
+        if disk.canonical_serial_number:
+            existing_aliases.add(disk.canonical_serial_number)
+        existing_aliases.update(disk.serial_aliases or [])
+        if incoming_aliases & existing_aliases:
+            return disk
+    return None
+
+
 def _reconcile_mount_path(disk: ExternalDisk, item) -> str | None:
     incoming = _normalize_optional_string(item.mount_path)
     existing = _normalize_optional_string(disk.mount_path)
@@ -215,6 +279,55 @@ def _reconcile_mount_path(disk: ExternalDisk, item) -> str | None:
     if existing:
         return existing
     return incoming
+
+
+def _reconcile_display_name(existing: str | None, incoming: str | None) -> str:
+    existing_clean = _normalize_optional_string(existing)
+    incoming_clean = _normalize_optional_string(incoming)
+    if not existing_clean:
+        return incoming_clean or "External disk"
+    if not incoming_clean:
+        return existing_clean
+    if _is_bridge_name(incoming_clean) and not _is_bridge_name(existing_clean):
+        return existing_clean
+    return existing_clean
+
+
+def _reconcile_model_name(existing: str | None, incoming: str | None) -> str | None:
+    existing_clean = _normalize_optional_string(existing)
+    incoming_clean = _normalize_optional_string(incoming)
+    if not existing_clean:
+        return incoming_clean
+    if not incoming_clean:
+        return existing_clean
+    if _is_bridge_name(incoming_clean) and not _is_bridge_name(existing_clean):
+        return existing_clean
+    return existing_clean
+
+
+def _is_bridge_name(value: str) -> bool:
+    clean = value.strip().casefold()
+    return clean in {"game drive", "external usb", "usb disk", "usb storage", "mass storage"}
+
+
+def _merge_aliases(existing: list[str] | None, incoming: list[str]) -> list[str]:
+    merged: list[str] = []
+    for value in [*(existing or []), *incoming]:
+        if value and value not in merged:
+            merged.append(value)
+    return merged
+
+
+def _disk_matches_event_serial(disk: ExternalDisk, event_serial: str) -> bool:
+    if serials_match(disk.serial_number, event_serial):
+        return True
+    if disk.reported_serial_number and serials_match(disk.reported_serial_number, event_serial):
+        return True
+    event_aliases = set(serial_aliases(event_serial))
+    disk_aliases = set(disk.serial_aliases or [])
+    if disk.canonical_serial_number:
+        disk_aliases.add(disk.canonical_serial_number)
+    return bool(event_aliases & disk_aliases)
 
 
 def _reconcile_filesystem_type(disk: ExternalDisk, item) -> str | None:
@@ -250,13 +363,26 @@ def _disk_detection_cooldown_elapsed(disk: ExternalDisk, observed_at: datetime) 
     return (observed_at - previous).total_seconds() >= get_disk_detection_notify_cooldown_seconds()
 
 
-def _format_disk_detection_description(disk: ExternalDisk, *, matched_planned_disk: bool = False) -> str:
-    parts = []
+def _format_disk_detection_description(
+    disk: ExternalDisk,
+    *,
+    matched_planned_disk: bool = False,
+    matched_existing_serial: str | None = None,
+) -> str:
+    parts = [f"Disque: {disk.display_name}"]
     if disk.model_name:
         parts.append(f"Modele: {disk.model_name}")
-    parts.append(f"Serie: {disk.serial_number}")
+    if disk.reported_serial_number:
+        parts.append(f"Serie reportee: {disk.reported_serial_number}")
+    parts.append(f"Serie canonique: {disk.canonical_serial_number or canonical_serial_number(disk.serial_number)}")
+    if matched_existing_serial:
+        parts.append(f"Serie existante: {matched_existing_serial}")
     if disk.mount_path:
         parts.append(f"Chemin: {disk.mount_path}")
+    if disk.proxmox_usb_mapping:
+        parts.append(f"USB: {disk.proxmox_usb_mapping}")
+    if disk.detection_reason:
+        parts.append(f"Detection: {disk.detection_reason}")
     parts.append("Disque planifie: oui" if matched_planned_disk else "Disque planifie: non")
     capacity = disk.usable_capacity_gb or disk.capacity_gb
     if capacity:
@@ -279,6 +405,10 @@ def _preferred_disk_visibility_condition():
         ExternalDisk.pbs_handoff_slot.is_not(None),
         ExternalDisk.handoff_status.in_(["attached_to_pbs", "visible_on_pbs", "ejected"]),
     )
+
+
+def _is_unusable_disk(disk: ExternalDisk) -> bool:
+    return disk.capacity_gb <= 0 or disk.candidate_type == "unusable"
 
 
 def get_agent_status(db: Session) -> dict[str, datetime | str | bool | int | None]:

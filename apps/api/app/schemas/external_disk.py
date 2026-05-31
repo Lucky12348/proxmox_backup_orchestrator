@@ -10,6 +10,12 @@ class ExternalDiskRead(UTCDateTimeModel):
 
     id: int
     serial_number: str
+    reported_serial_number: str | None
+    reported_display_name: str | None
+    reported_model_name: str | None
+    reported_mount_path: str | None
+    canonical_serial_number: str | None
+    serial_aliases: list[str] | None
     display_name: str
     capacity_gb: int
     connected: bool

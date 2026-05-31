@@ -45,7 +45,16 @@ def update_disk(
     if disk is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Disk not found")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    values = payload.model_dump(exclude_unset=True)
+    if (disk.capacity_gb <= 0 or disk.candidate_type == "unusable") and (
+        values.get("trusted") is True or values.get("dedicated_backup_disk") is True
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Disque détecté mais taille 0B — port/câble/initialisation USB probablement défaillant.",
+        )
+
+    for field, value in values.items():
         setattr(disk, field, value)
 
     db.add(disk)

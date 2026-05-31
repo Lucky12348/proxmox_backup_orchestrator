@@ -53,7 +53,9 @@ export function DisksPage({
               </tr>
             </thead>
             <tbody>
-              {data.disks.map((disk) => (
+              {data.disks.map((disk) => {
+                const unusable = isUnusableDisk(disk);
+                return (
                 <tr key={disk.id}>
                   <td>
                     <div style={{ fontWeight: 500, color: "var(--t1)", fontSize: 13 }}>
@@ -62,6 +64,16 @@ export function DisksPage({
                     <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>
                       {disk.serial_number}
                       {disk.model_name ? ` - ${disk.model_name}` : ""}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 4 }}>
+                      <div>{t.diskCanonicalSerial}: {disk.canonical_serial_number ?? disk.serial_number}</div>
+                      <div>{t.diskReportedSerial}: {disk.reported_serial_number ?? disk.serial_number}</div>
+                      <div>{t.diskReportedModel}: {disk.reported_model_name ?? disk.model_name ?? t.notAvailable}</div>
+                      <div>{t.diskReportedPath}: {disk.reported_mount_path ?? disk.mount_path ?? t.notAvailable}</div>
+                      <div>{t.diskAliases}: {disk.serial_aliases?.join(", ") || t.notAvailable}</div>
+                      {disk.candidate_type === "unusable" && disk.detection_reason ? (
+                        <div style={{ color: "var(--danger)", marginTop: 4 }}>{disk.detection_reason}</div>
+                      ) : null}
                     </div>
                   </td>
                   <td>
@@ -77,7 +89,7 @@ export function DisksPage({
                       <input
                         type="checkbox"
                         checked={disk.trusted}
-                        disabled={savingKey === `disk-${disk.id}`}
+                        disabled={savingKey === `disk-${disk.id}` || unusable}
                         onChange={(event) =>
                           onDiskToggleRequest({
                             disk,
@@ -101,7 +113,7 @@ export function DisksPage({
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button
                         className="action-button"
-                        disabled={savingKey === `external-backup-${disk.id}` || !disk.connected || Boolean(activeExternalBackup)}
+                        disabled={savingKey === `external-backup-${disk.id}` || !disk.connected || unusable || Boolean(activeExternalBackup)}
                         onClick={() => {
                           if (activeExternalBackup) {
                             window.location.hash = "#activity";
@@ -111,7 +123,7 @@ export function DisksPage({
                         }}
                         type="button"
                         style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
-                        title={activeExternalBackup ? "Un backup externe est deja en cours" : undefined}
+                        title={unusable ? disk.detection_reason ?? undefined : activeExternalBackup ? "Un backup externe est deja en cours" : undefined}
                       >
                         {t.externalBackupAction}
                       </button>
@@ -127,11 +139,16 @@ export function DisksPage({
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </DataTable>
       )}
     </div>
   );
+}
+
+function isUnusableDisk(disk: DisksPageProps["data"]["disks"][number]) {
+  return disk.capacity_gb <= 0 || disk.candidate_type === "unusable";
 }
