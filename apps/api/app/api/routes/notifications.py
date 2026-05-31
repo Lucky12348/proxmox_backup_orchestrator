@@ -33,6 +33,7 @@ def get_notifications_status() -> NotificationStatusRead:
         environment_enabled=status.environment_enabled,
         preferences_enabled=status.preferences_enabled,
         disk_detection_notify_cooldown_seconds=status.disk_detection_notify_cooldown_seconds,
+        sources=status.sources,
     )
 
 
@@ -72,6 +73,7 @@ def _preferences_read(preferences) -> NotificationPreferencesRead:
         "low_coverage_threshold_percent": preferences.low_coverage_threshold_percent,
         "disk_detection_notify_cooldown_seconds": preferences.disk_detection_notify_cooldown_seconds,
         "updated_at": preferences.updated_at,
+        "source": preferences.source,
     }
     values.update(
         {

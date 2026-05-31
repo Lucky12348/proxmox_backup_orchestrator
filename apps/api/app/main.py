@@ -8,6 +8,7 @@ from app.api.routes.health import router as health_router
 from app.auth import validate_auth_settings
 from app.core.config import get_settings
 from app.db.init import create_tables, seed_database
+from app.services.notifications import validate_notification_settings
 from app.services.planning_scheduler import start_planning_scheduler, stop_planning_scheduler
 
 
@@ -17,6 +18,7 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     validate_auth_settings()
+    validate_notification_settings(settings)
     create_tables()
     if settings.app_env != "production":
         seed_database()

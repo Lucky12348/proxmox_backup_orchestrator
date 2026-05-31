@@ -48,3 +48,9 @@ class NotificationPreferencesTests(TestCase):
         self.assertTrue(preferences.events["backup_success"])
         self.assertIsNone(preferences.notifications_enabled_override)
         self.assertEqual(get_notification_preferences(self.session).events["backup_success"], True)
+        self.assertEqual(preferences.source, "environment/server value")
+
+    def test_database_preferences_report_override_source(self):
+        preferences = update_notification_preferences(self.session, {"notify_on_backup_success": False})
+
+        self.assertEqual(preferences.source, "database override")

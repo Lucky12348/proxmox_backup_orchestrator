@@ -15,6 +15,7 @@ class NotificationStatusRead(BaseModel):
     environment_enabled: bool = True
     preferences_enabled: bool | None = None
     disk_detection_notify_cooldown_seconds: int = 1800
+    sources: dict[str, str] = Field(default_factory=dict)
 
 
 class NotificationPreferencesRead(BaseModel):
@@ -35,6 +36,7 @@ class NotificationPreferencesRead(BaseModel):
     low_coverage_threshold_percent: float
     disk_detection_notify_cooldown_seconds: int
     updated_at: datetime | None = None
+    source: str = "environment/server value"
 
 
 class NotificationPreferencesUpdate(BaseModel):

@@ -13,7 +13,7 @@ from app.services.disk_eject import eject_dedicated_external_disk
 from app.services.external_backup_agent import AgentCommandResult
 from app.services.external_backups import execute_external_backup_run
 from app.services.maintenance import MaintenanceActionResult, MaintenanceCommandResult, MaintenanceComponentStatus
-from app.services.notifications import NotificationService, notify_low_coverage
+from app.services.notifications import NotificationService, notify_low_coverage, validate_notification_settings
 
 
 class _SessionContext:
@@ -65,6 +65,45 @@ class NotificationServiceTests(TestCase):
         self.assertFalse(sent)
         self.assertIn("network ***", "\n".join(logs.output))
         self.assertNotIn("secret-password", "\n".join(logs.output))
+
+    def test_validate_requires_ntfy_values_when_enabled(self):
+        settings = Settings(notifications_enabled=True, ntfy_base_url="", ntfy_topic="")
+
+        with (
+            patch.dict("app.services.notifications.os.environ", {"NOTIFICATIONS_ENABLED": "true"}, clear=True),
+            self.assertRaisesRegex(RuntimeError, "NTFY_BASE_URL, NTFY_TOPIC"),
+        ):
+            validate_notification_settings(settings)
+
+    def test_validate_requires_complete_auth_pair(self):
+        settings = Settings(
+            notifications_enabled=True,
+            ntfy_base_url="https://ntfy.example.test",
+            ntfy_topic="topic",
+        )
+
+        with (
+            patch.dict(
+                "app.services.notifications.os.environ",
+                {
+                    "NOTIFICATIONS_ENABLED": "true",
+                    "NTFY_BASE_URL": "https://ntfy.example.test",
+                    "NTFY_TOPIC": "topic",
+                    "NTFY_USERNAME": "pbo",
+                },
+                clear=True,
+            ),
+            self.assertRaisesRegex(RuntimeError, "set both NTFY_USERNAME and NTFY_PASSWORD"),
+        ):
+            validate_notification_settings(settings)
+
+    def test_validate_warns_for_public_ntfy_in_production(self):
+        settings = Settings(app_env="production", notifications_enabled=False, ntfy_base_url="https://ntfy.sh")
+
+        with self.assertLogs("app.services.notifications", level="WARNING") as logs:
+            validate_notification_settings(settings)
+
+        self.assertIn("NTFY_BASE_URL is https://ntfy.sh in production", "\n".join(logs.output))
 
 
 class NotificationEventWiringTests(TestCase):

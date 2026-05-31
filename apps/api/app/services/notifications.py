@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -19,6 +20,7 @@ _last_low_coverage_sent_at: float | None = None
 _AGENT_DEGRADED_COOLDOWN_SECONDS = 3600
 _LOW_COVERAGE_COOLDOWN_SECONDS = 3600
 PREFERENCE_ID = 1
+PUBLIC_NTFY_BASE_URL = "https://ntfy.sh"
 EVENT_FIELDS = {
     "backup_success": "notify_on_backup_success",
     "backup_failure": "notify_on_backup_failure",
@@ -49,6 +51,7 @@ class NotificationStatus:
     environment_enabled: bool
     preferences_enabled: bool | None
     disk_detection_notify_cooldown_seconds: int
+    sources: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,7 @@ class EffectiveNotificationPreferences:
     low_coverage_threshold_percent: float
     disk_detection_notify_cooldown_seconds: int
     updated_at: datetime | None = None
+    source: str = "environment/server value"
 
     def event_enabled(self, event_name: str) -> bool:
         return self.events.get(event_name, True)
@@ -123,6 +127,16 @@ class NotificationService:
             environment_enabled=self.settings.notifications_enabled,
             preferences_enabled=preferences.notifications_enabled_override,
             disk_detection_notify_cooldown_seconds=preferences.disk_detection_notify_cooldown_seconds,
+            sources={
+                "notifications_enabled": _environment_source(),
+                "provider": _environment_source(),
+                "base_url": _environment_source(),
+                "topic": _environment_source(),
+                "username": _environment_source(),
+                "events": preferences.source,
+                "low_coverage_threshold_percent": preferences.source,
+                "disk_detection_notify_cooldown_seconds": preferences.source,
+            },
         )
 
     @property
@@ -136,6 +150,33 @@ class NotificationService:
 
 def get_notification_service(settings: Settings | None = None) -> NotificationService:
     return NotificationService(settings)
+
+
+def validate_notification_settings(settings: Settings | None = None) -> None:
+    current_settings = settings or get_settings()
+    if current_settings.app_env == "production" and current_settings.ntfy_base_url.rstrip("/") == PUBLIC_NTFY_BASE_URL:
+        logger.warning("NTFY_BASE_URL is https://ntfy.sh in production; configure a private ntfy server.")
+
+    if not current_settings.notifications_enabled:
+        return
+
+    missing = [
+        name
+        for name in ("NTFY_BASE_URL", "NTFY_TOPIC")
+        if not (os.getenv(name) or "").strip()
+    ]
+    if missing:
+        raise RuntimeError(
+            "Notifications are enabled but required environment values are missing: "
+            + ", ".join(missing)
+        )
+
+    username_set = bool((os.getenv("NTFY_USERNAME") or "").strip())
+    password_set = bool((os.getenv("NTFY_PASSWORD") or "").strip())
+    if username_set != password_set:
+        raise RuntimeError(
+            "Notifications auth is partially configured: set both NTFY_USERNAME and NTFY_PASSWORD, or neither."
+        )
 
 
 def get_effective_notification_preferences(
@@ -457,6 +498,7 @@ def _merge_preferences(
         low_coverage_threshold_percent=stored.low_coverage_threshold_percent,
         disk_detection_notify_cooldown_seconds=stored.disk_detection_notify_cooldown_seconds,
         updated_at=stored.updated_at,
+        source="database override",
     )
 
 
@@ -479,6 +521,10 @@ def _mask_secret(value: str) -> str | None:
     if len(clean) <= 8:
         return "***"
     return f"{clean[:4]}...{clean[-4:]}"
+
+
+def _environment_source() -> str:
+    return "environment/server value"
 
 
 def _shorten(value: str, limit: int = 220) -> str:

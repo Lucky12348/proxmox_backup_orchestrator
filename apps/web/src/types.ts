@@ -401,6 +401,7 @@ export interface NotificationStatus {
   environment_enabled: boolean;
   preferences_enabled: boolean | null;
   disk_detection_notify_cooldown_seconds: number;
+  sources: Record<string, string>;
 }
 
 export interface NotificationPreferences {
@@ -421,6 +422,7 @@ export interface NotificationPreferences {
   low_coverage_threshold_percent: number;
   disk_detection_notify_cooldown_seconds: number;
   updated_at: string | null;
+  source: string;
 }
 
 export interface NotificationTestResult {

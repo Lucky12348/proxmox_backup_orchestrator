@@ -98,6 +98,12 @@ function stateLabel(state: ComponentUiState, t: SettingsPageProps["t"]) {
   return t.maintenanceUiState[state];
 }
 
+function notificationSourceLabel(source: string | undefined, t: SettingsPageProps["t"]) {
+  if (source === "database override") return t.notificationDatabaseOverride;
+  if (source === "environment/server value") return t.notificationEnvironmentValue;
+  return source ?? t.notAvailable;
+}
+
 function isNetworkRestartError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return /fetch|network|failed|load|timeout|aborted|reset|connexion|connection|internal server error|request failed with status 5\d\d|\b5\d\d\b/i.test(message);
@@ -633,6 +639,10 @@ export function SettingsPage({ t }: SettingsPageProps) {
             <span>{t.notificationStatus}</span>
             <strong>{notificationStatus?.enabled ? t.enabled : t.disabled}</strong>
           </div>
+          <div className="summary-row">
+            <span>{t.notificationSource}</span>
+            <strong>{notificationSourceLabel(notificationStatus?.sources?.notifications_enabled, t)}</strong>
+          </div>
           {notificationStatus && !notificationStatus.environment_enabled ? (
             <div className="summary-row">
               <span>{t.notificationEnvironmentDisabled}</span>
@@ -645,26 +655,36 @@ export function SettingsPage({ t }: SettingsPageProps) {
           </div>
           <div className="summary-row">
             <span>{t.notificationProvider}</span>
-            <strong>{notificationStatus?.provider ?? t.notAvailable}</strong>
+            <strong>{notificationStatus?.provider ?? t.notAvailable} ({notificationSourceLabel(notificationStatus?.sources?.provider, t)})</strong>
           </div>
           <div className="summary-row">
             <span>{t.notificationBaseUrl}</span>
-            <strong>{notificationStatus?.base_url ?? t.notAvailable}</strong>
+            <strong>{notificationStatus?.base_url ?? t.notAvailable} ({notificationSourceLabel(notificationStatus?.sources?.base_url, t)})</strong>
           </div>
           <div className="summary-row">
             <span>{t.notificationTopic}</span>
-            <strong>{notificationStatus?.topic ?? t.notAvailable}</strong>
+            <strong>{notificationStatus?.topic ?? t.notAvailable} ({notificationSourceLabel(notificationStatus?.sources?.topic, t)})</strong>
           </div>
           <div className="summary-row">
             <span>{t.notificationUsername}</span>
-            <strong>{notificationStatus?.username ?? t.notAvailable}</strong>
+            <strong>{notificationStatus?.username ?? t.notAvailable} ({notificationSourceLabel(notificationStatus?.sources?.username, t)})</strong>
           </div>
           <div className="summary-row">
             <span>{t.notificationLowCoverageThreshold}</span>
-            <strong>{notificationDraft ? `${notificationDraft.low_coverage_threshold_percent}%` : t.notAvailable}</strong>
+            <strong>
+              {notificationDraft ? `${notificationDraft.low_coverage_threshold_percent}%` : t.notAvailable}
+              {" "}
+              ({notificationSourceLabel(notificationStatus?.sources?.low_coverage_threshold_percent ?? notificationDraft?.source, t)})
+            </strong>
           </div>
         </div>
         <h3 className="settings-subtitle">{t.notificationPreferencesTitle}</h3>
+        <div className="integration-details">
+          <div className="summary-row">
+            <span>{t.notificationSource}</span>
+            <strong>{notificationSourceLabel(notificationDraft?.source ?? notificationStatus?.sources?.events, t)}</strong>
+          </div>
+        </div>
         <div className="settings-toggle-grid">
           <label className="settings-toggle-row">
             <span>{t.notificationGlobalEnabled}</span>

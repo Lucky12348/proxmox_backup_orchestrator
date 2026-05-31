@@ -122,6 +122,7 @@ def maintenance_update(
             ["git", "rev-parse", "HEAD"],
             ["git", "rev-parse", "@{u}"],
             ["git", "pull", "--ff-only"],
+            _notification_env_preflight_command(),
             _compose_command(settings),
         ],
         settings.timeout_seconds,
@@ -185,19 +186,30 @@ def _run(repo: Path, command: list[str], timeout_seconds: float) -> dict[str, An
         }
     if command == _env_file_check_command():
         env_file = repo / ".env"
+        template_file = repo / ".env.example"
         if not env_file.exists():
+            if not template_file.exists():
+                return {
+                    "command": _command_text(command),
+                    "stdout": None,
+                    "stderr": ".env not found and .env.example template is missing",
+                    "return_code": 1,
+                }
+            shutil.copyfile(template_file, env_file)
             return {
                 "command": _command_text(command),
-                "stdout": None,
-                "stderr": ".env not found at APP_REPO_PATH",
-                "return_code": 1,
+                "stdout": ".env created from template",
+                "stderr": None,
+                "return_code": 0,
             }
         return {
             "command": _command_text(command),
-            "stdout": ".env found at APP_REPO_PATH",
+            "stdout": ".env preserved",
             "stderr": None,
             "return_code": 0,
         }
+    if command == _notification_env_preflight_command():
+        return _notification_env_preflight(repo)
 
     try:
         completed = subprocess.run(
@@ -285,6 +297,38 @@ def _env_file_check_command() -> list[str]:
     return ["check-env-file", ".env"]
 
 
+def _notification_env_preflight_command() -> list[str]:
+    return ["preflight-notification-env", ".env"]
+
+
+def _notification_env_preflight(repo: Path) -> dict[str, Any]:
+    values = _read_env_file(repo / ".env")
+    enabled = _parse_bool(values.get("NOTIFICATIONS_ENABLED"), default=False)
+    base_url = values.get("NTFY_BASE_URL", "").rstrip("/")
+    warnings: list[str] = []
+    errors: list[str] = []
+
+    if not enabled:
+        warnings.append("NOTIFICATIONS_ENABLED=false; notification delivery is disabled.")
+    if base_url == "https://ntfy.sh":
+        warnings.append("NTFY_BASE_URL=https://ntfy.sh; configure your own ntfy server for production.")
+
+    if enabled:
+        required = ["NTFY_BASE_URL", "NTFY_TOPIC", "NTFY_USERNAME", "NTFY_PASSWORD"]
+        missing = [key for key in required if not values.get(key, "").strip()]
+        if missing:
+            errors.append("Missing required notification environment values: " + ", ".join(missing))
+        if base_url == "https://ntfy.sh":
+            errors.append("NTFY_BASE_URL must not use the public default when notifications are enabled.")
+
+    return {
+        "command": _command_text(_notification_env_preflight_command()),
+        "stdout": "Notification environment preflight passed." if not warnings else " ".join(warnings),
+        "stderr": "; ".join(errors) if errors else None,
+        "return_code": 1 if errors else 0,
+    }
+
+
 def _restart_agent_service_command(settings: Settings) -> list[str]:
     if shutil.which("systemd-run"):
         return [
@@ -369,6 +413,12 @@ def _read_env_file(path: Path) -> dict[str, str]:
         value = value.strip().strip("'").strip('"')
         values[key] = value
     return values
+
+
+def _parse_bool(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _compose_commands_payload(settings: Settings) -> dict[str, str]:
