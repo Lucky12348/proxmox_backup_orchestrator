@@ -76,6 +76,7 @@ export function ActivityPage({
                     <td>
                       <strong>{formatExternalBackupStep(run.current_step, t)}</strong>
                       <br />
+                      <ExternalBackupProgress run={run} language={language} t={t} />
                       {formatExternalBackupMessage(run.progress_message ?? run.message, t) ?? t.notAvailable}
                       <br />
                       <span className="muted-text">
@@ -221,6 +222,16 @@ function ExternalBackupRunDetails({
           <strong>{t.externalBackupProgress}:</strong> {formatExternalBackupStep(liveRun.current_step, t)} -{" "}
           {formatExternalBackupMessage(liveRun.progress_message, t) ?? t.notAvailable}
         </p>
+        <ExternalBackupProgress run={liveRun} language={language} t={t} detailed />
+        {liveRun.warning_messages?.map((warning) => (
+          <p className="warning-text" key={warning}>{warning}</p>
+        ))}
+        {liveRun.failed_groups && liveRun.failed_groups.length > 0 ? (
+          <p>
+            <strong>Groupes en erreur:</strong>{" "}
+            {liveRun.failed_groups.map((item) => `${item.group}: ${item.reason}`).join(", ")}
+          </p>
+        ) : null}
         <p>
           <strong>{t.externalBackupLastLogAt}:</strong>{" "}
           {formatDateTime(liveRun.last_log_at, language, t.notAvailable)}
@@ -267,6 +278,67 @@ function ExternalBackupRunDetails({
       </div>
     </details>
   );
+}
+
+function ExternalBackupProgress({
+  detailed = false,
+  language,
+  run,
+  t,
+}: {
+  detailed?: boolean;
+  language: ActivityPageProps["language"];
+  run: ExternalBackupRun;
+  t: ActivityPageProps["t"];
+}) {
+  const percent = run.progress_percent ?? null;
+  const groups =
+    run.completed_groups !== null && run.total_groups !== null
+      ? `${run.completed_groups} / ${run.total_groups} groupes`
+      : null;
+  const stale = run.status === "running" && run.last_progress_at
+    ? Date.now() - new Date(run.last_progress_at).getTime() > 900_000
+    : false;
+  return (
+    <div className="external-progress">
+      <div className="external-progress-bar" aria-hidden="true">
+        <div style={{ width: `${Math.max(0, Math.min(100, percent ?? 0))}%` }} />
+      </div>
+      <div className="external-progress-meta">
+        {percent !== null ? `${percent.toFixed(2)}%` : null}
+        {groups ? ` ${groups}` : null}
+        {run.current_group ? ` ${run.current_group}` : null}
+      </div>
+      {detailed ? (
+        <div className="external-progress-meta">
+          {run.current_snapshot ? `Snapshot: ${run.current_snapshot}. ` : ""}
+          {run.current_archive ? `Archive: ${run.current_archive}. ` : ""}
+          {run.downloaded_bytes !== null ? `Telecharge: ${formatBytes(run.downloaded_bytes)}. ` : ""}
+          {run.current_speed ? `Vitesse: ${run.current_speed}. ` : ""}
+          {run.elapsed_seconds !== null ? `Duree: ${formatDuration(run.elapsed_seconds)}. ` : ""}
+          {run.last_progress_at ? `Derniere progression: ${formatDateTime(run.last_progress_at, language, t.notAvailable)}.` : ""}
+        </div>
+      ) : null}
+      {stale ? <div className="warning-text">Aucune nouvelle progression depuis plus de 15 minutes</div> : null}
+    </div>
+  );
+}
+
+function formatBytes(value: number) {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let amount = value;
+  let unitIndex = 0;
+  while (amount >= 1024 && unitIndex < units.length - 1) {
+    amount /= 1024;
+    unitIndex += 1;
+  }
+  return `${amount.toFixed(unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
+}
+
+function formatDuration(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return minutes > 0 ? `${minutes} min ${remainingSeconds}s` : `${remainingSeconds}s`;
 }
 
 function isScrolledNearBottom(element: HTMLElement) {

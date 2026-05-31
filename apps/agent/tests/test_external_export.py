@@ -13,7 +13,9 @@ from agent.main import (
     _is_safe_pbs_fuser_line,
     _only_pbs_services_block_mount,
     bytes_to_gb,
+    cleanup_external_export_objects_result,
     eject_dedicated_pbs_datastore_result,
+    external_export_objects_status,
     is_initialized_pbs_datastore_path,
     loop_backing_file,
     prepare_dedicated_pbs_datastore_result,
@@ -646,6 +648,56 @@ class ExternalExportDatastoreCreateTests(TestCase):
                 )
 
         self.assertIn("appears to be running", str(raised.exception))
+
+    def test_admin_cleanup_refuses_active_task(self):
+        settings = AgentSettings()
+
+        with (
+            patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
+            patch("agent.main._list_pbs_resource_names", side_effect=[["pbo-export-sync-active"], []]),
+            patch("agent.main._is_sync_job_running", return_value=True),
+            patch("agent.main._pbo_operation_lock_paths", return_value=[]),
+        ):
+            result = cleanup_external_export_objects_result(settings)
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["active"])
+        self.assertIn("Refusing cleanup", result["message"])
+
+    def test_admin_cleanup_removes_only_stale_temp_jobs_and_remotes(self):
+        settings = AgentSettings()
+        commands: list[list[str]] = []
+
+        def fake_run(command: list[str], timeout_seconds: float) -> SubprocessResult:
+            commands.append(command)
+            return SubprocessResult(command, 0, "", "")
+
+        with (
+            patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
+            patch("agent.main._list_pbs_resource_names", side_effect=[["pbo-export-sync-stale"], ["pbo-export-remote-stale"]]),
+            patch("agent.main._is_sync_job_running", return_value=False),
+            patch("agent.main._pbo_operation_lock_paths", return_value=[]),
+            patch("agent.main.run_subprocess", side_effect=fake_run),
+        ):
+            result = cleanup_external_export_objects_result(settings)
+
+        self.assertTrue(result["ok"])
+        self.assertIn(["/usr/sbin/proxmox-backup-manager", "sync-job", "remove", "pbo-export-sync-stale"], commands)
+        self.assertIn(["/usr/sbin/proxmox-backup-manager", "remote", "remove", "pbo-export-remote-stale"], commands)
+        self.assertFalse(any(command[1:3] == ["datastore", "remove"] for command in commands))
+
+    def test_admin_status_reports_stale_temp_objects(self):
+        settings = AgentSettings()
+        with (
+            patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
+            patch("agent.main._list_pbs_resource_names", side_effect=[["pbo-export-sync-stale"], ["pbo-export-remote-stale"]]),
+            patch("agent.main._is_sync_job_running", return_value=False),
+            patch("agent.main._pbo_operation_lock_paths", return_value=[]),
+        ):
+            result = external_export_objects_status(settings)
+
+        self.assertFalse(result["active"])
+        self.assertEqual([item["kind"] for item in result["items"]], ["sync-job", "remote"])
 
     def _run_export_and_capture_calls(
         self,

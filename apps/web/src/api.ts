@@ -63,8 +63,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await response.text();
     let parsedDetail: string | undefined;
     try {
-      const parsed = JSON.parse(body) as { detail?: string };
-      parsedDetail = parsed.detail;
+      const parsed = JSON.parse(body) as { detail?: string | { message?: string } };
+      parsedDetail = typeof parsed.detail === "string" ? parsed.detail : parsed.detail?.message;
     } catch {
       parsedDetail = undefined;
     }

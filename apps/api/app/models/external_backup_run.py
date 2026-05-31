@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, String, Text
+from sqlalchemy import BigInteger, DateTime, Enum as SqlEnum, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -35,6 +35,21 @@ class ExternalBackupRun(Base):
     current_step: Mapped[str | None] = mapped_column(String(128))
     progress_message: Mapped[str | None] = mapped_column(Text)
     last_log_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    progress_percent: Mapped[float | None] = mapped_column(Float)
+    total_groups: Mapped[int | None] = mapped_column(Integer)
+    completed_groups: Mapped[int | None] = mapped_column(Integer)
+    current_group: Mapped[str | None] = mapped_column(String(255))
+    current_snapshot: Mapped[str | None] = mapped_column(String(255))
+    current_archive: Mapped[str | None] = mapped_column(String(255))
+    downloaded_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    current_speed: Mapped[str | None] = mapped_column(String(64))
+    last_progress_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    warning_messages: Mapped[list[str] | None] = mapped_column(JSON)
+    failed_groups: Mapped[list[dict[str, str]] | None] = mapped_column(JSON)
+    pbs_sync_job_id: Mapped[str | None] = mapped_column(String(255))
+    pbs_remote_id: Mapped[str | None] = mapped_column(String(255))
+    pbs_task_upid: Mapped[str | None] = mapped_column(Text)
+    elapsed_seconds: Mapped[int | None] = mapped_column(Integer)
     mode: Mapped[ExternalBackupMode] = mapped_column(
         SqlEnum(ExternalBackupMode, name="external_backup_mode", native_enum=False),
         nullable=False,

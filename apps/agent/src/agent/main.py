@@ -901,6 +901,8 @@ def run_external_export_result(
         "target_path": str(target),
         "datastore_name": datastore_name,
         "mode": mode,
+        "pbs_sync_job_id": sync_job_name,
+        "pbs_remote_id": remote_name,
         "command_summary": "\n".join(command_summaries),
         "execution_cwd": str(Path.cwd()),
         "stdout_log": "\n\n".join(chunk for chunk in stdout_logs if chunk) or None,
@@ -2263,6 +2265,160 @@ def _remove_stale_sync_job_lock(
     message = f"Removed stale sync job lock `{lock_path}`."
     stdout_logs.append(message)
     progress.post("cleanup", message)
+
+
+def external_export_objects_status(settings: AgentSettings | None = None) -> dict[str, Any]:
+    settings = settings or AgentSettings()
+    manager = shutil.which("proxmox-backup-manager")
+    if manager is None:
+        raise RuntimeError("Missing required host dependency: `proxmox-backup-manager` was not found in PATH.")
+
+    command_summaries: list[str] = []
+    stdout_logs: list[str] = []
+    stderr_logs: list[str] = []
+    sync_jobs = [
+        name
+        for name in _list_pbs_resource_names(manager, "sync-job", settings, command_summaries, stdout_logs, stderr_logs)
+        if name.startswith("pbo-export-sync-")
+    ]
+    remotes = [
+        name
+        for name in _list_pbs_resource_names(manager, "remote", settings, command_summaries, stdout_logs, stderr_logs)
+        if name.startswith("pbo-export-remote-")
+    ]
+
+    items: list[dict[str, Any]] = []
+    active = False
+    for name in sync_jobs:
+        lock_path = _sync_job_lock_path(name)
+        running = _is_sync_job_running(name, lock_path)
+        active = active or running
+        items.append(
+            {
+                "kind": "sync-job",
+                "name": name,
+                "path": None,
+                "status": "active" if running else "stale",
+                "safe_to_remove": not running,
+            }
+        )
+        if lock_path.exists():
+            items.append(
+                {
+                    "kind": "jobstate-lock",
+                    "name": lock_path.name,
+                    "path": str(lock_path),
+                    "status": "active" if running else "stale",
+                    "safe_to_remove": not running,
+                }
+            )
+
+    for remote in remotes:
+        items.append(
+            {
+                "kind": "remote",
+                "name": remote,
+                "path": None,
+                "status": "stale",
+                "safe_to_remove": not active,
+            }
+        )
+
+    for lock_path in _pbo_operation_lock_paths():
+        items.append(
+            {
+                "kind": "operation-lock",
+                "name": lock_path.name,
+                "path": str(lock_path),
+                "status": "active" if active else "stale",
+                "safe_to_remove": not active,
+            }
+        )
+
+    return {
+        "ok": True,
+        "success": True,
+        "active": active,
+        "message": "PBO temporary external export objects inspected.",
+        "items": items,
+        "command_summary": "\n".join(command_summaries),
+        "execution_cwd": str(Path.cwd()),
+        "stdout_log": "\n\n".join(stdout_logs) or None,
+        "stderr_log": "\n\n".join(stderr_logs) or None,
+        "return_code": 0,
+    }
+
+
+def cleanup_external_export_objects_result(settings: AgentSettings | None = None) -> dict[str, Any]:
+    settings = settings or AgentSettings()
+    status_payload = external_export_objects_status(settings)
+    if status_payload["active"]:
+        return {
+            "ok": False,
+            "success": False,
+            "active": True,
+            "message": "Refusing cleanup because a PBO PBS task or process is active.",
+            "items": status_payload["items"],
+            "return_code": 1,
+        }
+
+    manager = shutil.which("proxmox-backup-manager")
+    if manager is None:
+        raise RuntimeError("Missing required host dependency: `proxmox-backup-manager` was not found in PATH.")
+    command_summaries: list[str] = []
+    stdout_logs: list[str] = []
+    stderr_logs: list[str] = []
+    errors: list[str] = []
+    actions: list[str] = []
+
+    for item in status_payload["items"]:
+        if not item.get("safe_to_remove"):
+            continue
+        kind = item.get("kind")
+        name = item.get("name")
+        path = item.get("path")
+        if kind == "sync-job" and isinstance(name, str):
+            result = run_subprocess([manager, "sync-job", "remove", name], settings.export_timeout_seconds)
+            record_command_result(result, command_summaries, stdout_logs, stderr_logs)
+            actions.append(f"remove sync-job {name}")
+            if result.returncode != 0:
+                errors.append(format_command_failure(f"Failed to remove stale sync job `{name}`.", result))
+        elif kind == "remote" and isinstance(name, str):
+            result = run_subprocess([manager, "remote", "remove", name], settings.export_timeout_seconds)
+            record_command_result(result, command_summaries, stdout_logs, stderr_logs)
+            actions.append(f"remove remote {name}")
+            if result.returncode != 0:
+                errors.append(format_command_failure(f"Failed to remove stale remote `{name}`.", result))
+        elif kind in {"jobstate-lock", "operation-lock"} and isinstance(path, str):
+            lock_path = Path(path)
+            if lock_path.name == ".lock" or ".chunks" in lock_path.parts:
+                continue
+            if lock_path.exists():
+                lock_path.unlink()
+                actions.append(f"remove lock {lock_path}")
+
+    return {
+        "ok": not errors,
+        "success": not errors,
+        "active": False,
+        "message": "PBO temporary external export cleanup completed." if not errors else "PBO temporary cleanup completed with errors.",
+        "items": status_payload["items"],
+        "actions": actions,
+        "command_summary": "\n".join(command_summaries),
+        "execution_cwd": str(Path.cwd()),
+        "stdout_log": "\n\n".join([*stdout_logs, *actions]) or None,
+        "stderr_log": "\n\n".join([*stderr_logs, *errors]) or None,
+        "return_code": 0 if not errors else 1,
+    }
+
+
+def _pbo_operation_lock_paths() -> list[Path]:
+    candidates: list[Path] = []
+    for directory in (Path("/run/lock"), Path("/var/lock"), Path("/tmp")):
+        if not directory.exists():
+            continue
+        candidates.extend(path for path in directory.glob("pbo-wd-*") if path.is_file())
+    return candidates
 
 
 def cleanup_legacy_external_export_objects(settings: AgentSettings | None = None) -> dict[str, Any]:

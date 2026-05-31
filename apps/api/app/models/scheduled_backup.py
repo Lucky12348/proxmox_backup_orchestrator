@@ -24,6 +24,7 @@ class ScheduledBackupRunStatus(str, Enum):
     PENDING = "pending"
     WAITING_FOR_DISK = "waiting_for_disk"
     WAITING_FOR_CONFIRMATION = "waiting_for_confirmation"
+    WAITING_FOR_EXTERNAL_BACKUP = "waiting_for_external_backup"
     RUNNING = "running"
     SUCCESS = "success"
     FAILURE = "failure"

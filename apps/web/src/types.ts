@@ -232,6 +232,21 @@ export interface ExternalBackupRun {
   current_step: string | null;
   progress_message: string | null;
   last_log_at: string | null;
+  progress_percent: number | null;
+  total_groups: number | null;
+  completed_groups: number | null;
+  current_group: string | null;
+  current_snapshot: string | null;
+  current_archive: string | null;
+  downloaded_bytes: number | null;
+  current_speed: string | null;
+  last_progress_at: string | null;
+  warning_messages: string[] | null;
+  failed_groups: Array<{ group: string; reason: string }> | null;
+  pbs_sync_job_id: string | null;
+  pbs_remote_id: string | null;
+  pbs_task_upid: string | null;
+  elapsed_seconds: number | null;
   mode: ExternalBackupMode;
   created_at: string;
 }
@@ -297,6 +312,7 @@ export type ScheduledBackupRunStatus =
   | "pending"
   | "waiting_for_disk"
   | "waiting_for_confirmation"
+  | "waiting_for_external_backup"
   | "running"
   | "success"
   | "failure"

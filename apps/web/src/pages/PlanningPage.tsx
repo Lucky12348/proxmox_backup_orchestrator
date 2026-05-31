@@ -30,7 +30,7 @@ import type { PlanningPageProps } from "./shared";
 type CalendarView = "day" | "week" | "month" | "year";
 type EventForm = ScheduledBackupEventPayload & { id?: number };
 
-const ACTIVE_STATUSES = new Set(["pending", "waiting_for_disk", "waiting_for_confirmation", "running"]);
+const ACTIVE_STATUSES = new Set(["pending", "waiting_for_disk", "waiting_for_confirmation", "waiting_for_external_backup", "running"]);
 const DONE_STATUSES = new Set(["success", "failure", "missed", "cancelled"]);
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 const VIEW_LABELS: Record<CalendarView, string> = { day: "Jour", week: "Semaine", month: "Mois", year: "Annee" };
@@ -670,6 +670,7 @@ function weekdayTitle(date: Date) {
 
 function shortStatus(status: string) {
   if (status === "waiting_for_confirmation") return "Confirm.";
+  if (status === "waiting_for_external_backup") return "Differe";
   if (status === "waiting_for_disk") return "Disque";
   return statusLabel(status);
 }
@@ -679,6 +680,7 @@ function statusLabel(status: string) {
     pending: "En attente",
     waiting_for_disk: "En attente disque",
     waiting_for_confirmation: "Confirmation requise",
+    waiting_for_external_backup: "Backup externe en cours",
     running: "En cours",
     success: "Succes",
     failure: "Echec",

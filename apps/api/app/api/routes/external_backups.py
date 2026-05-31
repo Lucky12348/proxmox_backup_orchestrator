@@ -14,12 +14,14 @@ from app.schemas import (
 )
 from app.services.external_backups import (
     append_external_backup_run_log,
+    cleanup_external_export_objects,
     cleanup_external_backup_runs,
     cleanup_legacy_external_export_objects,
     delete_external_backup_run,
     execute_external_backup_run,
     get_external_backup_preview,
     get_external_backup_run,
+    inspect_external_export_objects,
     list_external_backup_runs,
     run_external_backup,
 )
@@ -68,6 +70,16 @@ def cleanup_runs(db: DbSession, keep_last: int = 10) -> dict[str, int]:
 @router.post("/legacy-objects/cleanup")
 def cleanup_legacy_objects() -> dict[str, object]:
     return cleanup_legacy_external_export_objects()
+
+
+@router.get("/temporary-objects/status")
+def get_temporary_objects_status() -> dict[str, object]:
+    return inspect_external_export_objects()
+
+
+@router.post("/temporary-objects/cleanup")
+def cleanup_temporary_objects() -> dict[str, object]:
+    return cleanup_external_export_objects()
 
 
 @router.get("/runs/{run_id}", response_model=ExternalBackupRunRead)
@@ -129,6 +141,21 @@ def _build_summary(run, disk_name: str) -> ExternalBackupRunSummaryRead:
         current_step=run.current_step,
         progress_message=run.progress_message,
         last_log_at=run.last_log_at,
+        progress_percent=run.progress_percent,
+        total_groups=run.total_groups,
+        completed_groups=run.completed_groups,
+        current_group=run.current_group,
+        current_snapshot=run.current_snapshot,
+        current_archive=run.current_archive,
+        downloaded_bytes=run.downloaded_bytes,
+        current_speed=run.current_speed,
+        last_progress_at=run.last_progress_at,
+        warning_messages=run.warning_messages,
+        failed_groups=run.failed_groups,
+        pbs_sync_job_id=run.pbs_sync_job_id,
+        pbs_remote_id=run.pbs_remote_id,
+        pbs_task_upid=run.pbs_task_upid,
+        elapsed_seconds=run.elapsed_seconds,
         mode=run.mode,
         created_at=run.created_at,
     )

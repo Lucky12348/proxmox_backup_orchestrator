@@ -92,6 +92,7 @@ def process_runs(db: Session, now: datetime) -> None:
                         ScheduledBackupRunStatus.PENDING,
                         ScheduledBackupRunStatus.WAITING_FOR_DISK,
                         ScheduledBackupRunStatus.WAITING_FOR_CONFIRMATION,
+                        ScheduledBackupRunStatus.WAITING_FOR_EXTERNAL_BACKUP,
                         ScheduledBackupRunStatus.RUNNING,
                     ]
                 )
@@ -153,7 +154,7 @@ def confirm_planning_run(db: Session, run_id: int) -> ScheduledBackupRun:
     if run.status != ScheduledBackupRunStatus.WAITING_FOR_CONFIRMATION:
         raise ValueError("Run is not waiting for confirmation.")
     if now > run.window_ends_at:
-        run.status = ScheduledBackupRunStatus.MISSED
+        run.status = ScheduledBackupRunStatus.CANCELLED
         run.finished_at = now
         run.error = "Confirmation arrived after the planned window."
         db.add(run)
@@ -268,7 +269,7 @@ def _process_run(db: Session, event: ScheduledBackupEvent, run: ScheduledBackupR
         )
         run.reminder_sent_at = now
 
-    if now > run.window_ends_at:
+    if now > run.window_ends_at and _can_mark_missed(run):
         run.status = ScheduledBackupRunStatus.MISSED
         run.finished_at = now
         run.error = "Planned window expired."
@@ -276,6 +277,10 @@ def _process_run(db: Session, event: ScheduledBackupEvent, run: ScheduledBackupR
         event.last_completed_at = now
         notify_planned_backup_missed(event.title)
         db.add_all([event, run])
+        return
+    if now > run.window_ends_at:
+        run.updated_at = now
+        db.add(run)
         return
 
     if now < run.window_starts_at:
@@ -318,6 +323,7 @@ def _start_run(
 ) -> None:
     if _external_backup_running(db):
         run.error = "Another external backup is already running."
+        run.status = ScheduledBackupRunStatus.WAITING_FOR_EXTERNAL_BACKUP
         run.updated_at = now
         db.add(run)
         return
@@ -330,6 +336,12 @@ def _start_run(
     try:
         backup_run = run_external_backup(db, disk.id, confirmation=True, datastore_name=event.datastore)
     except Exception as exc:
+        if getattr(exc, "status_code", None) == 409:
+            run.status = ScheduledBackupRunStatus.WAITING_FOR_EXTERNAL_BACKUP
+            run.error = "Another external backup is already running."
+            run.updated_at = now
+            db.add(run)
+            return
         run.status = ScheduledBackupRunStatus.FAILURE
         run.finished_at = now
         run.error = str(exc)
@@ -357,7 +369,12 @@ def _sync_linked_backup_state(db: Session, event: ScheduledBackupEvent, run: Sch
     if run.backup_run_id is None or run.status != ScheduledBackupRunStatus.RUNNING:
         return
     backup_run = db.get(ExternalBackupRun, run.backup_run_id)
-    if backup_run is None or backup_run.status in {BackupRunStatus.PENDING, BackupRunStatus.RUNNING}:
+    if backup_run is None:
+        return
+    if backup_run.status in {BackupRunStatus.PENDING, BackupRunStatus.RUNNING}:
+        run.status = ScheduledBackupRunStatus.RUNNING
+        run.updated_at = now
+        db.add(run)
         return
     run.status = ScheduledBackupRunStatus.SUCCESS if backup_run.status == BackupRunStatus.SUCCESS else ScheduledBackupRunStatus.FAILURE
     run.finished_at = backup_run.finished_at or now
@@ -417,6 +434,19 @@ def _external_backup_running(db: Session) -> bool:
             .where(ExternalBackupRun.status.in_([BackupRunStatus.PENDING, BackupRunStatus.RUNNING]))
             .limit(1)
         )
+    )
+
+
+def _can_mark_missed(run: ScheduledBackupRun) -> bool:
+    return (
+        run.disk_seen_at is None
+        and run.backup_run_id is None
+        and run.started_at is None
+        and run.status
+        in {
+            ScheduledBackupRunStatus.PENDING,
+            ScheduledBackupRunStatus.WAITING_FOR_DISK,
+        }
     )
 
 

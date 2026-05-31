@@ -22,6 +22,9 @@ class ExternalBackupExecutionResult:
     export: ExternalBackupExecutionStep
     target_path: str
     target_datastore_name: str | None = None
+    pbs_sync_job_id: str | None = None
+    pbs_remote_id: str | None = None
+    pbs_task_upid: str | None = None
 
 
 class ExternalBackupExecutionService:
@@ -109,6 +112,9 @@ class ExternalBackupExecutionService:
                 return_code=export.return_code,
             ),
             target_path=actual_target_path,
+            pbs_sync_job_id=_extract_string(export.payload, "pbs_sync_job_id"),
+            pbs_remote_id=_extract_string(export.payload, "pbs_remote_id"),
+            pbs_task_upid=_extract_string(export.payload, "pbs_task_upid"),
         )
 
     def _execute_dedicated(
@@ -184,6 +190,9 @@ class ExternalBackupExecutionService:
             ),
             target_path=actual_target_path,
             target_datastore_name=target_datastore_name,
+            pbs_sync_job_id=_extract_string(export.payload, "pbs_sync_job_id"),
+            pbs_remote_id=_extract_string(export.payload, "pbs_remote_id"),
+            pbs_task_upid=_extract_string(export.payload, "pbs_task_upid"),
         )
 
 

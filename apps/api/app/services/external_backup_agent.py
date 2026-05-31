@@ -136,6 +136,12 @@ class ExternalBackupAgentBridge:
     def cleanup_legacy_external_export_objects(self) -> AgentCommandResult:
         return self._run_command(self.pbs_client, "/cleanup-legacy-external-export-objects", {})
 
+    def inspect_external_export_objects(self) -> AgentCommandResult:
+        return self._run_command(self.pbs_client, "/external-export-objects/status", {})
+
+    def cleanup_external_export_objects(self) -> AgentCommandResult:
+        return self._run_command(self.pbs_client, "/external-export-objects/cleanup", {})
+
     def _run_command(self, client, path: str, payload: dict[str, object]) -> AgentCommandResult:
         try:
             result = client.post(path, payload)

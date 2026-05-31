@@ -1,10 +1,11 @@
+import logging
 from datetime import datetime, timedelta
 
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import AgentHeartbeat, ExternalDisk
+from app.models import AgentHeartbeat, ExternalDisk, ScheduledBackupEvent
 from app.schemas.agent import AgentDiskReportCreate, AgentHeartbeatCreate
 from app.services.notifications import (
     get_disk_detection_notify_cooldown_seconds,
@@ -12,6 +13,9 @@ from app.services.notifications import (
     notify_new_disk_detected,
 )
 from app.services.planning_scheduler import handle_disk_detected
+
+
+logger = logging.getLogger(__name__)
 
 
 def has_agent_disks(db: Session) -> bool:
@@ -128,8 +132,10 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
                 trusted=item.trusted,
             )
             previous_presence = "never_seen"
+            logger.debug("disk classified as new because serial %s was not found", item.serial_number)
         else:
             previous_presence = disk.presence_state or ("present" if disk.connected else "absent")
+            logger.debug("disk classified as known because serial %s matched disk id %s", item.serial_number, disk.id)
 
         disk.display_name = item.display_name
         disk.model_name = item.model_name
@@ -179,7 +185,12 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
 
     for detection_type, disk in detection_notifications:
         try:
-            description = _format_disk_detection_description(disk)
+            matched_planned_disk = bool(
+                db.scalar(
+                    select(exists().where(ScheduledBackupEvent.disk_serial == disk.serial_number))
+                )
+            )
+            description = _format_disk_detection_description(disk, matched_planned_disk=matched_planned_disk)
             if detection_type == "new":
                 notify_new_disk_detected(description)
             else:
@@ -239,11 +250,14 @@ def _disk_detection_cooldown_elapsed(disk: ExternalDisk, observed_at: datetime) 
     return (observed_at - previous).total_seconds() >= get_disk_detection_notify_cooldown_seconds()
 
 
-def _format_disk_detection_description(disk: ExternalDisk) -> str:
+def _format_disk_detection_description(disk: ExternalDisk, *, matched_planned_disk: bool = False) -> str:
     parts = []
     if disk.model_name:
         parts.append(f"Modele: {disk.model_name}")
     parts.append(f"Serie: {disk.serial_number}")
+    if disk.mount_path:
+        parts.append(f"Chemin: {disk.mount_path}")
+    parts.append("Disque planifie: oui" if matched_planned_disk else "Disque planifie: non")
     capacity = disk.usable_capacity_gb or disk.capacity_gb
     if capacity:
         parts.append(f"Taille: {capacity} GB")

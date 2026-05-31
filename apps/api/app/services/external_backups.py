@@ -15,6 +15,7 @@ from app.services.external_backup_agent import AgentCommandError
 from app.services.external_backup_agent import get_external_backup_agent_bridge
 from app.services.external_backup_execution import build_export_target_path, get_external_backup_execution_service
 from app.services.notifications import notify_backup_failure, notify_backup_success
+from app.services.pbs_progress import parse_pbs_progress_line, summarize_pbs_failure
 
 
 @dataclass(frozen=True)
@@ -131,6 +132,26 @@ def cleanup_legacy_external_export_objects() -> dict[str, object]:
     }
 
 
+def inspect_external_export_objects() -> dict[str, object]:
+    result = get_external_backup_agent_bridge().inspect_external_export_objects()
+    return {
+        "ok": result.ok,
+        "message": result.message,
+        "return_code": result.return_code,
+        "payload": result.payload or {},
+    }
+
+
+def cleanup_external_export_objects() -> dict[str, object]:
+    result = get_external_backup_agent_bridge().cleanup_external_export_objects()
+    return {
+        "ok": result.ok,
+        "message": result.message,
+        "return_code": result.return_code,
+        "payload": result.payload or {},
+    }
+
+
 def run_external_backup(
     db: Session,
     disk_id: int,
@@ -142,6 +163,8 @@ def run_external_backup(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="External backup execution requires explicit confirmation.",
         )
+
+    assert_no_active_external_backup(db)
 
     disk = _get_disk_or_404(db, disk_id)
     if not disk.trusted:
@@ -175,6 +198,8 @@ def run_external_backup(
         current_step="starting",
         progress_message="External backup run queued.",
         last_log_at=now,
+        warning_messages=[],
+        failed_groups=[],
         mode=plan.mode,
         created_at=now,
     )
@@ -196,6 +221,8 @@ def execute_external_backup_run(run_id: int) -> None:
     with SessionLocal() as db:
         run = db.get(ExternalBackupRun, run_id)
         if run is None:
+            return
+        if run.status in {BackupRunStatus.SUCCESS, BackupRunStatus.FAILED}:
             return
         disk = db.get(ExternalDisk, run.disk_id)
         if disk is None:
@@ -264,6 +291,9 @@ def execute_external_backup_run(run_id: int) -> None:
             prepare_result = execution_result.prepare
             export_result = execution_result.export
             run.target_path = execution_result.target_path
+            run.pbs_sync_job_id = getattr(execution_result, "pbs_sync_job_id", None) or run.pbs_sync_job_id
+            run.pbs_remote_id = getattr(execution_result, "pbs_remote_id", None) or run.pbs_remote_id
+            run.pbs_task_upid = getattr(execution_result, "pbs_task_upid", None) or run.pbs_task_upid
             if execution_result.target_datastore_name:
                 disk.pbs_datastore_name = execution_result.target_datastore_name
                 disk.pbs_mount_path = execution_result.target_path
@@ -284,6 +314,7 @@ def execute_external_backup_run(run_id: int) -> None:
             run.command_summary = _merge_logs(prepare_result.command_summary, export_result.command_summary)
             run.execution_cwd = _merge_logs(prepare_result.execution_cwd, export_result.execution_cwd)
             run.return_code = export_result.return_code
+            _apply_progress_text(run, export_result.stdout_log)
             run.current_step = "success"
             run.progress_message = run.message
             run.last_log_at = datetime.utcnow()
@@ -312,8 +343,14 @@ def execute_external_backup_run(run_id: int) -> None:
                 exc.execution_cwd,
             )
             run.return_code = exc.return_code
+            _apply_progress_text(run, exc.stdout_log)
+            _apply_progress_text(run, exc.stderr_log)
+            summary = summarize_pbs_failure(str(exc), run.failed_groups)
+            if summary:
+                run.message = summary
+                run.progress_message = summary
             run.current_step = "failure"
-            run.progress_message = str(exc)
+            run.progress_message = run.progress_message or str(exc)
             run.last_log_at = datetime.utcnow()
             append_external_backup_run_log(db, run.id, step="failure", message=str(exc), stream="stderr", line=str(exc))
         except HTTPException as exc:
@@ -350,8 +387,14 @@ def execute_external_backup_run(run_id: int) -> None:
                 export_result.execution_cwd if export_result else None,
             )
             run.return_code = export_result.return_code if export_result else prepare_result.return_code if prepare_result else None
+            _apply_progress_text(run, export_result.stdout_log if export_result else None)
+            _apply_progress_text(run, export_result.stderr_log if export_result else None)
+            summary = summarize_pbs_failure(str(exc), run.failed_groups)
+            if summary:
+                run.message = summary
+                run.progress_message = summary
             run.current_step = "failure"
-            run.progress_message = str(exc)
+            run.progress_message = run.progress_message or str(exc)
             run.last_log_at = datetime.utcnow()
             append_external_backup_run_log(db, run.id, step="failure", message=str(exc), stream="stderr", line=str(exc))
         except Exception as exc:
@@ -404,10 +447,46 @@ def append_external_backup_run_log(
     run.current_step = clean_step
     run.progress_message = clean_message
     run.last_log_at = now
+    _apply_progress_line(run, line or clean_message, now)
     db.add(run)
     db.commit()
     db.refresh(run)
     return run
+
+
+def assert_no_active_external_backup(db: Session) -> None:
+    active_run = db.scalar(
+        select(ExternalBackupRun)
+        .where(ExternalBackupRun.status.in_([BackupRunStatus.PENDING, BackupRunStatus.RUNNING]))
+        .order_by(ExternalBackupRun.started_at.desc())
+        .limit(1)
+    )
+    if active_run is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Un backup externe est deja en cours",
+                "active_run_id": active_run.id,
+            },
+        )
+
+    bridge = get_external_backup_agent_bridge()
+    try:
+        result = bridge.inspect_external_export_objects()
+    except AgentCommandError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    payload = result.payload or {}
+    active = bool(payload.get("active"))
+    active_run_id = payload.get("active_run_id")
+    if active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Un backup externe est deja en cours",
+                "active_run_id": active_run_id if isinstance(active_run_id, int) else None,
+            },
+        )
 
 
 def _finish_run(
@@ -449,3 +528,58 @@ def _append_log(existing: str | None, entry: str) -> str:
     if not existing:
         return entry
     return f"{existing}\n{entry}"
+
+
+def _apply_progress_text(run: ExternalBackupRun, text: str | None) -> None:
+    if not text:
+        return
+    now = datetime.utcnow()
+    for line in text.splitlines():
+        _apply_progress_line(run, line, now)
+
+
+def _apply_progress_line(run: ExternalBackupRun, line: str | None, now: datetime) -> None:
+    update = parse_pbs_progress_line(line)
+    if update.progress_percent is not None:
+        run.progress_percent = update.progress_percent
+    if update.total_groups is not None:
+        run.total_groups = update.total_groups
+    if update.completed_groups is not None:
+        run.completed_groups = update.completed_groups
+    if update.current_group is not None:
+        run.current_group = update.current_group
+    if update.current_snapshot is not None:
+        run.current_snapshot = update.current_snapshot
+    if update.current_archive is not None:
+        run.current_archive = update.current_archive
+    if update.downloaded_bytes is not None:
+        run.downloaded_bytes = update.downloaded_bytes
+    if update.current_speed is not None:
+        run.current_speed = update.current_speed
+    if update.pbs_sync_job_id is not None:
+        run.pbs_sync_job_id = update.pbs_sync_job_id
+    if update.pbs_remote_id is not None:
+        run.pbs_remote_id = update.pbs_remote_id
+    if update.pbs_task_upid is not None:
+        run.pbs_task_upid = update.pbs_task_upid
+    if update.has_progress or update.task_ok or update.task_error or update.partial_failure:
+        run.last_progress_at = now
+        run.elapsed_seconds = max(0, int((now - run.started_at).total_seconds()))
+    if update.warnings:
+        existing = list(run.warning_messages or [])
+        for warning in update.warnings:
+            if warning not in existing:
+                existing.append(warning)
+        run.warning_messages = existing
+    if update.failed_groups:
+        existing_failed = list(run.failed_groups or [])
+        seen = {(item.get("group"), item.get("reason")) for item in existing_failed}
+        for failed in update.failed_groups:
+            key = (failed.get("group"), failed.get("reason"))
+            if key not in seen:
+                existing_failed.append(failed)
+                seen.add(key)
+        run.failed_groups = existing_failed
+    if update.partial_failure:
+        summary = summarize_pbs_failure("sync failed with some errors", run.failed_groups)
+        run.progress_message = summary or "Synchronisation terminee avec erreurs"

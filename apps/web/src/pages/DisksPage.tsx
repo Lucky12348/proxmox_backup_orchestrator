@@ -31,6 +31,7 @@ export function DisksPage({
   onExternalBackupRequest,
   onDiskEjectRequest,
 }: DisksPageProps) {
+  const activeExternalBackup = data.externalBackupRuns.find((run) => run.status === "pending" || run.status === "running");
   return (
     <div className="page-stack">
       <PageHeader title={t.nav.disks} description={t.disksIntro} />
@@ -100,10 +101,17 @@ export function DisksPage({
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button
                         className="action-button"
-                        disabled={savingKey === `external-backup-${disk.id}` || !disk.connected}
-                        onClick={() => onExternalBackupRequest(disk)}
+                        disabled={savingKey === `external-backup-${disk.id}` || !disk.connected || Boolean(activeExternalBackup)}
+                        onClick={() => {
+                          if (activeExternalBackup) {
+                            window.location.hash = "#activity";
+                            return;
+                          }
+                          onExternalBackupRequest(disk);
+                        }}
                         type="button"
                         style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
+                        title={activeExternalBackup ? "Un backup externe est deja en cours" : undefined}
                       >
                         {t.externalBackupAction}
                       </button>

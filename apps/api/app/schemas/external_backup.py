@@ -30,6 +30,21 @@ class ExternalBackupRunRead(UTCDateTimeModel):
     current_step: str | None
     progress_message: str | None
     last_log_at: datetime | None
+    progress_percent: float | None
+    total_groups: int | None
+    completed_groups: int | None
+    current_group: str | None
+    current_snapshot: str | None
+    current_archive: str | None
+    downloaded_bytes: int | None
+    current_speed: str | None
+    last_progress_at: datetime | None
+    warning_messages: list[str] | None
+    failed_groups: list[dict[str, str]] | None
+    pbs_sync_job_id: str | None
+    pbs_remote_id: str | None
+    pbs_task_upid: str | None
+    elapsed_seconds: int | None
     mode: ExternalBackupMode
     created_at: datetime
 
@@ -52,6 +67,21 @@ class ExternalBackupRunSummaryRead(UTCDateTimeModel):
     current_step: str | None
     progress_message: str | None
     last_log_at: datetime | None
+    progress_percent: float | None
+    total_groups: int | None
+    completed_groups: int | None
+    current_group: str | None
+    current_snapshot: str | None
+    current_archive: str | None
+    downloaded_bytes: int | None
+    current_speed: str | None
+    last_progress_at: datetime | None
+    warning_messages: list[str] | None
+    failed_groups: list[dict[str, str]] | None
+    pbs_sync_job_id: str | None
+    pbs_remote_id: str | None
+    pbs_task_upid: str | None
+    elapsed_seconds: int | None
     mode: ExternalBackupMode
     created_at: datetime
 

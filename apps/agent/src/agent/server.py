@@ -18,7 +18,9 @@ from agent.main import (
     prepare_disk_result,
     prepare_external_datastore_result,
     prepare_dedicated_pbs_datastore_result,
+    cleanup_external_export_objects_result,
     cleanup_legacy_external_export_objects,
+    external_export_objects_status,
     qemu_config_result,
     qemu_usb_attach_result,
     qemu_usb_detach_result,
@@ -274,6 +276,22 @@ def cleanup_legacy_external_export(
         "cleanup-legacy-external-export-objects",
         lambda: cleanup_legacy_external_export_objects(settings),
     )
+
+
+@app.post("/external-export-objects/status", response_model=None)
+def external_export_status(
+    _: None = Depends(require_agent_token),
+    settings: AgentSettings = Depends(get_settings),
+) -> Response:
+    return _run_endpoint("external-export-objects-status", lambda: external_export_objects_status(settings))
+
+
+@app.post("/external-export-objects/cleanup", response_model=None)
+def cleanup_external_export_objects(
+    _: None = Depends(require_agent_token),
+    settings: AgentSettings = Depends(get_settings),
+) -> Response:
+    return _run_endpoint("external-export-objects-cleanup", lambda: cleanup_external_export_objects_result(settings))
 
 
 @app.post("/maintenance/check", response_model=None)

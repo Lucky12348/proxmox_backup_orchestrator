@@ -156,6 +156,48 @@ class DiskInventoryTests(TestCase):
         self.assertFalse(preferred[0].connected)
         self.assertEqual(preferred[0].handoff_status, "ejected")
 
+    def test_same_serial_on_different_usb_port_is_known_not_new(self):
+        disk = _external_disk(
+            serial_number="WD-WXD2DA1L1E7C",
+            display_name="Western Digital Game Drive",
+            source="agent",
+            active=True,
+            connected=False,
+            presence_state="absent",
+            proxmox_usb_mapping="2-5",
+        )
+        self.session.add(disk)
+        self.session.commit()
+
+        report = AgentDiskReportCreate(
+            hostname="promox",
+            observed_at=datetime(2026, 5, 31, 10, 0, 0),
+            disks=[
+                {
+                    "serial_number": "WD-WXD2DA1L1E7C",
+                    "display_name": "Western Digital Game Drive",
+                    "model_name": "Game Drive",
+                    "capacity_gb": 1000,
+                    "filesystem_type": "ext4",
+                    "mount_path": "/mnt/usb-new-port",
+                    "detection_reason": "usb port 3-7",
+                    "candidate_type": "usb",
+                    "connected": True,
+                    "trusted": True,
+                }
+            ],
+        )
+
+        with (
+            patch("app.services.disks.notify_new_disk_detected") as new_notify,
+            patch("app.services.disks.notify_known_disk_detected") as known_notify,
+        ):
+            ingest_agent_disk_report(self.session, report)
+
+        new_notify.assert_not_called()
+        known_notify.assert_called_once()
+        self.assertEqual(self.session.query(ExternalDisk).filter_by(serial_number="WD-WXD2DA1L1E7C").count(), 1)
+
     def test_eject_refuses_when_external_backup_run_is_active(self):
         disk = _external_disk(
             serial_number="WD-WXD2DA1L1E7C",

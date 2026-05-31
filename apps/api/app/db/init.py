@@ -116,6 +116,21 @@ def ensure_external_backup_run_schema() -> None:
         "current_step": "ALTER TABLE external_backup_runs ADD COLUMN current_step VARCHAR(128)",
         "progress_message": "ALTER TABLE external_backup_runs ADD COLUMN progress_message TEXT",
         "last_log_at": "ALTER TABLE external_backup_runs ADD COLUMN last_log_at TIMESTAMP",
+        "progress_percent": "ALTER TABLE external_backup_runs ADD COLUMN progress_percent FLOAT",
+        "total_groups": "ALTER TABLE external_backup_runs ADD COLUMN total_groups INTEGER",
+        "completed_groups": "ALTER TABLE external_backup_runs ADD COLUMN completed_groups INTEGER",
+        "current_group": "ALTER TABLE external_backup_runs ADD COLUMN current_group VARCHAR(255)",
+        "current_snapshot": "ALTER TABLE external_backup_runs ADD COLUMN current_snapshot VARCHAR(255)",
+        "current_archive": "ALTER TABLE external_backup_runs ADD COLUMN current_archive VARCHAR(255)",
+        "downloaded_bytes": "ALTER TABLE external_backup_runs ADD COLUMN downloaded_bytes BIGINT",
+        "current_speed": "ALTER TABLE external_backup_runs ADD COLUMN current_speed VARCHAR(64)",
+        "last_progress_at": "ALTER TABLE external_backup_runs ADD COLUMN last_progress_at TIMESTAMP",
+        "warning_messages": "ALTER TABLE external_backup_runs ADD COLUMN warning_messages JSON",
+        "failed_groups": "ALTER TABLE external_backup_runs ADD COLUMN failed_groups JSON",
+        "pbs_sync_job_id": "ALTER TABLE external_backup_runs ADD COLUMN pbs_sync_job_id VARCHAR(255)",
+        "pbs_remote_id": "ALTER TABLE external_backup_runs ADD COLUMN pbs_remote_id VARCHAR(255)",
+        "pbs_task_upid": "ALTER TABLE external_backup_runs ADD COLUMN pbs_task_upid TEXT",
+        "elapsed_seconds": "ALTER TABLE external_backup_runs ADD COLUMN elapsed_seconds INTEGER",
     }
 
     with engine.begin() as connection:

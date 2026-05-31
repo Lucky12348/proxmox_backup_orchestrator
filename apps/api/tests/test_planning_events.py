@@ -8,13 +8,16 @@ from sqlalchemy.orm import Session
 from app.api.routes.planning import delete_event, get_calendar_occurrences, list_events
 from app.db.base import Base
 from app.models import (
+    BackupRunStatus,
+    ExternalBackupMode,
+    ExternalBackupRun,
     ScheduledBackupEvent,
     ScheduledBackupRecurrenceType,
     ScheduledBackupRun,
     ScheduledBackupRunStatus,
     ScheduledBackupStartMode,
 )
-from app.services.planning_scheduler import expand_occurrences
+from app.services.planning_scheduler import expand_occurrences, process_runs
 
 
 class PlanningEventTests(TestCase):
@@ -95,6 +98,59 @@ class PlanningEventTests(TestCase):
 
         self.assertEqual(raised.exception.status_code, 404)
 
+    def test_started_occurrence_after_window_is_not_marked_missed(self):
+        event = _event()
+        self.session.add(event)
+        self.session.commit()
+        backup = _external_run(BackupRunStatus.RUNNING)
+        self.session.add(backup)
+        self.session.commit()
+        run = _run(event.id, ScheduledBackupRunStatus.RUNNING)
+        run.disk_seen_at = run.window_starts_at
+        run.backup_run_id = backup.id
+        run.started_at = run.window_starts_at
+        self.session.add(run)
+        self.session.commit()
+
+        process_runs(self.session, run.window_ends_at + timedelta(minutes=1))
+
+        self.assertEqual(self.session.get(ScheduledBackupRun, run.id).status, ScheduledBackupRunStatus.RUNNING)
+
+    def test_linked_backup_success_updates_planned_occurrence_success(self):
+        event = _event()
+        self.session.add(event)
+        self.session.commit()
+        backup = _external_run(BackupRunStatus.SUCCESS)
+        self.session.add(backup)
+        self.session.commit()
+        run = _run(event.id, ScheduledBackupRunStatus.RUNNING)
+        run.backup_run_id = backup.id
+        self.session.add(run)
+        self.session.commit()
+
+        process_runs(self.session, run.window_starts_at + timedelta(minutes=10))
+
+        self.assertEqual(self.session.get(ScheduledBackupRun, run.id).status, ScheduledBackupRunStatus.SUCCESS)
+
+    def test_linked_backup_failure_updates_planned_occurrence_failure(self):
+        event = _event()
+        self.session.add(event)
+        self.session.commit()
+        backup = _external_run(BackupRunStatus.FAILED)
+        backup.message = "sync failed"
+        self.session.add(backup)
+        self.session.commit()
+        run = _run(event.id, ScheduledBackupRunStatus.RUNNING)
+        run.backup_run_id = backup.id
+        self.session.add(run)
+        self.session.commit()
+
+        process_runs(self.session, run.window_starts_at + timedelta(minutes=10))
+
+        refreshed = self.session.get(ScheduledBackupRun, run.id)
+        self.assertEqual(refreshed.status, ScheduledBackupRunStatus.FAILURE)
+        self.assertEqual(refreshed.error, "sync failed")
+
 
 def _event(**overrides) -> ScheduledBackupEvent:
     now = datetime(2026, 5, 1, 12, 0, 0)
@@ -129,4 +185,27 @@ def _run(event_id: int, status: ScheduledBackupRunStatus) -> ScheduledBackupRun:
         status=status,
         created_at=start,
         updated_at=start,
+    )
+
+
+def _external_run(status: BackupRunStatus) -> ExternalBackupRun:
+    now = datetime(2026, 5, 3, 1, 0, 0)
+    return ExternalBackupRun(
+        disk_id=1,
+        status=status,
+        started_at=now,
+        finished_at=now + timedelta(minutes=5) if status in {BackupRunStatus.SUCCESS, BackupRunStatus.FAILED} else None,
+        target_path="/mnt/pbo/USB-123/pbs-datastore",
+        datastore_name="backup-store",
+        message=None,
+        stdout_log=None,
+        stderr_log=None,
+        command_summary=None,
+        execution_cwd=None,
+        return_code=0 if status == BackupRunStatus.SUCCESS else None,
+        current_step=None,
+        progress_message=None,
+        last_log_at=now,
+        mode=ExternalBackupMode.DEDICATED,
+        created_at=now,
     )
