@@ -28,6 +28,7 @@ import type {
   ProxmoxBackupJob,
   ProxmoxSyncSummary,
   PlanningOverview,
+  SystemVersion,
   SystemTime,
   UnplannedAsset,
   VirtualMachine,
@@ -344,6 +345,10 @@ export function getDiskPreparationRun(runId: number) {
 
 export function getSystemTime() {
   return request<SystemTime>("/system/time");
+}
+
+export function getSystemVersion() {
+  return request<SystemVersion>("/system/version");
 }
 
 export function triggerAutoSync() {

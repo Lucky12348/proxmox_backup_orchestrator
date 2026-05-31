@@ -25,6 +25,7 @@ from agent.main import (
     qemu_usb_attach_result,
     qemu_usb_detach_result,
     run_external_export_result,
+    version_payload,
 )
 
 
@@ -66,6 +67,7 @@ class PrepareDedicatedPbsDatastoreRequest(BaseModel):
     datastore_name: str = Field(min_length=1)
     confirmation: bool = False
     force_format: bool = False
+    mount_path: str | None = Field(default=None, min_length=1)
     callback_run_id: int | None = Field(default=None, gt=0)
     callback_url: str | None = Field(default=None, min_length=1)
     callback_token: str | None = Field(default=None, min_length=1)
@@ -127,6 +129,19 @@ def health(_: None = Depends(require_agent_token), settings: AgentSettings = Dep
     }
 
 
+@app.get("/version")
+def version(_: None = Depends(require_agent_token), settings: AgentSettings = Depends(get_settings)) -> dict[str, Any]:
+    return {
+        **version_payload(settings, [route.path for route in app.routes]),
+        "started_at": SERVER_STARTED_AT,
+    }
+
+
+@app.get("/capabilities")
+def capabilities(_: None = Depends(require_agent_token), settings: AgentSettings = Depends(get_settings)) -> dict[str, Any]:
+    return version(_, settings)
+
+
 @app.post("/prepare-disk", response_model=None)
 def prepare_disk(
     payload: PrepareDiskRequest,
@@ -177,6 +192,7 @@ def prepare_dedicated_pbs_datastore(
             payload.confirmation,
             payload.force_format,
             settings,
+            preferred_mount_path=payload.mount_path,
             callback_run_id=payload.callback_run_id,
             callback_url=payload.callback_url,
             callback_token=payload.callback_token,

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models import ExternalDisk
+from app.services.disk_identity import canonical_serial_number, serial_aliases
 from app.services.host_agent import HostAgentError, HostAgentResult, get_host_agent_client, get_pbs_agent_client
 from app.services.proxmox_client import ProxmoxClient
 
@@ -160,10 +161,15 @@ def wait_for_pbs_disk_visibility(
     last_error: str | None = None
 
     for attempt in range(1, attempts + 1):
-        try:
-            result = pbs_agent.post("/inspect-disk", {"disk": disk.serial_number})
-        except HostAgentError as exc:
-            last_error = str(exc)
+        result = None
+        for identifier in _disk_inspection_identifiers(disk):
+            try:
+                result = pbs_agent.post("/inspect-disk", {"disk": identifier})
+                _report(progress, "inspect_disk", f"PBS inspect retry {attempt}/{attempts} used identifier `{identifier}`.")
+                break
+            except HostAgentError as exc:
+                last_error = str(exc)
+        if result is None:
             _report(progress, "inspect_disk", f"PBS inspect retry {attempt}/{attempts} failed: {last_error}")
             sleep(delay_seconds)
             continue
@@ -194,10 +200,16 @@ def wait_for_pbs_disk_visibility(
 
 def get_pbs_disk_visibility(db: Session, disk: ExternalDisk) -> DiskHandoffStatus:
     pbs_agent = get_pbs_agent_client()
-    try:
-        result = pbs_agent.post("/inspect-disk", {"disk": disk.serial_number})
-    except HostAgentError as exc:
-        return _build_status(disk, f"PBS visibility check failed: {exc}")
+    result = None
+    last_error: str | None = None
+    for identifier in _disk_inspection_identifiers(disk):
+        try:
+            result = pbs_agent.post("/inspect-disk", {"disk": identifier})
+            break
+        except HostAgentError as exc:
+            last_error = str(exc)
+    if result is None:
+        return _build_status(disk, f"PBS visibility check failed: {last_error}")
 
     device_path = _extract_pbs_device_path(result.payload)
     if device_path:
@@ -214,6 +226,27 @@ def get_pbs_disk_visibility(db: Session, disk: ExternalDisk) -> DiskHandoffStatu
     db.commit()
     db.refresh(disk)
     return _build_status(disk, "Disk is not yet visible on PBS.")
+
+
+def _disk_inspection_identifiers(disk: ExternalDisk) -> list[str]:
+    identifiers: list[str] = []
+    for value in [
+        disk.serial_number,
+        getattr(disk, "canonical_serial_number", None),
+        getattr(disk, "reported_serial_number", None),
+        getattr(disk, "pbs_device_path", None),
+        *(getattr(disk, "serial_aliases", None) or []),
+    ]:
+        if isinstance(value, str) and value.strip() and value.strip() not in identifiers:
+            identifiers.append(value.strip())
+    for value in list(identifiers):
+        for alias in serial_aliases(value):
+            if alias and alias not in identifiers:
+                identifiers.append(alias)
+        canonical = canonical_serial_number(value)
+        if canonical and canonical not in identifiers:
+            identifiers.append(canonical)
+    return identifiers
 
 
 def _attach_usb_candidate(

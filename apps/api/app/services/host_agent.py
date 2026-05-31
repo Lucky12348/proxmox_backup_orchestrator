@@ -51,6 +51,10 @@ class HostAgentClient:
         result = self._request("GET", "/health")
         return result.payload
 
+    def get_version(self) -> dict[str, Any]:
+        result = self._request("GET", "/version")
+        return result.payload
+
     def post(self, path: str, payload: dict[str, Any]) -> HostAgentResult:
         return self._request("POST", path, payload)
 

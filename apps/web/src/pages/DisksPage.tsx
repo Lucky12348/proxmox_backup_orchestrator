@@ -5,6 +5,15 @@ import { StatusBadge } from "../components/StatusBadge";
 import { formatDateTime } from "../utils";
 import type { DisksPageProps } from "./shared";
 
+const REQUIRED_PBS_CAPABILITIES = [
+  "version-endpoint",
+  "inspect-disk-alias-resolution",
+  "external-export-objects-status",
+  "external-export-objects-cleanup",
+  "dedicated-pbs-eject",
+];
+const REQUIRED_HOST_CAPABILITIES = ["version-endpoint", "qemu-usb-attach", "qemu-usb-detach"];
+
 function CapacityBar({ used, total }: { used: number | null; total: number }) {
   const pct = used !== null ? Math.min(100, Math.round((used / total) * 100)) : 0;
   const cls = pct >= 90 ? "danger" : pct >= 70 ? "warn" : "";
@@ -32,6 +41,7 @@ export function DisksPage({
   onDiskEjectRequest,
 }: DisksPageProps) {
   const activeExternalBackup = data.externalBackupRuns.find((run) => run.status === "pending" || run.status === "running");
+  const agentsCompatible = agentsReadyForExternalBackup(data.systemVersion);
   return (
     <div className="page-stack">
       <PageHeader title={t.nav.disks} description={t.disksIntro} />
@@ -113,7 +123,7 @@ export function DisksPage({
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button
                         className="action-button"
-                        disabled={savingKey === `external-backup-${disk.id}` || !disk.connected || unusable || Boolean(activeExternalBackup)}
+                        disabled={savingKey === `external-backup-${disk.id}` || !disk.connected || unusable || Boolean(activeExternalBackup) || !agentsCompatible}
                         onClick={() => {
                           if (activeExternalBackup) {
                             window.location.hash = "#activity";
@@ -123,7 +133,15 @@ export function DisksPage({
                         }}
                         type="button"
                         style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
-                        title={unusable ? disk.detection_reason ?? undefined : activeExternalBackup ? "Un backup externe est deja en cours" : undefined}
+                        title={
+                          unusable
+                            ? disk.detection_reason ?? undefined
+                            : !agentsCompatible
+                              ? "Mettre a jour l'agent PBS"
+                              : activeExternalBackup
+                                ? "Un backup externe est deja en cours"
+                                : undefined
+                        }
                       >
                         {t.externalBackupAction}
                       </button>
@@ -151,4 +169,12 @@ export function DisksPage({
 
 function isUnusableDisk(disk: DisksPageProps["data"]["disks"][number]) {
   return disk.capacity_gb <= 0 || disk.candidate_type === "unusable";
+}
+
+function agentsReadyForExternalBackup(systemVersion: DisksPageProps["data"]["systemVersion"]) {
+  if (!systemVersion?.pbs_agent?.ok || !systemVersion.proxmox_agent?.ok) return false;
+  const pbs = new Set(systemVersion.pbs_agent.capabilities ?? []);
+  const host = new Set(systemVersion.proxmox_agent.capabilities ?? []);
+  return REQUIRED_PBS_CAPABILITIES.every((capability) => pbs.has(capability))
+    && REQUIRED_HOST_CAPABILITIES.every((capability) => host.has(capability));
 }

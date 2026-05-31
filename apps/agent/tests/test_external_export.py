@@ -9,6 +9,7 @@ from agent.main import (
     SubprocessResult,
     _ensure_loop_image_mounted,
     _assert_safe_eject_mount_path,
+    _expected_pbo_datastore_mount_paths,
     _find_mount_source,
     _fuser_process_lines,
     _is_safe_pbs_fuser_line,
@@ -21,6 +22,7 @@ from agent.main import (
     loop_backing_file,
     prepare_dedicated_pbs_datastore_result,
     prepare_external_datastore_result,
+    resolve_disk,
     run_external_export_result,
     qemu_config_result,
     qemu_usb_attach_result,
@@ -100,6 +102,30 @@ class ExternalExportDatastoreCreateTests(TestCase):
         self.assertIn("raw size=`16M`", message)
         self.assertIn("parsed size=`0 GB`", message)
         self.assertIn("minimum=`32 GB`", message)
+
+    def test_resolve_disk_accepts_canonical_serial_when_udev_reports_wd_prefix(self):
+        disk = _dedicated_test_disk()
+        disk["serial"] = None
+
+        with (
+            patch("agent.main.list_all_block_nodes", return_value=[disk]),
+            patch("agent.main.load_udev_properties", return_value={"ID_SERIAL_SHORT": "WD-WXD2DA1L1E7C"}),
+        ):
+            resolved, _ = resolve_disk("WXD2DA1L1E7C")
+
+        self.assertEqual(resolved["path"], "/dev/sdc")
+
+    def test_resolve_disk_accepts_canonical_serial_when_udev_reports_hex_alias(self):
+        disk = _dedicated_test_disk()
+        disk["serial"] = None
+
+        with (
+            patch("agent.main.list_all_block_nodes", return_value=[disk]),
+            patch("agent.main.load_udev_properties", return_value={"ID_SERIAL_SHORT": "575844324441314C31453743"}),
+        ):
+            resolved, _ = resolve_disk("WXD2DA1L1E7C")
+
+        self.assertEqual(resolved["path"], "/dev/sdc")
 
     def test_dedicated_prepare_reuses_existing_marker_without_formatting(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -263,6 +289,23 @@ class ExternalExportDatastoreCreateTests(TestCase):
                 for command in commands
             )
         )
+
+    def test_expected_pbo_datastore_mount_paths_include_wd_historical_aliases(self):
+        with patch("agent.main.default_mount_base_path", return_value=Path("/mnt/pbo")):
+            paths = {str(path).replace("\\", "/") for path in _expected_pbo_datastore_mount_paths("WXD2DA1L1E7C")}
+
+        self.assertIn("/mnt/pbo/WXD2DA1L1E7C/pbs-datastore", paths)
+        self.assertIn("/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore", paths)
+        self.assertIn("/mnt/pbo/WDC-WXD2DA1L1E7C/pbs-datastore", paths)
+        self.assertIn("/mnt/pbo/WDC_WXD2DA1L1E7C/pbs-datastore", paths)
+
+    def test_expected_pbo_datastore_mount_paths_include_decoded_hex_aliases(self):
+        with patch("agent.main.default_mount_base_path", return_value=Path("/mnt/pbo")):
+            paths = {str(path).replace("\\", "/") for path in _expected_pbo_datastore_mount_paths("575844324441314C31453743")}
+
+        self.assertIn("/mnt/pbo/575844324441314C31453743/pbs-datastore", paths)
+        self.assertIn("/mnt/pbo/WXD2DA1L1E7C/pbs-datastore", paths)
+        self.assertIn("/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore", paths)
 
     def test_eject_refuses_unsafe_mount_paths(self):
         for path in ["/", "/boot", "/boot/efi", "/mnt/datastore/backup-store", "/tmp/WXD2DA1L1E7C/pbs-datastore", "/mnt/pbo/WXD2DA1L1E7C/not-pbs"]:

@@ -277,6 +277,28 @@ export interface SystemTime {
   hostname: string;
 }
 
+export interface ComponentVersion {
+  ok?: boolean;
+  component?: string;
+  agent_version?: string;
+  package_version?: string;
+  git_sha?: string | null;
+  started_at?: string | null;
+  installed_path?: string | null;
+  python_executable?: string | null;
+  protocol_version?: string | null;
+  capabilities?: string[];
+  routes?: string[];
+  message?: string;
+}
+
+export interface SystemVersion {
+  api: ComponentVersion;
+  web: ComponentVersion;
+  proxmox_agent: ComponentVersion;
+  pbs_agent: ComponentVersion;
+}
+
 export interface AutoSyncResult {
   enabled: boolean;
   proxmox_triggered: boolean;

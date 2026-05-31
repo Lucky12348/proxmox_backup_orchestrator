@@ -1,7 +1,9 @@
 from dataclasses import dataclass
+from typing import Iterable
 
 from app.core.config import get_settings
 from app.models import DiskPreparationMode, ExternalBackupMode, ExternalDisk
+from app.services.disk_identity import canonical_serial_number, serial_aliases
 from app.services.host_agent import HostAgentError, get_host_agent_client, get_pbs_agent_client
 
 
@@ -34,6 +36,24 @@ class AgentCommandError(RuntimeError):
         self.command_summary = command_summary
         self.execution_cwd = execution_cwd
         self.return_code = return_code
+
+
+class AgentCompatibilityError(RuntimeError):
+    pass
+
+
+REQUIRED_PBS_CAPABILITIES = {
+    "version-endpoint",
+    "inspect-disk-alias-resolution",
+    "external-export-objects-status",
+    "external-export-objects-cleanup",
+    "dedicated-pbs-eject",
+}
+REQUIRED_HOST_CAPABILITIES = {
+    "version-endpoint",
+    "qemu-usb-attach",
+    "qemu-usb-detach",
+}
 
 
 class ExternalBackupAgentBridge:
@@ -84,6 +104,9 @@ class ExternalBackupAgentBridge:
             "datastore_name": datastore_name,
             "confirmation": True,
         }
+        pbs_mount_path = getattr(disk, "pbs_mount_path", None)
+        if pbs_mount_path:
+            payload["mount_path"] = pbs_mount_path
         if run_id is not None:
             payload.update(self._callback_payload(run_id))
         return self._run_command(self.pbs_client, "/prepare-dedicated-pbs-datastore", payload)
@@ -110,10 +133,26 @@ class ExternalBackupAgentBridge:
         return self._run_command(self.pbs_client, "/run-external-export", payload)
 
     def inspect_disk_on_pbs(self, disk: ExternalDisk) -> AgentCommandResult:
-        return self._run_command(
-            self.pbs_client,
-            "/inspect-disk",
-            {"disk": disk.serial_number},
+        errors: list[str] = []
+        for identifier in _disk_identifiers(disk):
+            try:
+                result = self._run_command(self.pbs_client, "/inspect-disk", {"disk": identifier})
+            except AgentCommandError as exc:
+                errors.append(str(exc))
+                continue
+            if result.ok:
+                return result
+            errors.append(result.message)
+        message = errors[-1] if errors else f"Unable to inspect disk `{disk.serial_number}` on PBS."
+        return AgentCommandResult(
+            ok=False,
+            message=message,
+            stdout_log=None,
+            stderr_log="\n".join(errors) or None,
+            command_summary="POST /inspect-disk",
+            execution_cwd=self.pbs_client.base_url,
+            return_code=1,
+            payload=None,
         )
 
     def eject_dedicated_pbs_datastore(
@@ -141,6 +180,10 @@ class ExternalBackupAgentBridge:
 
     def cleanup_external_export_objects(self) -> AgentCommandResult:
         return self._run_command(self.pbs_client, "/external-export-objects/cleanup", {})
+
+    def assert_external_backup_capabilities(self) -> None:
+        _assert_capabilities(self.pbs_client, REQUIRED_PBS_CAPABILITIES, "Agent PBS incompatible ou non mis a jour. Mettre a jour l'agent PBS.")
+        _assert_capabilities(self.host_client, REQUIRED_HOST_CAPABILITIES, "Agent Proxmox incompatible ou non mis a jour. Mettre a jour l'agent Proxmox.")
 
     def _run_command(self, client, path: str, payload: dict[str, object]) -> AgentCommandResult:
         try:
@@ -177,3 +220,38 @@ class ExternalBackupAgentBridge:
 
 def get_external_backup_agent_bridge() -> ExternalBackupAgentBridge:
     return ExternalBackupAgentBridge()
+
+
+def _assert_capabilities(client, required: Iterable[str], message: str) -> None:
+    try:
+        payload = client.get_version()
+    except HostAgentError as exc:
+        raise AgentCompatibilityError(message) from exc
+    capabilities = payload.get("capabilities")
+    if not isinstance(capabilities, list):
+        raise AgentCompatibilityError(message)
+    missing = set(required) - {str(item) for item in capabilities}
+    if missing:
+        raise AgentCompatibilityError(f"{message} Capacites manquantes: {', '.join(sorted(missing))}.")
+
+
+def _disk_identifiers(disk: ExternalDisk) -> list[str]:
+    identifiers: list[str] = []
+    raw_values = [
+        disk.serial_number,
+        getattr(disk, "canonical_serial_number", None),
+        getattr(disk, "reported_serial_number", None),
+        getattr(disk, "pbs_device_path", None),
+        *(getattr(disk, "serial_aliases", None) or []),
+    ]
+    for value in raw_values:
+        if isinstance(value, str) and value.strip() and value.strip() not in identifiers:
+            identifiers.append(value.strip())
+    for value in list(identifiers):
+        for alias in serial_aliases(value):
+            if alias and alias not in identifiers:
+                identifiers.append(alias)
+        canonical = canonical_serial_number(value)
+        if canonical and canonical not in identifiers:
+            identifiers.append(canonical)
+    return identifiers

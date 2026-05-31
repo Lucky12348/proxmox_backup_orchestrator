@@ -11,7 +11,7 @@ from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models import BackupRunStatus, ExternalBackupMode, ExternalBackupRun, ExternalDisk
 from app.services.disk_handoff import handoff_disk_to_pbs
-from app.services.external_backup_agent import AgentCommandError
+from app.services.external_backup_agent import AgentCommandError, AgentCompatibilityError
 from app.services.external_backup_agent import get_external_backup_agent_bridge
 from app.services.external_backup_execution import build_export_target_path, get_external_backup_execution_service
 from app.services.notifications import notify_backup_failure, notify_backup_success
@@ -30,7 +30,7 @@ def _expected_pbs_mount_path(serial_number: str) -> PurePosixPath:
 
 
 def build_external_backup_plan(disk: ExternalDisk) -> ExternalBackupPlan:
-    base_path = _expected_pbs_mount_path(disk.serial_number)
+    base_path = PurePosixPath(disk.pbs_mount_path).parent if disk.pbs_mount_path else _expected_pbs_mount_path(disk.serial_number)
     settings = get_settings()
 
     if disk.dedicated_backup_disk or not settings.external_backup_legacy_coexistence_enabled:
@@ -471,6 +471,11 @@ def assert_no_active_external_backup(db: Session) -> None:
         )
 
     bridge = get_external_backup_agent_bridge()
+    if hasattr(bridge, "assert_external_backup_capabilities"):
+        try:
+            bridge.assert_external_backup_capabilities()
+        except AgentCompatibilityError as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     try:
         result = bridge.inspect_external_export_objects()
     except AgentCommandError as exc:

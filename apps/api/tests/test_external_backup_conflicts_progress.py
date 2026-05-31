@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.base import Base
 from app.models import BackupRunStatus, ExternalBackupMode, ExternalBackupRun, ExternalDisk
 from app.services.external_backup_agent import AgentCommandResult
-from app.services.external_backups import append_external_backup_run_log, run_external_backup
+from app.services.external_backups import append_external_backup_run_log, build_external_backup_plan, run_external_backup
 
 
 class ExternalBackupConflictProgressTests(TestCase):
@@ -49,6 +49,29 @@ class ExternalBackupConflictProgressTests(TestCase):
 
         self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(raised.exception.detail["message"], "Un backup externe est deja en cours")
+
+    def test_manual_backup_returns_503_if_agent_capabilities_are_missing_before_run_creation(self):
+        disk = _disk()
+        self.session.add(disk)
+        self.session.commit()
+
+        with (
+            patch("app.services.external_backups.get_external_backup_agent_bridge", return_value=_IncompatibleBridge()),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            run_external_backup(self.session, disk.id, confirmation=True)
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(self.session.query(ExternalBackupRun).count(), 0)
+
+    def test_external_backup_plan_preserves_existing_pbs_mount_path(self):
+        disk = _disk()
+        disk.serial_number = "WXD2DA1L1E7C"
+        disk.pbs_mount_path = "/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore"
+
+        plan = build_external_backup_plan(disk)
+
+        self.assertEqual(plan.target_path, "/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore")
 
     def test_progress_parser_updates_external_run(self):
         disk = _disk()
@@ -104,6 +127,19 @@ class _ActiveBridge:
             return_code=0,
             payload={"active": True, "items": [{"kind": "sync-job", "name": "pbo-export-sync-test"}]},
         )
+
+    def assert_external_backup_capabilities(self):
+        return None
+
+
+class _IncompatibleBridge:
+    def assert_external_backup_capabilities(self):
+        from app.services.external_backup_agent import AgentCompatibilityError
+
+        raise AgentCompatibilityError("Agent PBS incompatible ou non mis a jour. Mettre a jour l'agent PBS.")
+
+    def inspect_external_export_objects(self):
+        raise AssertionError("compatibility failure should block before object inspection")
 
 
 def _disk() -> ExternalDisk:

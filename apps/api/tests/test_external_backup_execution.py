@@ -3,6 +3,7 @@ from unittest import TestCase
 
 from app.models import ExternalBackupMode
 from app.services.external_backup_agent import AgentCommandResult
+from app.services.external_backup_agent import _disk_identifiers
 from app.services.external_backup_execution import ExternalBackupExecutionService
 
 
@@ -30,6 +31,22 @@ class ExternalBackupExecutionTests(TestCase):
         self.assertIn("Requested target path:", result.prepare.stdout_log or "")
         self.assertIn("Actual datastore path:", result.prepare.stdout_log or "")
         self.assertIn("Loop image path:", result.prepare.stdout_log or "")
+
+    def test_disk_identifiers_include_historical_canonical_reported_and_aliases(self):
+        disk = SimpleNamespace(
+            serial_number="WD-WXD2DA1L1E7C",
+            canonical_serial_number="WXD2DA1L1E7C",
+            reported_serial_number="575844324441314C31453743",
+            serial_aliases=["WDC_WXD2DA1L1E7C"],
+            pbs_device_path="/dev/sdc",
+        )
+
+        identifiers = _disk_identifiers(disk)
+
+        self.assertLess(identifiers.index("WD-WXD2DA1L1E7C"), identifiers.index("WXD2DA1L1E7C"))
+        self.assertIn("575844324441314C31453743", identifiers)
+        self.assertIn("WDC_WXD2DA1L1E7C", identifiers)
+        self.assertIn("/dev/sdc", identifiers)
 
 
 class FakeBridge:

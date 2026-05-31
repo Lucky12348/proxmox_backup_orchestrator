@@ -6,6 +6,7 @@ import {
   getNotificationPreferences,
   getNotificationStatus,
   getSystemTime,
+  getSystemVersion,
   resetNotificationPreferences,
   sendTestNotification,
   updateNotificationPreferences,
@@ -15,7 +16,7 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import type { SettingsPageProps } from "./shared";
-import type { MaintenanceAction, MaintenanceCommandResult, MaintenanceComponentStatus, NotificationPreferences, NotificationStatus } from "../types";
+import type { ComponentVersion, MaintenanceAction, MaintenanceCommandResult, MaintenanceComponentStatus, NotificationPreferences, NotificationStatus, SystemVersion } from "../types";
 import { formatDateTimeLocal } from "../utils";
 
 type MaintenanceComponent = "app" | "proxmox-agent" | "pbs-agent";
@@ -35,6 +36,18 @@ const COMPONENTS: { id: MaintenanceComponent; backend: string; label: string }[]
   { id: "pbs-agent", backend: "pbs-agent", label: "PBS agent" },
 ];
 const UPDATE_ALL_ORDER: MaintenanceComponent[] = ["proxmox-agent", "pbs-agent", "app"];
+const REQUIRED_HOST_CAPABILITIES = [
+  "version-endpoint",
+  "qemu-usb-attach",
+  "qemu-usb-detach",
+];
+const REQUIRED_PBS_CAPABILITIES = [
+  "version-endpoint",
+  "inspect-disk-alias-resolution",
+  "external-export-objects-status",
+  "external-export-objects-cleanup",
+  "dedicated-pbs-eject",
+];
 
 const initialMeta: Record<MaintenanceComponent, ComponentMeta> = {
   app: { uiState: "idle", lastCheckedAt: null, lastUpdatedAt: null, message: null, logs: [] },
@@ -151,6 +164,8 @@ export function SettingsPage({ t }: SettingsPageProps) {
   const [notificationTestRunning, setNotificationTestRunning] = useState(false);
   const [notificationSaving, setNotificationSaving] = useState(false);
   const [notificationResult, setNotificationResult] = useState<{ message: string; tone: "info" | "error" } | null>(null);
+  const [systemVersion, setSystemVersion] = useState<SystemVersion | null>(null);
+  const [systemVersionError, setSystemVersionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [banner, setBanner] = useState<{ message: string; tone: "info" | "error" } | null>(null);
 
@@ -195,7 +210,17 @@ export function SettingsPage({ t }: SettingsPageProps) {
   useEffect(() => {
     void loadStatus().then(() => void checkAllComponents());
     void loadNotificationStatus();
+    void loadSystemVersion();
   }, []);
+
+  async function loadSystemVersion() {
+    try {
+      setSystemVersion(await getSystemVersion());
+      setSystemVersionError(null);
+    } catch (error) {
+      setSystemVersionError(error instanceof Error ? error.message : "Unknown error");
+    }
+  }
 
   async function checkComponent(component: MaintenanceComponent) {
     setComponentMeta(component, { uiState: "checking", message: null });
@@ -609,9 +634,54 @@ export function SettingsPage({ t }: SettingsPageProps) {
     return components.find((item) => item.component === backendName(component));
   }
 
+  function agentOutdated(component: ComponentVersion | undefined, requiredCapabilities: string[]) {
+    if (!component?.ok) return true;
+    const capabilities = new Set(component.capabilities ?? []);
+    return requiredCapabilities.some((capability) => !capabilities.has(capability));
+  }
+
+  function renderVersionRow(label: string, component: ComponentVersion | undefined, requiredCapabilities: string[] = []) {
+    const outdated = requiredCapabilities.length > 0 && agentOutdated(component, requiredCapabilities);
+    return (
+      <article className="maintenance-card" key={label}>
+        <div className="panel-card-header">
+          <h3>{label}</h3>
+          <StatusBadge tone={outdated ? "danger" : component?.ok === false ? "danger" : "success"}>
+            {outdated ? "Outdated" : component?.ok === false ? "Unavailable" : "OK"}
+          </StatusBadge>
+        </div>
+        <div className="integration-details">
+          <div className="summary-row"><span>Git SHA</span><strong>{shortCommit(component?.git_sha ?? null)}</strong></div>
+          <div className="summary-row"><span>Version</span><strong>{component?.package_version ?? component?.agent_version ?? t.notAvailable}</strong></div>
+          <div className="summary-row"><span>Protocol</span><strong>{component?.protocol_version ?? t.notAvailable}</strong></div>
+          <div className="summary-row"><span>Path</span><strong>{component?.installed_path ?? t.notAvailable}</strong></div>
+        </div>
+        {component?.message ? <p className={component.ok === false ? "integration-message danger-text" : "integration-message"}>{component.message}</p> : null}
+      </article>
+    );
+  }
+
   return (
     <div className="page-stack">
       <PageHeader title={t.nav.settings} description={t.settingsIntro} />
+
+      <section className="panel-card">
+        <div className="panel-card-header">
+          <h2>Component Versions</h2>
+          <button className="ghost-button" onClick={() => void loadSystemVersion()} type="button">
+            {t.refresh}
+          </button>
+        </div>
+        {systemVersionError ? (
+          <ErrorBanner dismissLabel={t.dismiss} message={systemVersionError} onDismiss={() => setSystemVersionError(null)} tone="error" />
+        ) : null}
+        <div className="maintenance-grid">
+          {renderVersionRow("App API", systemVersion?.api)}
+          {renderVersionRow("Web", systemVersion?.web)}
+          {renderVersionRow("Proxmox agent", systemVersion?.proxmox_agent, REQUIRED_HOST_CAPABILITIES)}
+          {renderVersionRow("PBS agent", systemVersion?.pbs_agent, REQUIRED_PBS_CAPABILITIES)}
+        </div>
+      </section>
 
       <section className="panel-card">
         <div className="panel-card-header">

@@ -17,6 +17,7 @@ import {
   getPreferredDisks,
   getProxmoxInventory,
   getProxmoxStatus,
+  getSystemVersion,
   getUnplannedAssets,
   getVMs,
   getOverview,
@@ -46,6 +47,7 @@ import type {
   UnplannedAsset,
   ScheduledBackupEvent,
   ScheduledBackupRun,
+  SystemVersion,
 } from "../types";
 
 export interface AppDataState {
@@ -64,6 +66,7 @@ export interface AppDataState {
   pbsStatus: PBSStatus;
   proxmoxStatus: ProxmoxStatus;
   proxmoxBackupJobs: ProxmoxBackupJob[];
+  systemVersion: SystemVersion | null;
 }
 
 async function fetchAppData(): Promise<AppDataState> {
@@ -84,6 +87,7 @@ async function fetchAppData(): Promise<AppDataState> {
     proxmoxInventory,
     pbsStatus,
     pbsInventory,
+    systemVersion,
   ] = await Promise.all([
     getAgentStatus(),
     getOverview(),
@@ -101,6 +105,7 @@ async function fetchAppData(): Promise<AppDataState> {
     getProxmoxInventory(),
     getPBSStatus(),
     getPBSInventory(),
+    getSystemVersion().catch(() => null),
   ]);
 
   return {
@@ -119,6 +124,7 @@ async function fetchAppData(): Promise<AppDataState> {
     pbsStatus,
     proxmoxStatus,
     proxmoxBackupJobs,
+    systemVersion,
   };
 }
 

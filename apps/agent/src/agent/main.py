@@ -10,6 +10,7 @@ import socket
 import stat
 import string
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -32,6 +33,16 @@ logger = logging.getLogger("agent")
 EXCLUDED_DEVICE_PREFIXES = ("loop", "dm-", "zd", "sr")
 SYSTEM_MOUNTPOINTS = {"/", "/boot", "/boot/efi"}
 SYSTEM_FS_MARKERS = {"LVM2_member", "zfs_member"}
+AGENT_PROTOCOL_VERSION = "2026-05-31"
+AGENT_CAPABILITIES = {
+    "version-endpoint",
+    "inspect-disk-alias-resolution",
+    "external-export-objects-status",
+    "external-export-objects-cleanup",
+    "dedicated-pbs-eject",
+    "qemu-usb-attach",
+    "qemu-usb-detach",
+}
 
 
 def parse_bool(value: str | None, default: bool = False) -> bool:
@@ -144,6 +155,23 @@ def post_mock_disk_report(settings: AgentSettings) -> None:
     }
     post_json(settings, "/agent/disks/report", payload)
     logger.info("Mock disk report sent for host %s", settings.hostname)
+
+
+def version_payload(settings: AgentSettings, routes: list[str] | None = None) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "component": "agent",
+        "agent_version": settings.agent_version,
+        "package_version": settings.agent_version,
+        "git_sha": _git_sha(settings.repo_path),
+        "started_at": None,
+        "installed_path": str(Path(__file__).resolve()),
+        "python_executable": sys_executable(),
+        "protocol_version": AGENT_PROTOCOL_VERSION,
+        "capabilities": sorted(AGENT_CAPABILITIES),
+        "routes": sorted(routes or []),
+        "message": "Agent version inspected.",
+    }
 
 
 def sync_state(settings: AgentSettings) -> None:
@@ -308,6 +336,7 @@ def prepare_dedicated_pbs_datastore_result(
     confirmation: bool,
     force_format: bool,
     settings: AgentSettings,
+    preferred_mount_path: str | None = None,
     callback_run_id: int | None = None,
     callback_url: str | None = None,
     callback_token: str | None = None,
@@ -326,7 +355,7 @@ def prepare_dedicated_pbs_datastore_result(
         )
     _assert_safe_dedicated_disk(disk)
 
-    mount_path = default_mount_base_path(None) / serial / "pbs-datastore"
+    mount_path = Path(preferred_mount_path).resolve(strict=False) if preferred_mount_path else default_mount_base_path(None) / serial / "pbs-datastore"
     partition_path = _first_partition_path(device_path)
     command_summaries: list[str] = []
     stdout_logs: list[str] = []
@@ -1154,6 +1183,7 @@ def disk_priority(disk: dict[str, Any]) -> int:
 def resolve_disk(identifier: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     all_nodes = list_all_block_nodes()
     normalized = identifier.strip()
+    identifier_aliases = set(serial_aliases(normalized))
     for node in all_nodes:
         if node["type"] != "disk":
             continue
@@ -1167,8 +1197,39 @@ def resolve_disk(identifier: str) -> tuple[dict[str, Any], list[dict[str, Any]]]
             ]
         ):
             return node, all_nodes
+        if identifier_aliases and identifier_aliases & set(disk_identifier_aliases(node)):
+            return node, all_nodes
 
     raise FileNotFoundError(f"Unable to resolve disk from identifier: {identifier}")
+
+
+def disk_identifier_aliases(node: dict[str, Any]) -> list[str]:
+    aliases: list[str] = []
+    raw_values: list[str | None] = [
+        str(node.get("serial") or "") or None,
+        str(node.get("model") or "") or None,
+    ]
+    udev_props = load_udev_properties(device_name(node))
+    raw_values.extend(
+        [
+            udev_props.get("ID_SERIAL"),
+            udev_props.get("ID_SERIAL_SHORT"),
+            udev_props.get("ID_WWN"),
+            udev_props.get("ID_MODEL"),
+            udev_props.get("ID_VENDOR"),
+            " ".join(
+                value
+                for value in [udev_props.get("ID_VENDOR"), udev_props.get("ID_MODEL")]
+                if value
+            )
+            or None,
+        ]
+    )
+    for raw_value in raw_values:
+        for alias in serial_aliases(raw_value):
+            if alias and alias not in aliases:
+                aliases.append(alias)
+    return aliases
 
 
 def list_all_block_nodes() -> list[dict[str, Any]]:
@@ -2090,7 +2151,7 @@ def mount_path_serial_aliases(value: str | None) -> list[str]:
                 aliases.append(normalized)
     canonical = canonical_serial_number(value)
     if canonical:
-        for candidate in (canonical, f"WD-{canonical}", f"WDC-{canonical}"):
+        for candidate in (canonical, f"WD-{canonical}", f"WDC-{canonical}", f"WDC_{canonical}"):
             if candidate not in aliases:
                 aliases.append(candidate)
     return aliases
@@ -2721,6 +2782,17 @@ def post_progress_callback(
 
 def current_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def sys_executable() -> str:
+    return sys.executable
+
+
+def _git_sha(repo_path: str) -> str | None:
+    try:
+        return run_command(["git", "-C", repo_path, "rev-parse", "HEAD"])
+    except Exception:
+        return None
 
 
 def device_name(device: dict[str, Any]) -> str:

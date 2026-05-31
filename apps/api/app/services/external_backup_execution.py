@@ -125,7 +125,7 @@ class ExternalBackupExecutionService:
         run_id: int | None,
         progress: Callable[[str, str, str | None], None] | None,
     ) -> ExternalBackupExecutionResult:
-        target_datastore_name = build_dedicated_datastore_name(disk.serial_number)
+        target_datastore_name = getattr(disk, "pbs_datastore_name", None) or build_dedicated_datastore_name(disk.serial_number)
         _report(progress, "inspect_disk", "Inspecting disk on PBS agent.")
         disk_inspect = self._bridge.inspect_disk_on_pbs(disk)
         if not disk_inspect.ok:
