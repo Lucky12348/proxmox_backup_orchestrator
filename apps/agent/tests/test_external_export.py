@@ -8,6 +8,7 @@ from agent.main import (
     AgentSettings,
     SubprocessResult,
     _ensure_loop_image_mounted,
+    _assert_safe_eject_mount_path,
     _find_mount_source,
     _fuser_process_lines,
     _is_safe_pbs_fuser_line,
@@ -230,6 +231,43 @@ class ExternalExportDatastoreCreateTests(TestCase):
         self.assertTrue(result["ok"])
         self.assertIn(["sync"], commands)
         self.assertTrue(any(command[0] == "umount" and command[1].endswith("pbs-datastore") for command in commands))
+
+    def test_eject_accepts_historical_mount_path_for_canonical_wd_alias(self):
+        commands: list[list[str]] = []
+
+        def fake_run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResult:
+            commands.append(command)
+            return SubprocessResult(command, 0, "", "")
+
+        with (
+            patch("agent.main.default_mount_base_path", return_value=Path("/mnt/pbo")),
+            patch("agent.main._assert_safe_eject_mount_path"),
+            patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
+            patch("agent.main._pbs_datastore_has_running_tasks", return_value=False),
+            patch("agent.main._pbo_export_sync_job_running", return_value=False),
+            patch("agent.main._find_mount_source", side_effect=["/dev/sdc1", None, None]),
+            patch("agent.main.run_subprocess", side_effect=fake_run_subprocess),
+        ):
+            result = eject_dedicated_pbs_datastore_result(
+                "WXD2DA1L1E7C",
+                "pbo-wd-wxd2da1l1e7c",
+                "/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore",
+                AgentSettings(),
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(
+            any(
+                command[0] == "umount"
+                and command[1].replace("\\", "/").endswith("WD-WXD2DA1L1E7C/pbs-datastore")
+                for command in commands
+            )
+        )
+
+    def test_eject_refuses_unsafe_mount_paths(self):
+        for path in ["/", "/boot", "/boot/efi", "/mnt/datastore/backup-store", "/tmp/WXD2DA1L1E7C/pbs-datastore", "/mnt/pbo/WXD2DA1L1E7C/not-pbs"]:
+            with self.subTest(path=path), self.assertRaises(RuntimeError):
+                _assert_safe_eject_mount_path(Path(path))
 
     def test_eject_busy_datastore_restarts_pbs_services_when_only_pbs_blocks_mount(self):
         with tempfile.TemporaryDirectory() as temp_dir:

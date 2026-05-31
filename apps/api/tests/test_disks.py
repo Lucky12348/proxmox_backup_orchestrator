@@ -240,6 +240,9 @@ class DiskInventoryTests(TestCase):
             trusted=True,
             dedicated_backup_disk=True,
             planning_notes="keep me",
+            pbs_mount_path="/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore",
+            pbs_datastore_name="pbo-wd-wxd2da1l1e7c",
+            prepared_as_pbs_datastore=True,
         )
         self.session.add(disk)
         self.session.commit()
@@ -273,13 +276,16 @@ class DiskInventoryTests(TestCase):
         self.assertEqual(len(disks), 1)
         refreshed = disks[0]
         self.assertEqual(refreshed.id, disk.id)
-        self.assertEqual(refreshed.serial_number, "WXD2DA1L1E7C")
+        self.assertEqual(refreshed.serial_number, "WD-WXD2DA1L1E7C")
         self.assertEqual(refreshed.reported_serial_number, "575844324441314C31453743")
         self.assertEqual(refreshed.reported_model_name, "Game Drive")
         self.assertEqual(refreshed.reported_mount_path, "/mnt/front-usb")
         self.assertEqual(refreshed.canonical_serial_number, "WXD2DA1L1E7C")
         self.assertIn("575844324441314C31453743", refreshed.serial_aliases)
         self.assertEqual(refreshed.display_name, "WDC WD40NMZW-59BCBS0")
+        self.assertEqual(refreshed.pbs_mount_path, "/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore")
+        self.assertEqual(refreshed.pbs_datastore_name, "pbo-wd-wxd2da1l1e7c")
+        self.assertTrue(refreshed.prepared_as_pbs_datastore)
         self.assertTrue(refreshed.trusted)
         self.assertTrue(refreshed.dedicated_backup_disk)
         self.assertEqual(refreshed.planning_notes, "keep me")
@@ -288,7 +294,7 @@ class DiskInventoryTests(TestCase):
         description = known_notify.call_args.args[0]
         self.assertIn("Serie reportee: 575844324441314C31453743", description)
         self.assertIn("Serie canonique: WXD2DA1L1E7C", description)
-        self.assertIn("Serie existante: WXD2DA1L1E7C", description)
+        self.assertIn("Serie existante: WD-WXD2DA1L1E7C", description)
         self.assertIn("Detection: usb port 1-2", description)
 
     def test_zero_size_disk_is_marked_unusable_and_does_not_trigger_planning_or_notifications(self):

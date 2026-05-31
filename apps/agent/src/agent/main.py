@@ -1,4 +1,5 @@
 import argparse
+import binascii
 import hashlib
 import json
 import logging
@@ -7,6 +8,7 @@ import os.path
 import shutil
 import socket
 import stat
+import string
 import subprocess
 import threading
 import time
@@ -476,18 +478,18 @@ def eject_dedicated_pbs_datastore_result(
     settings = settings or AgentSettings()
     clean_serial = serial.strip()
     requested_mount = Path(mount_path)
-    expected_mount = default_mount_base_path(None) / clean_serial / "pbs-datastore"
+    expected_mounts = _expected_pbo_datastore_mount_paths(clean_serial)
     resolved_mount = requested_mount.resolve(strict=False)
-    resolved_expected_mount = expected_mount.resolve(strict=False)
     command_summaries: list[str] = []
     stdout_logs: list[str] = []
     stderr_logs: list[str] = []
 
     if not clean_serial:
         raise RuntimeError("Dedicated datastore eject requires a disk serial number.")
-    if resolved_mount != resolved_expected_mount:
+    if resolved_mount not in {path.resolve(strict=False) for path in expected_mounts}:
         raise RuntimeError(
-            f"Refusing to eject `{requested_mount}` because it is not the expected PBO path `{expected_mount}`."
+            "Refusing to eject "
+            f"`{requested_mount}` because it is not an expected PBO path for disk serial `{clean_serial}`."
         )
     _assert_safe_eject_mount_path(resolved_mount)
 
@@ -2019,6 +2021,79 @@ def _assert_safe_eject_mount_path(mount_path: Path) -> None:
         raise RuntimeError(f"Refusing to unmount protected path `{mount_path}`.")
     if not str(mount_path).startswith("/mnt/pbo/") or mount_path.name != "pbs-datastore":
         raise RuntimeError(f"Refusing to unmount non-PBO datastore path `{mount_path}`.")
+    try:
+        mount_path.relative_to(Path("/mnt/pbo"))
+    except ValueError as exc:
+        raise RuntimeError(f"Refusing to unmount non-PBO datastore path `{mount_path}`.") from exc
+    if mount_path.parent.parent != Path("/mnt/pbo"):
+        raise RuntimeError(f"Refusing to unmount non-PBO datastore path `{mount_path}`.")
+
+
+def _expected_pbo_datastore_mount_paths(serial: str) -> list[Path]:
+    base_path = default_mount_base_path(None)
+    return [base_path / alias / "pbs-datastore" for alias in mount_path_serial_aliases(serial)]
+
+
+def normalize_serial_for_compare(value: str | None) -> str:
+    if value is None:
+        return ""
+    return "".join(char for char in value.strip().upper() if char not in " _-")
+
+
+def decode_hex_ascii_serial(value: str | None) -> str | None:
+    clean = normalize_serial_for_compare(value)
+    if len(clean) < 8 or len(clean) % 2 != 0:
+        return None
+    if any(char not in string.hexdigits.upper() for char in clean):
+        return None
+    try:
+        decoded = binascii.unhexlify(clean).decode("ascii")
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        return None
+    if not decoded or any(char not in string.printable or char in "\r\n\t\x0b\x0c" for char in decoded):
+        return None
+    return decoded
+
+
+def canonical_serial_number(value: str | None) -> str:
+    decoded = decode_hex_ascii_serial(value)
+    candidate = normalize_serial_for_compare(decoded or value)
+    for prefix in ("WDC", "WD"):
+        if candidate.startswith(prefix):
+            remainder = candidate[len(prefix) :]
+            if len(remainder) >= 6 and remainder.startswith("W"):
+                return remainder
+    return candidate
+
+
+def serial_aliases(value: str | None) -> list[str]:
+    aliases: list[str] = []
+    for candidate in (value, decode_hex_ascii_serial(value), canonical_serial_number(value)):
+        normalized = normalize_serial_for_compare(candidate)
+        if normalized and normalized not in aliases:
+            aliases.append(normalized)
+        canonical = canonical_serial_number(candidate)
+        if canonical and canonical not in aliases:
+            aliases.append(canonical)
+    return aliases
+
+
+def mount_path_serial_aliases(value: str | None) -> list[str]:
+    aliases: list[str] = []
+    for candidate in (value, decode_hex_ascii_serial(value), canonical_serial_number(value)):
+        if isinstance(candidate, str):
+            stripped = candidate.strip()
+            if stripped and stripped not in aliases:
+                aliases.append(stripped)
+            normalized = normalize_serial_for_compare(candidate)
+            if normalized and normalized not in aliases:
+                aliases.append(normalized)
+    canonical = canonical_serial_number(value)
+    if canonical:
+        for candidate in (canonical, f"WD-{canonical}", f"WDC-{canonical}"):
+            if candidate not in aliases:
+                aliases.append(candidate)
+    return aliases
 
 
 def _is_target_busy_umount_result(result: SubprocessResult) -> bool:

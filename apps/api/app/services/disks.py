@@ -138,9 +138,11 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
                 disk.dedicated_backup_disk = False
                 disk.trusted = False
             previous_presence = "never_seen"
+            is_new_disk = True
             logger.debug("disk classified as new because serial %s canonical %s was not found", item.serial_number, incoming_canonical)
         else:
             previous_presence = disk.presence_state or ("present" if disk.connected else "absent")
+            is_new_disk = False
             logger.debug(
                 "disk classified as known because serial %s canonical %s matched disk id %s",
                 item.serial_number,
@@ -155,7 +157,7 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
         disk.reported_mount_path = item.mount_path
         disk.canonical_serial_number = incoming_canonical or disk.canonical_serial_number
         disk.serial_aliases = _merge_aliases(disk.serial_aliases, [*incoming_aliases, *serial_aliases(previous_serial)])
-        if not disk.serial_number or serials_match(disk.serial_number, item.serial_number):
+        if is_new_disk and (not disk.serial_number or serials_match(disk.serial_number, item.serial_number)):
             disk.serial_number = disk.canonical_serial_number or disk.serial_number or item.serial_number
         disk.display_name = _reconcile_display_name(disk.display_name, item.display_name)
         disk.model_name = _reconcile_model_name(disk.model_name, item.model_name)
