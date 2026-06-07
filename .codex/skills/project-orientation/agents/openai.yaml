@@ -1,0 +1,4 @@
+interface:
+  display_name: "PBO Project Orientation"
+  short_description: "Map the monorepo and find the right area to change"
+  default_prompt: "Use $project-orientation to locate the correct app, entrypoint, and docs before modifying proxmox_backup_orchestrator."

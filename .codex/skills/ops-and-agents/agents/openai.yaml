@@ -1,0 +1,4 @@
+interface:
+  display_name: "PBO Ops And Agents"
+  short_description: "Work on agents, compose wiring, maintenance, and operational safety"
+  default_prompt: "Use $ops-and-agents to inspect deployment wiring, privileged agent behavior, and operational docs before changing infrastructure-facing code."

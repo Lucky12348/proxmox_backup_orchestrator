@@ -1,0 +1,4 @@
+interface:
+  display_name: "PBO Backend Workflow"
+  short_description: "Modify FastAPI orchestration, disk flows, and backend integrations safely"
+  default_prompt: "Use $backup-workflow-backend to trace routes, services, schemas, and tests before changing backup orchestration logic."
