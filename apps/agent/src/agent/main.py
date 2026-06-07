@@ -40,6 +40,7 @@ AGENT_CAPABILITIES = {
     "external-export-objects-status",
     "external-export-objects-cleanup",
     "dedicated-pbs-eject",
+    "filesystem-usage",
     "qemu-usb-attach",
     "qemu-usb-detach",
 }
@@ -953,6 +954,7 @@ def inspect_disk_result(identifier: str, mount_base_path: str | None = None) -> 
     filesystem_type = None
     if filesystem_node is not None:
         filesystem_type = blkid_info.get("TYPE") or filesystem_node.get("fstype")
+    filesystem_usage = filesystem_usage_for_mount_path(filesystem_node["mountpoint"] if filesystem_node else None)
     candidate_mount_path = str(default_mount_base_path(mount_base_path) / serial)
     payload = {
         "success": True,
@@ -962,6 +964,9 @@ def inspect_disk_result(identifier: str, mount_base_path: str | None = None) -> 
             "filesystem_type": filesystem_type,
             "uuid": blkid_info.get("UUID"),
             "mount_path": filesystem_node["mountpoint"] if filesystem_node else None,
+            "filesystem_total_gb": filesystem_usage["total_gb"],
+            "filesystem_used_gb": filesystem_usage["used_gb"],
+            "filesystem_free_gb": filesystem_usage["free_gb"],
         },
         "partition_info": [summarize_node(node) for node in list_partition_nodes(disk)],
         "candidate_mount_path": candidate_mount_path,
@@ -1574,6 +1579,21 @@ def filesystem_usage_for_mount_path(mount_path: str | None) -> dict[str, int | N
     }
 
 
+def filesystem_usage_result(mount_path: str) -> dict[str, Any]:
+    resolved_mount = Path(mount_path).resolve(strict=False)
+    _assert_safe_filesystem_usage_mount_path(resolved_mount)
+    usage = filesystem_usage_for_mount_path(str(resolved_mount))
+    return {
+        "ok": True,
+        "success": True,
+        "mount_path": str(resolved_mount),
+        "filesystem_total_gb": usage["total_gb"],
+        "filesystem_used_gb": usage["used_gb"],
+        "filesystem_free_gb": usage["free_gb"],
+        "message": "Filesystem usage inspected.",
+    }
+
+
 def flatten_partitions(children: list[dict[str, Any]]) -> list[dict[str, Any]]:
     flattened: list[dict[str, Any]] = []
     for child in children:
@@ -2114,6 +2134,16 @@ def _assert_safe_eject_mount_path(mount_path: Path) -> None:
         raise RuntimeError(f"Refusing to unmount non-PBO datastore path `{mount_path}`.") from exc
     if mount_path.parent.parent != Path("/mnt/pbo"):
         raise RuntimeError(f"Refusing to unmount non-PBO datastore path `{mount_path}`.")
+
+
+def _assert_safe_filesystem_usage_mount_path(mount_path: Path) -> None:
+    dangerous_mounts = {Path("/"), Path("/boot"), Path("/boot/efi"), Path("/etc")}
+    if mount_path in dangerous_mounts:
+        raise RuntimeError(f"Refusing to inspect protected path `{mount_path}`.")
+    try:
+        mount_path.relative_to(Path("/mnt"))
+    except ValueError as exc:
+        raise RuntimeError(f"Refusing to inspect filesystem usage outside `/mnt`: `{mount_path}`.") from exc
 
 
 def _expected_pbo_datastore_mount_paths(serial: str) -> list[Path]:

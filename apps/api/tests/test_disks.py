@@ -25,7 +25,7 @@ from app.schemas.external_disk import ExternalDiskUpdate
 from app.services.disk_eject import eject_dedicated_external_disk
 from app.services.disk_identity import canonical_serial_number, serials_match
 from app.services.external_backup_agent import AgentCommandResult
-from app.services.disks import ingest_agent_disk_report, list_preferred_disks
+from app.services.disks import ingest_agent_disk_report, list_preferred_disks, refresh_disk_filesystem_usage_from_pbs
 
 
 class DiskInventoryTests(TestCase):
@@ -367,6 +367,85 @@ class DiskInventoryTests(TestCase):
         self.assertIsNone(disk.filesystem_total_gb)
         self.assertIsNone(disk.filesystem_used_gb)
         self.assertIsNone(disk.filesystem_free_gb)
+
+    def test_host_report_without_mount_does_not_overwrite_existing_pbs_filesystem_usage(self):
+        disk = _external_disk(
+            serial_number="WD-WXD2DA1L1E7C",
+            display_name="Disk",
+            filesystem_total_gb=3726,
+            filesystem_used_gb=1200,
+            filesystem_free_gb=2526,
+            pbs_visible=True,
+            pbs_mount_path="/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore",
+        )
+        self.session.add(disk)
+        self.session.commit()
+
+        report = AgentDiskReportCreate(
+            hostname="promox",
+            observed_at=datetime(2026, 5, 31, 10, 0, 0),
+            disks=[
+                {
+                    "serial_number": "WD-WXD2DA1L1E7C",
+                    "display_name": "Disk",
+                    "model_name": "Game Drive",
+                    "capacity_gb": 4000,
+                    "filesystem_type": None,
+                    "mount_path": None,
+                    "detection_reason": "usb port 1-2",
+                    "candidate_type": "usb",
+                    "connected": True,
+                    "trusted": True,
+                }
+            ],
+        )
+
+        with (
+            patch("app.services.disks.notify_new_disk_detected"),
+            patch("app.services.disks.notify_known_disk_detected"),
+        ):
+            ingest_agent_disk_report(self.session, report)
+
+        refreshed = self.session.get(ExternalDisk, disk.id)
+        self.assertEqual(refreshed.filesystem_total_gb, 3726)
+        self.assertEqual(refreshed.filesystem_used_gb, 1200)
+        self.assertEqual(refreshed.filesystem_free_gb, 2526)
+
+    def test_refresh_disk_filesystem_usage_from_pbs_updates_metrics_when_supported(self):
+        disk = _external_disk(
+            serial_number="WD-WXD2DA1L1E7C",
+            display_name="Disk",
+            pbs_mount_path="/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore",
+        )
+        self.session.add(disk)
+        self.session.commit()
+
+        fake_client = SimpleNamespace(
+            get_version=lambda: {"capabilities": ["filesystem-usage"]},
+            post=lambda path, payload: AgentCommandResult(
+                ok=True,
+                message="ok",
+                stdout_log=None,
+                stderr_log=None,
+                command_summary="POST /filesystem-usage",
+                execution_cwd="/",
+                return_code=0,
+                payload={
+                    "filesystem_total_gb": 3726,
+                    "filesystem_used_gb": 1200,
+                    "filesystem_free_gb": 2526,
+                },
+            ),
+        )
+
+        with patch("app.services.disks.get_pbs_agent_client", return_value=fake_client):
+            refreshed = refresh_disk_filesystem_usage_from_pbs(self.session, disk)
+
+        self.assertTrue(refreshed)
+        stored = self.session.get(ExternalDisk, disk.id)
+        self.assertEqual(stored.filesystem_total_gb, 3726)
+        self.assertEqual(stored.filesystem_used_gb, 1200)
+        self.assertEqual(stored.filesystem_free_gb, 2526)
 
     def test_zero_size_disk_is_marked_unusable_and_does_not_trigger_planning_or_notifications(self):
         report = AgentDiskReportCreate(

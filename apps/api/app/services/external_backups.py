@@ -300,6 +300,10 @@ def execute_external_backup_run(run_id: int) -> None:
                 disk.pbs_filesystem_type = "ext4"
                 disk.prepared_as_pbs_datastore = True
                 db.add(disk)
+                db.commit()
+                db.refresh(disk)
+                from app.services.disks import refresh_disk_filesystem_usage_from_pbs
+                refresh_disk_filesystem_usage_from_pbs(db, disk)
 
             run.status = BackupRunStatus.SUCCESS
             run.finished_at = datetime.utcnow()

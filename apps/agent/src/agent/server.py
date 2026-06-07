@@ -12,6 +12,7 @@ from agent.main import (
     build_command_failure_payload,
     current_timestamp,
     eject_dedicated_pbs_datastore_result,
+    filesystem_usage_result,
     inspect_disk_result,
     maintenance_check_result,
     maintenance_update_result,
@@ -82,6 +83,10 @@ class EjectDedicatedPbsDatastoreRequest(BaseModel):
 class InspectDiskRequest(BaseModel):
     disk: str = Field(min_length=1)
     mount_base_path: str | None = Field(default=None, max_length=255)
+
+
+class FilesystemUsageRequest(BaseModel):
+    mount_path: str = Field(min_length=1)
 
 
 class QemuUsbAttachRequest(BaseModel):
@@ -225,6 +230,17 @@ def inspect_disk(
     return _run_endpoint(
         "inspect-disk",
         lambda: inspect_disk_result(payload.disk, payload.mount_base_path),
+    )
+
+
+@app.post("/filesystem-usage", response_model=None)
+def filesystem_usage(
+    payload: FilesystemUsageRequest,
+    _: None = Depends(require_agent_token),
+) -> Response:
+    return _run_endpoint(
+        "filesystem-usage",
+        lambda: filesystem_usage_result(payload.mount_path),
     )
 
 

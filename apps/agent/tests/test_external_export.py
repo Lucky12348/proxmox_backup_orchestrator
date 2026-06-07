@@ -8,6 +8,7 @@ from agent.main import (
     AgentSettings,
     SubprocessResult,
     filesystem_usage_for_mount_path,
+    filesystem_usage_result,
     _ensure_loop_image_mounted,
     _assert_safe_eject_mount_path,
     _expected_pbo_datastore_mount_paths,
@@ -102,6 +103,10 @@ class ExternalExportDatastoreCreateTests(TestCase):
             usage = filesystem_usage_for_mount_path("/mnt/test-disk")
 
         self.assertEqual(usage, {"total_gb": None, "used_gb": None, "free_gb": None})
+
+    def test_filesystem_usage_result_rejects_path_outside_mnt(self):
+        with self.assertRaises(RuntimeError):
+            filesystem_usage_result("/var/lib")
 
     def test_dedicated_prepare_size_error_includes_raw_and_parsed_values(self):
         disk = {

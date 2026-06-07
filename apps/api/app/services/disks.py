@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models import AgentHeartbeat, ExternalDisk, ScheduledBackupEvent
 from app.schemas.agent import AgentDiskReportCreate, AgentHeartbeatCreate
+from app.services.host_agent import HostAgentError, get_pbs_agent_client
 from app.services.disk_identity import canonical_serial_number, serial_aliases, serials_match
 from app.services.notifications import (
     get_disk_detection_notify_cooldown_seconds,
@@ -164,9 +165,10 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
         disk.capacity_gb = item.capacity_gb
         disk.filesystem_type = _reconcile_filesystem_type(disk, item)
         disk.mount_path = _reconcile_mount_path(disk, item)
-        disk.filesystem_total_gb = item.filesystem_total_gb
-        disk.filesystem_used_gb = item.filesystem_used_gb
-        disk.filesystem_free_gb = item.filesystem_free_gb
+        if _should_apply_host_filesystem_usage(disk, item):
+            disk.filesystem_total_gb = item.filesystem_total_gb
+            disk.filesystem_used_gb = item.filesystem_used_gb
+            disk.filesystem_free_gb = item.filesystem_free_gb
         disk.detection_reason = ZERO_SIZE_DISK_MESSAGE if unusable_zero_size else item.detection_reason
         disk.candidate_type = "unusable" if unusable_zero_size else item.candidate_type
         if unusable_zero_size:
@@ -414,6 +416,59 @@ def _preferred_disk_visibility_condition():
 
 def _is_unusable_disk(disk: ExternalDisk) -> bool:
     return disk.capacity_gb <= 0 or disk.candidate_type == "unusable"
+
+
+def refresh_disk_filesystem_usage_from_pbs(db: Session, disk: ExternalDisk) -> bool:
+    if not disk.pbs_mount_path:
+        return False
+    client = get_pbs_agent_client()
+    try:
+        capabilities = set(client.get_version().get("capabilities") or [])
+    except HostAgentError:
+        return False
+    if "filesystem-usage" not in capabilities:
+        return False
+    try:
+        result = client.post("/filesystem-usage", {"mount_path": disk.pbs_mount_path})
+    except HostAgentError:
+        return False
+    if not result.ok:
+        return False
+    _apply_filesystem_usage_payload(disk, result.payload)
+    db.add(disk)
+    db.commit()
+    db.refresh(disk)
+    return True
+
+
+def apply_filesystem_usage_from_payload(db: Session, disk: ExternalDisk, payload: dict | None) -> None:
+    if not isinstance(payload, dict):
+        return
+    _apply_filesystem_usage_payload(disk, payload)
+    db.add(disk)
+    db.commit()
+    db.refresh(disk)
+
+
+def _apply_filesystem_usage_payload(disk: ExternalDisk, payload: dict[str, object]) -> None:
+    disk.filesystem_total_gb = _optional_int(payload.get("filesystem_total_gb"))
+    disk.filesystem_used_gb = _optional_int(payload.get("filesystem_used_gb"))
+    disk.filesystem_free_gb = _optional_int(payload.get("filesystem_free_gb"))
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _should_apply_host_filesystem_usage(disk: ExternalDisk, item) -> bool:
+    if any(value is not None for value in (item.filesystem_total_gb, item.filesystem_used_gb, item.filesystem_free_gb)):
+        return True
+    return not bool(disk.pbs_visible)
 
 
 def get_agent_status(db: Session) -> dict[str, datetime | str | bool | int | None]:

@@ -175,13 +175,23 @@ def wait_for_pbs_disk_visibility(
             continue
 
         device_path = _extract_pbs_device_path(result.payload)
+        mount_path = _extract_pbs_mount_path(result.payload)
         _report(progress, "inspect_disk", f"PBS inspect retry {attempt}/{attempts} succeeded: {device_path or disk.serial_number}.")
         disk.pbs_visible = True
         disk.pbs_device_path = device_path
+        if mount_path:
+            disk.pbs_mount_path = mount_path
+        disk.pbs_filesystem_type = _extract_pbs_filesystem_type(result.payload) or disk.pbs_filesystem_type
         disk.handoff_status = "visible_on_pbs"
         db.add(disk)
         db.commit()
         db.refresh(disk)
+        if mount_path:
+            from app.services.disks import apply_filesystem_usage_from_payload
+            apply_filesystem_usage_from_payload(db, disk, _extract_pbs_filesystem_usage_payload(result.payload))
+        elif disk.pbs_mount_path:
+            from app.services.disks import refresh_disk_filesystem_usage_from_pbs
+            refresh_disk_filesystem_usage_from_pbs(db, disk)
         return _build_status(disk, f"Disk is now visible on PBS as {device_path or disk.serial_number}.")
 
     disk.pbs_visible = False
@@ -212,13 +222,23 @@ def get_pbs_disk_visibility(db: Session, disk: ExternalDisk) -> DiskHandoffStatu
         return _build_status(disk, f"PBS visibility check failed: {last_error}")
 
     device_path = _extract_pbs_device_path(result.payload)
+    mount_path = _extract_pbs_mount_path(result.payload)
     if device_path:
         disk.pbs_visible = True
         disk.pbs_device_path = device_path
+        if mount_path:
+            disk.pbs_mount_path = mount_path
+        disk.pbs_filesystem_type = _extract_pbs_filesystem_type(result.payload) or disk.pbs_filesystem_type
         disk.handoff_status = "visible_on_pbs"
         db.add(disk)
         db.commit()
         db.refresh(disk)
+        if mount_path:
+            from app.services.disks import apply_filesystem_usage_from_payload
+            apply_filesystem_usage_from_payload(db, disk, _extract_pbs_filesystem_usage_payload(result.payload))
+        elif disk.pbs_mount_path:
+            from app.services.disks import refresh_disk_filesystem_usage_from_pbs
+            refresh_disk_filesystem_usage_from_pbs(db, disk)
         return _build_status(disk, f"Disk is visible on PBS as {device_path}.")
 
     disk.pbs_visible = False
@@ -676,6 +696,31 @@ def _candidate_value(device: dict[str, Any], *keys: str) -> str | None:
             return value.strip()
         if isinstance(value, int):
             return str(value)
+    return None
+
+
+def _extract_pbs_mount_path(payload: dict[str, Any]) -> str | None:
+    filesystem_info = payload.get("filesystem_info")
+    if isinstance(filesystem_info, dict):
+        mount_path = filesystem_info.get("mount_path")
+        if isinstance(mount_path, str) and mount_path.strip():
+            return mount_path.strip()
+    return None
+
+
+def _extract_pbs_filesystem_type(payload: dict[str, Any]) -> str | None:
+    filesystem_info = payload.get("filesystem_info")
+    if isinstance(filesystem_info, dict):
+        filesystem_type = filesystem_info.get("filesystem_type")
+        if isinstance(filesystem_type, str) and filesystem_type.strip():
+            return filesystem_type.strip()
+    return None
+
+
+def _extract_pbs_filesystem_usage_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    filesystem_info = payload.get("filesystem_info")
+    if isinstance(filesystem_info, dict):
+        return filesystem_info
     return None
 
 

@@ -155,6 +155,9 @@ class ExternalBackupAgentBridge:
             payload=None,
         )
 
+    def filesystem_usage_on_pbs(self, mount_path: str) -> AgentCommandResult:
+        return self._run_command(self.pbs_client, "/filesystem-usage", {"mount_path": mount_path})
+
     def eject_dedicated_pbs_datastore(
         self,
         *,
