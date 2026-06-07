@@ -164,6 +164,9 @@ def ingest_agent_disk_report(db: Session, payload: AgentDiskReportCreate) -> lis
         disk.capacity_gb = item.capacity_gb
         disk.filesystem_type = _reconcile_filesystem_type(disk, item)
         disk.mount_path = _reconcile_mount_path(disk, item)
+        disk.filesystem_total_gb = item.filesystem_total_gb
+        disk.filesystem_used_gb = item.filesystem_used_gb
+        disk.filesystem_free_gb = item.filesystem_free_gb
         disk.detection_reason = ZERO_SIZE_DISK_MESSAGE if unusable_zero_size else item.detection_reason
         disk.candidate_type = "unusable" if unusable_zero_size else item.candidate_type
         if unusable_zero_size:

@@ -2,7 +2,7 @@ import { DataTable } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
-import { getDiskDisplayCapacityGb } from "../diskPlanning";
+import { getDiskFilesystemUsage } from "../diskPlanning";
 import { formatDateTime } from "../utils";
 import type { DisksPageProps } from "./shared";
 
@@ -15,19 +15,34 @@ const REQUIRED_PBS_CAPABILITIES = [
 ];
 const REQUIRED_HOST_CAPABILITIES = ["version-endpoint", "qemu-usb-attach", "qemu-usb-detach"];
 
-function CapacityBar({ used, total }: { used: number | null; total: number }) {
-  const safeUsed = used ?? total;
-  const pct = total > 0 ? Math.min(100, Math.round((safeUsed / total) * 100)) : 0;
+function CapacityBar({
+  used,
+  free,
+  total,
+  fallbackTotal,
+  t,
+}: {
+  used: number | null;
+  free: number | null;
+  total: number | null;
+  fallbackTotal: number;
+  t: DisksPageProps["t"];
+}) {
+  const hasUsage = used !== null && free !== null && total !== null;
+  const pct = hasUsage && total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
   const cls = pct >= 90 ? "danger" : pct >= 70 ? "warn" : "";
 
   return (
     <div className="cap-wrap">
       <div className="cap-nums">
-        <span>{safeUsed} GB</span>
-        <span>{total} GB</span>
+        <span>{hasUsage ? `${used} GB ${t.diskRealUsed}` : t.diskRealCapacityUnavailable}</span>
+        <span>{hasUsage ? `${free} GB ${t.diskRealFree}` : `${t.diskRawCapacity}: ${fallbackTotal} GB`}</span>
       </div>
       <div className="cap-bar">
         <div className={`cap-fill ${cls}`} style={{ width: `${pct}%` }} />
+      </div>
+      <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 6 }}>
+        {hasUsage ? `${total} GB total` : `${t.diskRawCapacity}: ${fallbackTotal} GB`}
       </div>
     </div>
   );
@@ -67,6 +82,7 @@ export function DisksPage({
             <tbody>
               {data.disks.map((disk) => {
                 const unusable = isUnusableDisk(disk);
+                const usage = getDiskFilesystemUsage(disk);
                 return (
                 <tr key={disk.id}>
                   <td>
@@ -94,7 +110,13 @@ export function DisksPage({
                     </StatusBadge>
                   </td>
                   <td>
-                    <CapacityBar used={getDiskDisplayCapacityGb(disk)} total={disk.capacity_gb} />
+                    <CapacityBar
+                      used={usage?.used ?? null}
+                      free={usage?.free ?? null}
+                      total={usage?.total ?? null}
+                      fallbackTotal={disk.capacity_gb}
+                      t={t}
+                    />
                   </td>
                   <td>
                     <label className="toggle">

@@ -26,6 +26,9 @@ class ExternalDiskRead(UTCDateTimeModel):
     filesystem_type: str | None
     model_name: str | None
     mount_path: str | None
+    filesystem_total_gb: int | None
+    filesystem_used_gb: int | None
+    filesystem_free_gb: int | None
     last_seen_at: datetime | None
     detection_reason: str | None
     candidate_type: str | None

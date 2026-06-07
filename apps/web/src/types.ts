@@ -50,6 +50,9 @@ export interface ExternalDisk {
   filesystem_type: string | null;
   model_name: string | null;
   mount_path: string | null;
+  filesystem_total_gb: number | null;
+  filesystem_used_gb: number | null;
+  filesystem_free_gb: number | null;
   last_seen_at: string | null;
   detection_reason: string | null;
   candidate_type: string | null;

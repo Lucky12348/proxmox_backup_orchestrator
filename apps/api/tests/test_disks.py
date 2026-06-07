@@ -297,6 +297,77 @@ class DiskInventoryTests(TestCase):
         self.assertIn("Serie existante: WD-WXD2DA1L1E7C", description)
         self.assertIn("Detection: usb port 1-2", description)
 
+    def test_agent_report_persists_filesystem_usage_metrics(self):
+        report = AgentDiskReportCreate(
+            hostname="promox",
+            observed_at=datetime(2026, 5, 31, 10, 0, 0),
+            disks=[
+                {
+                    "serial_number": "WD-WXD2DA1L1E7C",
+                    "display_name": "Western Digital Game Drive",
+                    "model_name": "Game Drive",
+                    "capacity_gb": 4000,
+                    "filesystem_total_gb": 3726,
+                    "filesystem_used_gb": 1200,
+                    "filesystem_free_gb": 2526,
+                    "filesystem_type": "ext4",
+                    "mount_path": "/mnt/front-usb",
+                    "detection_reason": "usb port 1-2",
+                    "candidate_type": "usb",
+                    "connected": True,
+                    "trusted": True,
+                }
+            ],
+        )
+
+        with (
+            patch("app.services.disks.notify_new_disk_detected"),
+            patch("app.services.disks.notify_known_disk_detected"),
+        ):
+            ingest_agent_disk_report(self.session, report)
+
+        disk = self.session.scalar(
+            select(ExternalDisk).where(ExternalDisk.serial_number.not_like("agent-report::%")).limit(1)
+        )
+        self.assertIsNotNone(disk)
+        self.assertEqual(disk.filesystem_total_gb, 3726)
+        self.assertEqual(disk.filesystem_used_gb, 1200)
+        self.assertEqual(disk.filesystem_free_gb, 2526)
+
+    def test_agent_report_without_filesystem_usage_keeps_metrics_null(self):
+        report = AgentDiskReportCreate(
+            hostname="promox",
+            observed_at=datetime(2026, 5, 31, 10, 0, 0),
+            disks=[
+                {
+                    "serial_number": "WD-WXD2DA1L1E7C",
+                    "display_name": "Western Digital Game Drive",
+                    "model_name": "Game Drive",
+                    "capacity_gb": 4000,
+                    "filesystem_type": "ext4",
+                    "mount_path": "/mnt/front-usb",
+                    "detection_reason": "usb port 1-2",
+                    "candidate_type": "usb",
+                    "connected": True,
+                    "trusted": True,
+                }
+            ],
+        )
+
+        with (
+            patch("app.services.disks.notify_new_disk_detected"),
+            patch("app.services.disks.notify_known_disk_detected"),
+        ):
+            ingest_agent_disk_report(self.session, report)
+
+        disk = self.session.scalar(
+            select(ExternalDisk).where(ExternalDisk.serial_number.not_like("agent-report::%")).limit(1)
+        )
+        self.assertIsNotNone(disk)
+        self.assertIsNone(disk.filesystem_total_gb)
+        self.assertIsNone(disk.filesystem_used_gb)
+        self.assertIsNone(disk.filesystem_free_gb)
+
     def test_zero_size_disk_is_marked_unusable_and_does_not_trigger_planning_or_notifications(self):
         report = AgentDiskReportCreate(
             hostname="promox",

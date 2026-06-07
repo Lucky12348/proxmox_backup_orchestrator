@@ -7,6 +7,7 @@ from unittest.mock import patch
 from agent.main import (
     AgentSettings,
     SubprocessResult,
+    filesystem_usage_for_mount_path,
     _ensure_loop_image_mounted,
     _assert_safe_eject_mount_path,
     _expected_pbo_datastore_mount_paths,
@@ -73,6 +74,34 @@ class ExternalExportDatastoreCreateTests(TestCase):
         self.assertLess(bytes_to_gb("16M"), 1)
         self.assertGreaterEqual(bytes_to_gb(4000000000000), 3724)
         self.assertLessEqual(bytes_to_gb(4000000000000), 3726)
+
+    def test_filesystem_usage_for_mount_path_returns_real_usage_when_mount_is_measurable(self):
+        fake_stats = type(
+            "StatVfs",
+            (),
+            {
+                "f_frsize": 1024 * 1024,
+                "f_bsize": 1024 * 1024,
+                "f_blocks": 4000 * 1024,
+                "f_bavail": 2500 * 1024,
+            },
+        )()
+
+        with (
+            patch("agent.main.os.path.ismount", return_value=True),
+            patch("agent.main.os.statvfs", return_value=fake_stats, create=True),
+        ):
+            usage = filesystem_usage_for_mount_path("/mnt/test-disk")
+
+        self.assertEqual(usage["total_gb"], 4000)
+        self.assertEqual(usage["free_gb"], 2500)
+        self.assertEqual(usage["used_gb"], 1500)
+
+    def test_filesystem_usage_for_mount_path_returns_nulls_when_mount_is_unavailable(self):
+        with patch("agent.main.os.path.ismount", return_value=False):
+            usage = filesystem_usage_for_mount_path("/mnt/test-disk")
+
+        self.assertEqual(usage, {"total_gb": None, "used_gb": None, "free_gb": None})
 
     def test_dedicated_prepare_size_error_includes_raw_and_parsed_values(self):
         disk = {

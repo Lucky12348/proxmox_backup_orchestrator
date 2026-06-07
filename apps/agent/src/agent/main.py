@@ -1516,12 +1516,16 @@ def build_disk_report(
     model_name = first_value(device.get("model"), udev_props.get("ID_MODEL"))
     display_name = first_value(model_name, serial_number, device_name(device))
     capacity_gb = bytes_to_gb(device.get("size"))
+    filesystem_usage = filesystem_usage_for_mount_path(partition_info["mount_path"])
 
     return {
         "serial_number": serial_number,
         "display_name": display_name,
         "model_name": model_name,
         "capacity_gb": capacity_gb,
+        "filesystem_total_gb": filesystem_usage["total_gb"],
+        "filesystem_used_gb": filesystem_usage["used_gb"],
+        "filesystem_free_gb": filesystem_usage["free_gb"],
         "filesystem_type": partition_info["filesystem_type"],
         "mount_path": partition_info["mount_path"],
         "detection_reason": detection_reason,
@@ -1545,6 +1549,28 @@ def derive_partition_info(device: dict[str, Any], mount_lookup: dict[str, str]) 
     return {
         "filesystem_type": device.get("fstype"),
         "mount_path": first_value(device.get("mountpoint"), recover_mount_path(device.get("path"), mount_lookup)),
+    }
+
+
+def filesystem_usage_for_mount_path(mount_path: str | None) -> dict[str, int | None]:
+    if not mount_path:
+        return {"total_gb": None, "used_gb": None, "free_gb": None}
+
+    try:
+        if not os.path.ismount(mount_path):
+            return {"total_gb": None, "used_gb": None, "free_gb": None}
+        stats = os.statvfs(mount_path)
+    except (FileNotFoundError, NotADirectoryError, OSError):
+        return {"total_gb": None, "used_gb": None, "free_gb": None}
+
+    fragment_size = stats.f_frsize or stats.f_bsize
+    total_bytes = stats.f_blocks * fragment_size
+    free_bytes = stats.f_bavail * fragment_size
+    used_bytes = max(0, total_bytes - free_bytes)
+    return {
+        "total_gb": bytes_to_gb(total_bytes),
+        "used_gb": bytes_to_gb(used_bytes),
+        "free_gb": bytes_to_gb(free_bytes),
     }
 
 
