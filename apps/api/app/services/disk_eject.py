@@ -22,11 +22,15 @@ PARTIAL_DETACH_FAILURE_MESSAGE = (
 )
 
 
+def is_disk_auto_eject_eligible(disk: ExternalDisk) -> bool:
+    return bool(disk.dedicated_backup_disk or disk.prepared_as_pbs_datastore)
+
+
 def eject_dedicated_external_disk(db: Session, disk_id: int) -> ExternalDisk:
     disk = db.get(ExternalDisk, disk_id)
     if disk is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Disk not found")
-    if not disk.dedicated_backup_disk and not disk.prepared_as_pbs_datastore:
+    if not is_disk_auto_eject_eligible(disk):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only dedicated PBS datastore disks can be ejected from this workflow.",

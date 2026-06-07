@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from app.api.dependencies import DbSession
-from app.models import ScheduledBackupEvent, ScheduledBackupRun, ScheduledBackupRunStatus
+from app.models import ExternalDisk, ScheduledBackupEvent, ScheduledBackupRun, ScheduledBackupRunStatus
 from app.schemas import (
     DiskPlanningRead,
     PlanningOverviewRead,
@@ -16,6 +16,8 @@ from app.schemas import (
     ScheduledBackupRunRead,
     UnplannedAssetRead,
 )
+from app.services.disk_eject import is_disk_auto_eject_eligible
+from app.services.disk_identity import serial_aliases, serials_match
 from app.services.planning import get_disk_planning, get_planning_overview, get_unplanned_assets
 from app.services.planning_scheduler import (
     cancel_planning_run,
@@ -34,6 +36,7 @@ ACTIVE_RUN_STATUSES = {
     ScheduledBackupRunStatus.WAITING_FOR_CONFIRMATION,
     ScheduledBackupRunStatus.RUNNING,
 }
+AUTO_EJECT_UNSUPPORTED_DETAIL = "L'auto-eject planifie est disponible uniquement pour les disques dedies PBS."
 
 
 @router.get("/disks", response_model=list[DiskPlanningRead])
@@ -135,6 +138,7 @@ def get_calendar_occurrences(
 
 @router.post("/events", response_model=ScheduledBackupEventRead)
 def create_event(payload: ScheduledBackupEventCreate, db: DbSession) -> ScheduledBackupEventRead:
+    _validate_auto_eject_configuration(db, payload.disk_serial, payload.auto_eject_after_success)
     now = datetime.utcnow()
     event = ScheduledBackupEvent(
         **payload.model_dump(),
@@ -160,7 +164,13 @@ def update_event(event_id: int, payload: ScheduledBackupEventUpdate, db: DbSessi
     event = db.get(ScheduledBackupEvent, event_id)
     if event is None or event.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scheduled event not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    values = payload.model_dump(exclude_unset=True)
+    _validate_auto_eject_configuration(
+        db,
+        values.get("disk_serial", event.disk_serial),
+        values.get("auto_eject_after_success", event.auto_eject_after_success),
+    )
+    for field, value in values.items():
         setattr(event, field, value)
     event.updated_at = datetime.utcnow()
     db.add(event)
@@ -261,3 +271,30 @@ def _run_read(db, run: ScheduledBackupRun) -> ScheduledBackupRunRead:
             "disk_serial": event.disk_serial if event else None,
         }
     )
+
+
+def _validate_auto_eject_configuration(db, disk_serial: str, auto_eject_after_success: bool) -> None:
+    if not auto_eject_after_success:
+        return
+    disk = _find_disk_by_event_serial(db, disk_serial)
+    if disk is None or not is_disk_auto_eject_eligible(disk):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=AUTO_EJECT_UNSUPPORTED_DETAIL)
+
+
+def _find_disk_by_event_serial(db, event_serial: str) -> ExternalDisk | None:
+    exact = db.scalar(select(ExternalDisk).where(ExternalDisk.serial_number == event_serial).limit(1))
+    if exact is not None:
+        return exact
+
+    event_aliases = set(serial_aliases(event_serial))
+    for disk in db.scalars(select(ExternalDisk)):
+        if serials_match(disk.serial_number, event_serial):
+            return disk
+        if disk.reported_serial_number and serials_match(disk.reported_serial_number, event_serial):
+            return disk
+        disk_aliases = set(disk.serial_aliases or [])
+        if disk.canonical_serial_number:
+            disk_aliases.add(disk.canonical_serial_number)
+        if event_aliases & disk_aliases:
+            return disk
+    return None

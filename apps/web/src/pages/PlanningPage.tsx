@@ -18,6 +18,7 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
 import { StatusBadge } from "../components/StatusBadge";
+import { coerceAutoEjectAfterSuccess, getDiskDisplayCapacityGb, isAutoEjectEligibleDisk } from "../diskPlanning";
 import type {
   ExternalDisk,
   ScheduledBackupCalendarOccurrence,
@@ -67,6 +68,8 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
   const upcomingRuns = runs.filter((run) => !DONE_STATUSES.has(run.status)).sort(sortRunsAsc).slice(0, 12);
   const nextOccurrence = occurrences.filter((item) => new Date(item.window_starts_at) >= new Date()).sort(sortOccurrences)[0] ?? null;
   const lastRun = runs.slice().sort(sortRunsDesc)[0] ?? null;
+  const selectedDisk = form ? data.disks.find((item) => item.serial_number === form.disk_serial) ?? null : null;
+  const autoEjectEligible = Boolean(selectedDisk && isAutoEjectEligibleDisk(selectedDisk));
 
   useEffect(() => {
     setEvents(data.scheduledBackupEvents);
@@ -76,6 +79,13 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
   useEffect(() => {
     window.localStorage.setItem("pbo.planning.calendarView", calendarView);
   }, [calendarView]);
+
+  useEffect(() => {
+    if (!form) return;
+    const nextValue = coerceAutoEjectAfterSuccess(selectedDisk, form.auto_eject_after_success);
+    if (nextValue === form.auto_eject_after_success) return;
+    setForm((current) => (current ? { ...current, auto_eject_after_success: nextValue } : current));
+  }, [form, selectedDisk, autoEjectEligible]);
 
   useEffect(() => {
     let cancelled = false;
@@ -147,6 +157,7 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
     setBanner(null);
     const payload: ScheduledBackupEventPayload = {
       ...form,
+      auto_eject_after_success: coerceAutoEjectAfterSuccess(selectedDisk, form.auto_eject_after_success),
       window_starts_at: new Date(form.window_starts_at).toISOString(),
     };
     delete (payload as Partial<EventForm>).id;
@@ -326,7 +337,20 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
                 <option value="manual_confirmation">Confirmation manuelle</option>
                 <option value="auto_on_disk_detected">Automatique sur detection disque</option>
               </select></label>
-              <label className="checkbox-row"><input checked={form.auto_eject_after_success} onChange={(event) => setForm({ ...form, auto_eject_after_success: event.target.checked })} type="checkbox" /> Auto-eject apres succes</label>
+              <label className="checkbox-row">
+                <input
+                  checked={form.auto_eject_after_success}
+                  disabled={!autoEjectEligible}
+                  onChange={(event) => setForm({ ...form, auto_eject_after_success: event.target.checked })}
+                  type="checkbox"
+                />
+                {" "}Auto-eject apres succes
+              </label>
+              {!autoEjectEligible ? (
+                <div style={{ gridColumn: "1 / -1", fontSize: 12, color: "var(--t3)" }}>
+                  Disponible uniquement pour les disques dedies PBS deja prepares pour l'ejection.
+                </div>
+              ) : null}
               <label className="checkbox-row"><input checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} type="checkbox" /> Active</label>
             </div>
             <div className="button-row">
@@ -694,7 +718,7 @@ function statusLabel(status: string) {
 function diskLabel(disk: ExternalDisk, compact = true) {
   const model = disk.model_name || disk.display_name;
   const serial = compact ? shortSerial(disk.serial_number) : disk.serial_number;
-  const capacity = disk.usable_capacity_gb || disk.capacity_gb;
+  const capacity = getDiskDisplayCapacityGb(disk);
   return `${model} - ${serial}${capacity ? ` - ${capacity} GB` : ""}`;
 }
 

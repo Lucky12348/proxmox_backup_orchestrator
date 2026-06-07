@@ -2,6 +2,7 @@ import { DataTable } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import { getDiskDisplayCapacityGb } from "../diskPlanning";
 import { formatDateTime } from "../utils";
 import type { DisksPageProps } from "./shared";
 
@@ -15,13 +16,14 @@ const REQUIRED_PBS_CAPABILITIES = [
 const REQUIRED_HOST_CAPABILITIES = ["version-endpoint", "qemu-usb-attach", "qemu-usb-detach"];
 
 function CapacityBar({ used, total }: { used: number | null; total: number }) {
-  const pct = used !== null ? Math.min(100, Math.round((used / total) * 100)) : 0;
+  const safeUsed = used ?? total;
+  const pct = total > 0 ? Math.min(100, Math.round((safeUsed / total) * 100)) : 0;
   const cls = pct >= 90 ? "danger" : pct >= 70 ? "warn" : "";
 
   return (
     <div className="cap-wrap">
       <div className="cap-nums">
-        <span>{used ?? "?"} GB</span>
+        <span>{safeUsed} GB</span>
         <span>{total} GB</span>
       </div>
       <div className="cap-bar">
@@ -92,7 +94,7 @@ export function DisksPage({
                     </StatusBadge>
                   </td>
                   <td>
-                    <CapacityBar used={disk.usable_capacity_gb} total={disk.capacity_gb} />
+                    <CapacityBar used={getDiskDisplayCapacityGb(disk)} total={disk.capacity_gb} />
                   </td>
                   <td>
                     <label className="toggle">

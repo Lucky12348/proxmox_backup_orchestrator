@@ -5,10 +5,11 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from app.api.routes.planning import delete_event, get_calendar_occurrences, list_events
+from app.api.routes.planning import create_event, delete_event, get_calendar_occurrences, list_events, update_event
 from app.db.base import Base
 from app.models import (
     BackupRunStatus,
+    ExternalDisk,
     ExternalBackupMode,
     ExternalBackupRun,
     ScheduledBackupEvent,
@@ -17,6 +18,7 @@ from app.models import (
     ScheduledBackupRunStatus,
     ScheduledBackupStartMode,
 )
+from app.schemas.planning import ScheduledBackupEventCreate, ScheduledBackupEventUpdate
 from app.services.planning_scheduler import expand_occurrences, process_runs
 
 
@@ -151,6 +153,55 @@ class PlanningEventTests(TestCase):
         self.assertEqual(refreshed.status, ScheduledBackupRunStatus.FAILURE)
         self.assertEqual(refreshed.error, "sync failed")
 
+    def test_create_event_rejects_auto_eject_for_non_dedicated_disk(self):
+        self.session.add(_disk())
+        self.session.commit()
+
+        with self.assertRaises(HTTPException) as raised:
+            create_event(
+                ScheduledBackupEventCreate(
+                    **{
+                        **_event_payload(),
+                        "auto_eject_after_success": True,
+                    }
+                ),
+                self.session,
+            )
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertEqual(
+            raised.exception.detail,
+            "L'auto-eject planifie est disponible uniquement pour les disques dedies PBS.",
+        )
+
+    def test_create_event_accepts_auto_eject_for_dedicated_disk(self):
+        self.session.add(_disk(dedicated_backup_disk=True))
+        self.session.commit()
+
+        event = create_event(
+            ScheduledBackupEventCreate(
+                **{
+                    **_event_payload(),
+                    "auto_eject_after_success": True,
+                }
+            ),
+            self.session,
+        )
+
+        self.assertTrue(event.auto_eject_after_success)
+
+    def test_update_event_rejects_enabling_auto_eject_for_non_dedicated_disk(self):
+        self.session.add(_disk())
+        event = _event(auto_eject_after_success=False)
+        self.session.add(event)
+        self.session.commit()
+
+        with self.assertRaises(HTTPException) as raised:
+            update_event(event.id, ScheduledBackupEventUpdate(auto_eject_after_success=True), self.session)
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertFalse(self.session.get(ScheduledBackupEvent, event.id).auto_eject_after_success)
+
 
 def _event(**overrides) -> ScheduledBackupEvent:
     now = datetime(2026, 5, 1, 12, 0, 0)
@@ -209,3 +260,29 @@ def _external_run(status: BackupRunStatus) -> ExternalBackupRun:
         mode=ExternalBackupMode.DEDICATED,
         created_at=now,
     )
+
+
+def _disk(**overrides) -> ExternalDisk:
+    values = {
+        "serial_number": "USB-123",
+        "display_name": "Disk USB-123",
+        "capacity_gb": 1000,
+        "connected": True,
+        "dedicated_backup_disk": False,
+        "allow_existing_data": True,
+        "trusted": True,
+        "reserved_capacity_gb": 0,
+        "source": "agent",
+        "active": True,
+        "pbs_visible": False,
+        "prepared_as_pbs_datastore": False,
+    }
+    values.update(overrides)
+    return ExternalDisk(**values)
+
+
+def _event_payload() -> dict:
+    payload = _event().__dict__.copy()
+    payload.pop("id", None)
+    payload.pop("_sa_instance_state", None)
+    return payload
