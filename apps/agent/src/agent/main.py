@@ -632,6 +632,29 @@ def qemu_usb_detach_result(vmid: int, slot: str) -> dict[str, Any]:
     }
 
 
+def _resolve_disk_after_usb_detach(identifier: str) -> dict[str, Any] | None:
+    """Resolve a disk right after QEMU USB passthrough detach returns it to
+    this host — the kernel can take a moment to re-enumerate it as a block
+    device, so a bare `resolve_disk()` call right away can raise
+    `FileNotFoundError` even though the disk is physically present. Wait for
+    udev to settle, then retry resolution briefly before giving up.
+    """
+    udevadm = shutil.which("udevadm")
+    if udevadm:
+        run_subprocess([udevadm, "settle", "--timeout=5"], timeout_seconds=6)
+
+    attempts_left = 4
+    while True:
+        try:
+            disk, _ = resolve_disk(identifier)
+            return disk
+        except FileNotFoundError:
+            attempts_left -= 1
+            if attempts_left <= 0:
+                return None
+            time.sleep(1)
+
+
 def spin_down_disk_result(identifier: str) -> dict[str, Any]:
     """Best-effort attempt to stop a disk from spinning after USB passthrough
     detach returns it to this host. Unlike Windows' "safely remove hardware",
@@ -649,16 +672,18 @@ def spin_down_disk_result(identifier: str) -> dict[str, Any]:
     blocks the eject; the disk is already safe to remove regardless.
     """
     attempts: list[dict[str, Any]] = []
-    try:
-        disk, _ = resolve_disk(identifier)
-        device_path = str(disk["path"])
-    except FileNotFoundError as exc:
+    disk = _resolve_disk_after_usb_detach(identifier)
+    if disk is None:
         return {
             "ok": True,
             "success": True,
-            "message": f"Could not resolve disk `{identifier}` to spin it down: {exc}",
+            "message": (
+                f"Could not resolve disk `{identifier}` to spin it down "
+                "(it may not have finished re-enumerating on this host after USB detach)."
+            ),
             "attempts": attempts,
         }
+    device_path = str(disk["path"])
 
     hdparm = shutil.which("hdparm")
     if hdparm:

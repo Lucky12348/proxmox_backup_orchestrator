@@ -76,6 +76,21 @@ regardless of what runs on the host. `hdparm -y` still stops the platters
 spinning on drives that honor ATA standby over their USB-SATA bridge, even
 when the LED itself can't be controlled.
 
+**Follow-up bug found during a real hardware test (2026-07-12), fixed same
+day**: the very first end-to-end test (after fixing §1.2b below) hit a
+genuine race condition, not the hardware limitation above —
+`spin_down_disk_result` called `resolve_disk()` immediately after QEMU USB
+detach, before the Proxmox host's kernel had finished re-enumerating the
+physical device as a block device, so it raised `FileNotFoundError` every
+time (`Unable to resolve disk from identifier: ...`). Fixed by
+`_resolve_disk_after_usb_detach()`: run `udevadm settle --timeout=5` first,
+then retry `resolve_disk()` up to 4 times with a 1s pause between attempts
+before giving up. Covered by
+`test_spin_down_waits_for_disk_to_reappear_after_usb_detach` in
+`apps/agent/tests/test_external_export.py`. Not yet re-verified against real
+hardware after this fix — do that before considering the LED/spin-down
+behavior fully validated.
+
 ### 1.2 Agent updates don't reach the Proxmox host / PBS VM — Done — 2026-07-12
 
 **Problem, discovered live in production.** A security fix to
@@ -118,6 +133,37 @@ that changes `apps/agent` — worth a quick check the first time it happens.
 - `src.bak` / `tests.bak` (and an older `.venv.bak-after-pve9-*` found on the
   Proxmox host) are harmless leftovers from this migration and the previous
   PVE upgrade; safe to delete once confident, not urgent.
+
+### 1.2b Both agents' `.venv` were editable-installed against an orphaned clone — Done — 2026-07-12
+
+**Problem, found while debugging why a new capability (`disk-spin-down`,
+§1.1b) still 404'd after 1.2's git-conversion was verified working.** Both
+`/opt/proxmox-backup-orchestrator-agent/.venv` and
+`/opt/proxmox-backup-orchestrator-pbs-agent/.venv` had been created with
+`pip install -e .` run against `/opt/proxmox_backup_orchestrator` — a
+complete, separate monorepo clone that exists on **both** the Proxmox host
+and the PBS VM, unrelated to (and predating) the `-agent`/`-pbs-agent`
+directories this project's docs assume. Editable installs record an absolute
+path at install time (`__editable__.proxmox_backup_orchestrator_agent-*.pth`
+in the venv's `site-packages`); that path pointed at the orphaned clone, so
+**every** git-pull-based update this session (§1.1b, §1.2's own conversion)
+was silently invisible to the actually-running process — `git_sha` and
+`systemctl` restart timestamps looked current, but `installed_path` in
+`GET /version` revealed the process was really loading
+`/opt/proxmox_backup_orchestrator/apps/agent/src/agent/main.py`.
+
+**Fix**: `pip install -e . --force-reinstall --no-deps` run from each of
+`/opt/proxmox-backup-orchestrator-agent` and `-pbs-agent` (with `src`/`tests`
+already symlinked into the real `-repo` clone per §1.2), then a manual
+service restart. Verified via `GET /version` → `installed_path` and
+`capabilities` on both machines. **Diagnostic takeaway for next time**: don't
+trust `git_sha` or restart timestamps alone to prove new code is live —
+`installed_path` in the `/version` response is the one field that reflects
+what the running process actually resolved `__file__` to.
+
+**Still open**: the orphaned `/opt/proxmox_backup_orchestrator` clones on
+both machines are unused now but still present — safe to remove once
+confident nothing else references them (nothing found so far), not urgent.
 
 ### 1.3 Manual `docker compose` commands silently blank out `.env` settings — Done — 2026-07-12
 

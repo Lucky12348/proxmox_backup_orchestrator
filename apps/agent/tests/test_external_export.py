@@ -96,11 +96,32 @@ class ExternalExportDatastoreCreateTests(TestCase):
         self.assertIn("may keep spinning", result["message"])
 
     def test_spin_down_handles_unresolvable_disk_without_raising(self):
-        with patch("agent.main.resolve_disk", side_effect=FileNotFoundError("no such disk")):
+        with (
+            patch("agent.main.resolve_disk", side_effect=FileNotFoundError("no such disk")),
+            patch("agent.main.shutil.which", return_value=None),
+            patch("agent.main.time.sleep"),
+        ):
             result = spin_down_disk_result("missing-serial")
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["attempts"], [])
+        self.assertIn("re-enumerating", result["message"])
+
+    def test_spin_down_waits_for_disk_to_reappear_after_usb_detach(self):
+        disk = {"path": "/dev/sdc", "type": "disk", "children": []}
+        # Simulate the disk not being visible yet right after USB detach, then
+        # showing up on the second lsblk-backed resolve_disk() call.
+        resolve_effects = [FileNotFoundError("not yet"), (disk, [disk])]
+
+        with (
+            patch("agent.main.resolve_disk", side_effect=resolve_effects),
+            patch("agent.main.shutil.which", return_value=None),
+            patch("agent.main.time.sleep") as sleep_mock,
+        ):
+            result = spin_down_disk_result("WD-SERIAL")
+
+        sleep_mock.assert_called_once()
+        self.assertEqual(result["attempts"][0]["stderr_log"], "hdparm is not installed on this host; skipped.")
 
     def test_qemu_config_returns_qm_config_output(self):
         with patch(
