@@ -108,7 +108,7 @@ def _job_to_read(job: dict, db: DbSession) -> ProxmoxBackupJobRead:
         node=job.get("node"),
         schedule=job.get("schedule"),
         storage=job.get("storage"),
-        retention=job.get("prune-backups") or job.get("retention"),
+        retention=_format_retention(job.get("prune-backups") or job.get("retention")),
         selection_mode="include_selected_vms" if supported else "unsupported",
         selected_vmids=selected_vmids,
         comment=job.get("comment"),
@@ -122,3 +122,23 @@ def _job_to_read(job: dict, db: DbSession) -> ProxmoxBackupJobRead:
 
 def _truthy_disabled(value) -> bool:
     return str(value).lower() in {"0", "false", "no"}
+
+
+def _format_retention(value: object) -> str | None:
+    """Normalize a PVE `prune-backups` value to a display string.
+
+    The Proxmox API returns this field as a plain string when the property
+    string has a single component, but expands it to a dict (one entry per
+    keep-* rule) when it has more than one — e.g. `{"keep-last": "4",
+    "keep-monthly": "8"}`. `ProxmoxBackupJobRead.retention` is a plain string,
+    so a dict here must be joined back into PVE's own `key=value,...` format
+    (sorted for a stable, deterministic display) instead of being passed
+    through as-is.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return ",".join(f"{key}={value[key]}" for key in sorted(value))
+    return str(value)

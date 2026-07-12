@@ -161,6 +161,7 @@ def _build_summary(run, disk_name: str) -> ExternalBackupRunSummaryRead:
         pbs_remote_id=run.pbs_remote_id,
         pbs_task_upid=run.pbs_task_upid,
         elapsed_seconds=run.elapsed_seconds,
+        auto_eject_after_success=run.auto_eject_after_success,
         mode=run.mode,
         created_at=run.created_at,
     )

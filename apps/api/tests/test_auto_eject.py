@@ -6,6 +6,7 @@ from unittest.mock import patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.api.routes.external_backups import _build_summary
 from app.db.base import Base
 from app.models import BackupRunStatus, ExternalBackupMode, ExternalBackupRun, ExternalDisk
 from app.services.disk_eject import _attempt_disk_spin_down
@@ -98,6 +99,22 @@ class AutoEjectAfterManualBackupTests(TestCase):
         self.session.close()
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
+
+    def test_build_summary_serializes_the_run_without_raising(self):
+        # Regression guard: _build_summary() lists every ExternalBackupRunSummaryRead
+        # field by hand instead of using model_validate(), so adding a field to the
+        # schema without also adding it here raises a pydantic ValidationError at
+        # request time (this broke GET /external-backups/runs in production once).
+        disk = _disk()
+        self.session.add(disk)
+        self.session.commit()
+        run = _run(disk.id, auto_eject_after_success=True)
+        self.session.add(run)
+        self.session.commit()
+
+        summary = _build_summary(run, disk.display_name)
+
+        self.assertTrue(summary.auto_eject_after_success)
 
     def test_run_external_backup_stores_the_requested_flag(self):
         disk = _disk()
