@@ -92,6 +92,26 @@ class ProxmoxClientConfigUpdateTests(TestCase):
 
         self.assertEqual(client.delete_calls, ["cluster/backup/backup-123"])
 
+    def test_update_backup_job_selection_drops_the_read_only_type_field(self):
+        # Regression test: Proxmox includes "type": "vzdump" on GET but its PUT
+        # schema doesn't allow this property at all, which used to make every
+        # selection update fail with "property is not defined in schema and
+        # the schema does not allow additional properties".
+        client = _BackupJobRecordingClient(
+            job={
+                "id": "backup-0580d237-fe75",
+                "type": "vzdump",
+                "schedule": "sun 03:00",
+                "storage": "pbs",
+                "vmid": "101,102",
+                "all": 0,
+            }
+        )
+
+        client.update_backup_job_selection("backup-0580d237-fe75", [103, 101])
+
+        self.assertNotIn("type", client.put_calls[0][1])
+
     def test_update_backup_job_selection_flattens_multi_rule_retention(self):
         # Regression test: the Proxmox API expands `prune-backups` into a dict
         # once a job has more than one keep-* rule. Sending that dict back

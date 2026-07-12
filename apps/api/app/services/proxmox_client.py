@@ -8,6 +8,16 @@ import httpx
 from app.core.config import Settings, get_settings
 
 
+# Fields the Proxmox API includes on GET /cluster/backup/{id} but rejects as
+# unknown/read-only on PUT ("property is not defined in schema and the schema
+# does not allow additional properties"). update_backup_job_selection() round
+# trips every other field from GET into PUT, so this list must be kept
+# up to date if Proxmox ever adds another read-only field to that response —
+# if that happens again, `_describe_pve_error()` will name the exact field to
+# add here, the same way it identified `type` here.
+BACKUP_JOB_READ_ONLY_FIELDS = {"id", "digest", "next-run", "next_run", "type"}
+
+
 def _describe_pve_error(response: httpx.Response) -> str:
     """Build a diagnostic message from a failed Proxmox API response.
 
@@ -113,7 +123,7 @@ class ProxmoxClient:
         data = {
             key: flatten_pve_property_value(value)
             for key, value in current.items()
-            if key not in {"id", "digest", "next-run", "next_run"}
+            if key not in BACKUP_JOB_READ_ONLY_FIELDS
         }
         data["vmid"] = ",".join(str(vmid) for vmid in sorted(set(selected_vmids)))
         data["all"] = 0

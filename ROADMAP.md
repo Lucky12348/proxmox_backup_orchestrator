@@ -257,6 +257,17 @@ the UI as a 400 with the actual Proxmox complaint, no SSH/log session needed
 to diagnose the *next* "parameter verification failed". Covered by
 `DescribePveErrorTests` in `apps/api/tests/test_proxmox_client.py`.
 
+**Actual field, found via the improved error message**: `type` (Proxmox
+returns `"type": "vzdump"` on `GET` but the `PUT` schema doesn't accept it at
+all — "property is not defined in schema and the schema does not allow
+additional properties"). Added to a new `BACKUP_JOB_READ_ONLY_FIELDS`
+constant in `proxmox_client.py` alongside `id`/`digest`/`next-run`. This
+blocklist approach is inherently fragile — any future read-only field
+Proxmox adds to the `GET` response will trip the same error — but thanks to
+`_describe_pve_error()` above, the fix each time is now a quick one-line
+addition instead of a guessing game. Covered by
+`test_update_backup_job_selection_drops_the_read_only_type_field`.
+
 ### 1.5 Proxmox backup job management: create/delete from the app — Done (MVP scope) — 2026-07-12
 
 Requested by the user after fixing §1.4: manage Proxmox backup jobs (the
