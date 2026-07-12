@@ -26,6 +26,7 @@ from agent.main import (
     qemu_usb_attach_result,
     qemu_usb_detach_result,
     run_external_export_result,
+    spin_down_disk_result,
     version_payload,
 )
 
@@ -110,6 +111,10 @@ class QemuUsbDetachRequest(BaseModel):
 
 class QemuConfigRequest(BaseModel):
     vmid: int = Field(gt=0)
+
+
+class SpinDownDiskRequest(BaseModel):
+    disk: str = Field(min_length=1)
 
 
 def get_settings() -> AgentSettings:
@@ -270,6 +275,17 @@ def qemu_usb_detach(
     return _run_endpoint(
         "qemu-usb-detach",
         lambda: qemu_usb_detach_result(payload.vmid, payload.slot),
+    )
+
+
+@app.post("/disk/spin-down", response_model=None)
+def spin_down_disk(
+    payload: SpinDownDiskRequest,
+    _: None = Depends(require_agent_token),
+) -> Response:
+    return _run_endpoint(
+        "disk-spin-down",
+        lambda: spin_down_disk_result(payload.disk),
     )
 
 

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Route, Routes } from "react-router-dom";
 
 import { getExternalBackupPreview, AUTH_EXPIRED_EVENT } from "./api";
@@ -28,6 +29,7 @@ interface ConfirmState {
   cancelLabel: string;
   tone: "danger" | "warning" | "info";
   onConfirm: () => void;
+  extra?: ReactNode;
 }
 
 const LANGUAGE_STORAGE_KEY = "pbo:language";
@@ -42,6 +44,9 @@ function AuthenticatedApp() {
   const { logout } = useAuth();
   const [language, setLanguage] = useState<Language>(() => getStoredLanguage());
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  // Read at confirm-time by handleExternalBackupRequest; a ref (not state) so
+  // toggling the checkbox doesn't re-render/recreate the modal's onConfirm closure.
+  const autoEjectAfterSuccessRef = useRef(true);
 
   // Listen for auth-expired events from api.ts
   useEffect(() => {
@@ -173,6 +178,7 @@ function AuthenticatedApp() {
       const loopSizeText = preview.mode === "coexistence" && preview.loop_image_size_gb !== null
         ? `${t.externalBackupLoopSize}: ${preview.loop_image_size_gb} GiB.` : null;
       const loopWarningText = preview.loop_image_size_warning ? t.externalBackupLoopSizeWarning : null;
+      autoEjectAfterSuccessRef.current = true;
       openConfirm({
         title: t.confirmExternalBackupTitle,
         description: [
@@ -187,7 +193,20 @@ function AuthenticatedApp() {
         confirmLabel: t.externalBackupAction,
         cancelLabel: t.cancel,
         tone: "info",
-        onConfirm: () => { void startExternalBackup(disk.id, t.externalBackupSummary); closeConfirm(); },
+        extra: (
+          <label className="checkbox-field">
+            <input
+              defaultChecked
+              onChange={(event) => { autoEjectAfterSuccessRef.current = event.target.checked; }}
+              type="checkbox"
+            />
+            <span>{t.externalBackupAutoEject}</span>
+          </label>
+        ),
+        onConfirm: () => {
+          void startExternalBackup(disk.id, t.externalBackupSummary, autoEjectAfterSuccessRef.current);
+          closeConfirm();
+        },
       });
     } catch (previewError) {
       openConfirm({
@@ -302,6 +321,7 @@ function AuthenticatedApp() {
         cancelLabel={confirmState?.cancelLabel ?? t.cancel}
         confirmLabel={confirmState?.confirmLabel ?? t.confirm}
         description={confirmState?.description ?? ""}
+        extra={confirmState?.extra}
         onCancel={closeConfirm}
         onConfirm={() => confirmState?.onConfirm()}
         open={confirmState !== null}

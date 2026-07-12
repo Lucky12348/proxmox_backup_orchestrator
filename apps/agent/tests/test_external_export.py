@@ -29,6 +29,7 @@ from agent.main import (
     qemu_config_result,
     qemu_usb_attach_result,
     qemu_usb_detach_result,
+    spin_down_disk_result,
 )
 
 
@@ -58,6 +59,48 @@ class ExternalExportDatastoreCreateTests(TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(commands, [["qm", "set", "100", "-delete", "usb0"]])
+
+    def test_spin_down_tries_hdparm_then_udisksctl_when_both_available(self):
+        disk = {"path": "/dev/sdc", "type": "disk", "children": []}
+        commands: list[list[str]] = []
+
+        def fake_which(name: str) -> str | None:
+            return f"/usr/bin/{name}" if name in {"hdparm", "udisksctl"} else None
+
+        def fake_run_subprocess(command: list[str], timeout_seconds: float) -> SubprocessResult:
+            commands.append(command)
+            return SubprocessResult(command, 0, "ok", "")
+
+        with (
+            patch("agent.main.resolve_disk", return_value=(disk, [disk])),
+            patch("agent.main.shutil.which", side_effect=fake_which),
+            patch("agent.main.run_subprocess", side_effect=fake_run_subprocess),
+        ):
+            result = spin_down_disk_result("WD-SERIAL")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(commands, [["/usr/bin/hdparm", "-y", "/dev/sdc"], ["/usr/bin/udisksctl", "power-off", "-b", "/dev/sdc"]])
+        self.assertTrue(all(attempt["ok"] for attempt in result["attempts"]))
+
+    def test_spin_down_reports_unsupported_tools_without_failing(self):
+        disk = {"path": "/dev/sdc", "type": "disk", "children": []}
+
+        with (
+            patch("agent.main.resolve_disk", return_value=(disk, [disk])),
+            patch("agent.main.shutil.which", return_value=None),
+        ):
+            result = spin_down_disk_result("WD-SERIAL")
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(any(attempt["ok"] for attempt in result["attempts"]))
+        self.assertIn("may keep spinning", result["message"])
+
+    def test_spin_down_handles_unresolvable_disk_without_raising(self):
+        with patch("agent.main.resolve_disk", side_effect=FileNotFoundError("no such disk")):
+            result = spin_down_disk_result("missing-serial")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["attempts"], [])
 
     def test_qemu_config_returns_qm_config_output(self):
         with patch(

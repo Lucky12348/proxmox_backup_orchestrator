@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import BigInteger, DateTime, Enum as SqlEnum, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum as SqlEnum, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -50,6 +50,7 @@ class ExternalBackupRun(Base):
     pbs_remote_id: Mapped[str | None] = mapped_column(String(255))
     pbs_task_upid: Mapped[str | None] = mapped_column(Text)
     elapsed_seconds: Mapped[int | None] = mapped_column(Integer)
+    auto_eject_after_success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     mode: Mapped[ExternalBackupMode] = mapped_column(
         SqlEnum(ExternalBackupMode, name="external_backup_mode", native_enum=False),
         nullable=False,

@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
@@ -17,6 +18,9 @@ from app.services.external_backup_agent import get_external_backup_agent_bridge
 from app.services.external_backup_execution import build_export_target_path, get_external_backup_execution_service
 from app.services.notifications import notify_backup_failure, notify_backup_success
 from app.services.pbs_progress import parse_pbs_progress_line, summarize_pbs_failure
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -168,6 +172,7 @@ def run_external_backup(
     disk_id: int,
     confirmation: bool,
     datastore_name: str | None = None,
+    auto_eject_after_success: bool = False,
 ) -> ExternalBackupRun:
     if not confirmation:
         raise HTTPException(
@@ -212,6 +217,7 @@ def run_external_backup(
             last_log_at=now,
             warning_messages=[],
             failed_groups=[],
+            auto_eject_after_success=auto_eject_after_success,
             mode=plan.mode,
             created_at=now,
         )
@@ -335,6 +341,39 @@ def execute_external_backup_run(run_id: int) -> None:
             run.progress_message = run.message
             run.last_log_at = datetime.utcnow()
             append_external_backup_run_log(db, run.id, step="success", message=run.message)
+
+            if run.auto_eject_after_success:
+                from app.services.disk_eject import eject_dedicated_external_disk, is_disk_auto_eject_eligible
+
+                if is_disk_auto_eject_eligible(disk):
+                    try:
+                        eject_dedicated_external_disk(db, disk.id)
+                        append_external_backup_run_log(
+                            db,
+                            run.id,
+                            step="auto_eject",
+                            message="Disk ejected automatically after a successful backup.",
+                        )
+                    except Exception as exc:
+                        logger.warning("Auto-eject after manual backup failed for disk_id=%s: %s", disk.id, exc)
+                        append_external_backup_run_log(
+                            db,
+                            run.id,
+                            step="auto_eject",
+                            message=f"Automatic eject was requested but failed: {exc}",
+                            stream="stderr",
+                            line=str(exc),
+                        )
+                else:
+                    append_external_backup_run_log(
+                        db,
+                        run.id,
+                        step="auto_eject",
+                        message=(
+                            "Automatic eject was requested, but this disk mode does not support it yet "
+                            "(only dedicated PBS datastore disks can be auto-ejected today)."
+                        ),
+                    )
         except AgentCommandError as exc:
             run.status = BackupRunStatus.FAILED
             run.finished_at = datetime.utcnow()

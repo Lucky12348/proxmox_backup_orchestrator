@@ -42,7 +42,12 @@ def start_run(
     background_tasks: BackgroundTasks,
     db: DbSession,
 ) -> ExternalBackupRunSummaryRead:
-    run = run_external_backup(db, payload.disk_id, payload.confirmation)
+    run = run_external_backup(
+        db,
+        payload.disk_id,
+        payload.confirmation,
+        auto_eject_after_success=payload.auto_eject_after_success,
+    )
     background_tasks.add_task(execute_external_backup_run, run.id)
     disk = db.get(ExternalDisk, run.disk_id)
     return _build_summary(run, disk.display_name if disk is not None else f"Disk {run.disk_id}")

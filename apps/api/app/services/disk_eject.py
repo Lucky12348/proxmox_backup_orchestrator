@@ -12,6 +12,7 @@ from app.services.disk_handoff import _detach_usb_slot_via_host_agent, _get_qemu
 from app.services.external_backup_agent import AgentCommandError, get_external_backup_agent_bridge
 from app.services.external_backup_execution import build_dedicated_datastore_name
 from app.services.external_backups import append_external_backup_run_log
+from app.services.host_agent import get_host_agent_client
 from app.services.notifications import notify_disk_eject_ready
 
 
@@ -84,6 +85,9 @@ def eject_dedicated_external_disk(db: Session, disk_id: int) -> ExternalDisk:
             line=result.stdout_log,
         )
         detach_message = _detach_usb_passthrough_from_pbs_vm(disk)
+        spin_down_message = _attempt_disk_spin_down(disk)
+        if spin_down_message:
+            append_external_backup_run_log(db, run.id, step="eject", message=spin_down_message)
         disk.connected = False
         disk.pbs_visible = False
         disk.pbs_device_path = None
@@ -151,6 +155,24 @@ def _detach_usb_passthrough_from_pbs_vm(disk: ExternalDisk) -> str:
         )
 
     return f"USB passthrough slot `{slot}` removed from the PBS VM."
+
+
+def _attempt_disk_spin_down(disk: ExternalDisk) -> str | None:
+    """Best-effort: ask the host agent to spin down / power off the disk now
+    that USB passthrough detach has returned it to the Proxmox host. Unlike a
+    Windows "safely remove hardware", the eject flow otherwise only unmounts
+    and detaches passthrough — nothing powers the drive down, so without this
+    it keeps spinning with its LED lit. This never blocks the eject: the disk
+    is already safe to remove regardless of whether spin-down succeeds, and
+    success also depends on hardware the host has no control over (many
+    onboard USB root-hub ports don't support per-port power switching).
+    """
+    try:
+        result = get_host_agent_client().post("/disk/spin-down", {"disk": disk.serial_number})
+        return result.payload.get("message")
+    except Exception as exc:
+        logger.warning("Disk spin-down attempt failed for disk_id=%s: %s", disk.id, exc)
+        return f"Disk spin-down attempt failed (disk may keep spinning): {exc}"
 
 
 def _create_eject_activity(db: Session, disk: ExternalDisk, datastore_name: str, mount_path: str) -> ExternalBackupRun:

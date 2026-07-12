@@ -13,46 +13,70 @@ Status legend: `Not started` / `In progress` / `Done`.
 
 ## 1. Reliability fixes
 
-### 1.1 Auto-eject after successful backup, for any disk mode — Not started
+### 1.1 Auto-eject after successful backup, for any disk mode — Partially done — 2026-07-12
 
-**Problem.** Auto-eject exists today, but only in one narrow path:
-`apps/api/app/services/planning_scheduler.py:386-392` ejects the disk after a
-*scheduled* run succeeds, gated by `ScheduledBackupEvent.auto_eject_after_success`
-(`apps/api/app/models/scheduled_backup.py:57`). Manual/on-demand runs started via
-`POST /external-backups/run` → `execute_external_backup_run()`
-(`apps/api/app/services/external_backups.py:220-359`) never call eject at all —
-the operator must always click "Eject" by hand after a manual run.
+**Done.** Manual/on-demand runs can now auto-eject too, opt-in per run (not a
+silent default): `POST /external-backups/run` accepts
+`auto_eject_after_success` (`apps/api/app/schemas/external_backup.py`), stored
+on `ExternalBackupRun` (new column, `apps/api/app/models/external_backup_run.py`
++ `apps/api/app/db/init.py`). `execute_external_backup_run()`'s success path
+(`apps/api/app/services/external_backups.py`) calls
+`eject_dedicated_external_disk()` when the flag is set, mirroring the existing
+scheduled-run path in `planning_scheduler.py:386-392` — failures are logged to
+the run's activity log rather than failing the (already-successful) backup.
+The web UI exposes this as a checkbox (checked by default) in the "Lancer une
+sauvegarde externe" confirmation modal (`apps/web/src/App.tsx`,
+`ConfirmModal.tsx`). Covered by `apps/api/tests/test_auto_eject.py`.
 
-On top of that, `eject_dedicated_external_disk()` and
+**Still open — coexistence-mode disks still can't be ejected at all, manual
+or automatic.** `eject_dedicated_external_disk()` and
 `is_disk_auto_eject_eligible()` (`apps/api/app/services/disk_eject.py:25-37`)
 only accept disks where `dedicated_backup_disk` or `prepared_as_pbs_datastore`
 is true. A disk running in coexistence mode
 (`ExternalBackupMode.COEXISTENCE`, `external_backups.py:43-48`) has **no eject
-path at all**, manual or automatic — it only unmounts the dedicated PBS
-datastore, not a generic mount point.
+path at all** — it only unmounts the dedicated PBS datastore, not a generic
+mount point. Checking the new checkbox for a coexistence disk today just logs
+"this disk mode does not support it yet" instead of ejecting. To close this:
 
-**Goal.** Auto-eject the disk after a successful backup event, regardless of
-whether the disk is a dedicated PBS datastore or a coexistence/generic disk.
+1. Extend `disk_eject.py` to support coexistence-mode disks: unmount the
+   generic `pbs_mount_path` instead of assuming a dedicated datastore, and
+   widen `is_disk_auto_eject_eligible()` accordingly.
+2. Add regression tests for the scheduled-run path specifically: no existing
+   test verifies that `eject_dedicated_external_disk` is invoked when
+   `ScheduledBackupEvent.auto_eject_after_success=True` and the run succeeds —
+   see `test_linked_backup_success_updates_planned_occurrence_success` in
+   `apps/api/tests/test_planning_events.py:121-135`, which uses an event
+   without that flag set.
 
-**Suggested approach:**
+### 1.1b Eject doesn't power down the physical disk — Done (best-effort) — 2026-07-12
 
-1. Add the same auto-eject call used in `planning_scheduler.py:386-392` to the
-   success path of `execute_external_backup_run()` in `external_backups.py`
-   (around the `run.status = BackupRunStatus.SUCCESS` block, ~line 308-325), so
-   manual runs can auto-eject too. This likely needs a per-run flag (today only
-   `ScheduledBackupEvent` carries `auto_eject_after_success`).
-2. Extend `disk_eject.py` to support coexistence-mode disks: unmount the
-   generic `pbs_mount_path` instead of assuming a dedicated datastore, and widen
-   `is_disk_auto_eject_eligible()` accordingly.
-3. Add regression tests: no existing test verifies that
-   `eject_dedicated_external_disk` is actually invoked when
-   `auto_eject_after_success=True` and the run succeeds — see
-   `test_linked_backup_success_updates_planned_occurrence_success` in
-   `apps/api/tests/test_planning_events.py:121-135`, which uses an event without
-   that flag set. Add coverage for both the scheduled and manual paths, and for
-   both dedicated and coexistence disks.
+**Problem, raised by the user.** After ejecting a disk, its LED stays on and
+it keeps spinning — unlike Windows' "safely remove hardware." Confirmed by
+code audit: the eject flow only unmounts the filesystem
+(`eject_dedicated_pbs_datastore_result` on the PBS agent) and removes the QEMU
+USB passthrough config (`qemu_usb_detach_result`, `qm set <vmid> -delete
+<slot>`, `apps/agent/src/agent/main.py`). Nothing anywhere in the codebase
+ever asked the host to power down or spin down the drive.
 
-### 1.2 Agent updates don't reach the Proxmox host / PBS VM — Done (code), deployment pending — 2026-07-12
+**Fix.** New best-effort step after USB detach: the host agent's
+`spin_down_disk_result()` (`apps/agent/src/agent/main.py`) resolves the
+physical device and tries, in order, `hdparm -y` (ATA standby) then
+`udisksctl power-off -b` (USB port power-off), each independently optional —
+missing tools or hardware that doesn't support them are logged, never fail
+the eject. Wired in from `apps/api/app/services/disk_eject.py`
+(`_attempt_disk_spin_down`) via a new `POST /disk/spin-down` agent endpoint.
+Covered by `apps/agent/tests/test_external_export.py` (spin-down cases) and
+`apps/api/tests/test_auto_eject.py` (API-side wiring).
+
+**Known limitation, not fixable in software**: many onboard motherboard
+USB root-hub ports don't support per-port power switching, so `udisksctl
+power-off` can silently do nothing on that hardware, and the LED — often just
+wired to USB 5V presence — stays lit until the cable is physically unplugged
+regardless of what runs on the host. `hdparm -y` still stops the platters
+spinning on drives that honor ATA standby over their USB-SATA bridge, even
+when the LED itself can't be controlled.
+
+### 1.2 Agent updates don't reach the Proxmox host / PBS VM — Done — 2026-07-12
 
 **Problem, discovered live in production.** A security fix to
 `apps/agent/src/agent/main.py` was pushed and "Tout mettre à jour" reported
@@ -75,23 +99,25 @@ to `systemctl try-restart ... --no-block`) — the same pattern
 `AGENT_HTTP_SERVICE_NAME` (see `.env.example`, `docs/MAINTENANCE.md`).
 Covered by `apps/agent/tests/test_maintenance.py`.
 
-**Still needed — one-time manual setup per machine (not yet done on the real
-Proxmox host / PBS VM as of 2026-07-12):**
+**One-time manual setup completed on both machines (2026-07-12):** both
+`/opt/proxmox-backup-orchestrator-agent` and `-pbs-agent` now have a sibling
+`-repo/` full git clone (public repo, HTTPS), with `src/`/`tests/` replaced by
+symlinks into `<repo>/apps/agent/{src,tests}`, and `AGENT_REPO_PATH` /
+`AGENT_HTTP_SERVICE_NAME` set in each `.env`. Verified via
+`POST /maintenance/check` on both agents: `status: up_to_date`, matching
+local/remote commit. The actual pull-then-self-restart path (as opposed to
+just git status resolving) will get its first real exercise on the next push
+that changes `apps/agent` — worth a quick check the first time it happens.
 
-1. Convert `/opt/proxmox-backup-orchestrator-agent` (and `-pbs-agent`) from a
-   flat file copy into a real git clone at a sibling path (e.g.
-   `-agent-repo/`), with `src/` and `tests/` replaced by symlinks into
-   `<repo>/apps/agent/{src,tests}` — see the step-by-step in
-   `docs/MAINTENANCE.md` ("`AGENT_REPO_PATH` must be a real git checkout").
-   This keeps the existing `.venv` and systemd unit files untouched.
-2. Set `AGENT_REPO_PATH` and `AGENT_HTTP_SERVICE_NAME` in each agent's `.env`,
-   then restart the `-http.service` once by hand to pick up the `.env`
-   change.
-3. Note the shipped systemd unit filenames in
-   `apps/agent/deploy/systemd/*-api.service` don't match the real installed
-   unit names on this deployment (`*-http.service`) — reconcile these or
-   document the discrepancy so a fresh install doesn't silently diverge from
-   what's actually running.
+**Still open / minor follow-ups:**
+
+- The shipped systemd unit filenames in
+  `apps/agent/deploy/systemd/*-api.service` don't match the real installed
+  unit names on this deployment (`*-http.service`) — reconcile these so a
+  fresh install doesn't silently diverge from what's actually running.
+- `src.bak` / `tests.bak` (and an older `.venv.bak-after-pve9-*` found on the
+  Proxmox host) are harmless leftovers from this migration and the previous
+  PVE upgrade; safe to delete once confident, not urgent.
 
 ## 2. CI/CD — Not started
 

@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 interface ConfirmModalProps {
   open: boolean;
   title: string;
@@ -7,6 +9,7 @@ interface ConfirmModalProps {
   tone?: "danger" | "warning" | "info";
   onConfirm: () => void;
   onCancel: () => void;
+  extra?: ReactNode;
 }
 
 export function ConfirmModal({
@@ -18,6 +21,7 @@ export function ConfirmModal({
   tone = "warning",
   onConfirm,
   onCancel,
+  extra,
 }: ConfirmModalProps) {
   if (!open) {
     return null;
@@ -41,6 +45,7 @@ export function ConfirmModal({
           </button>
         </div>
         <p className="modal-description">{description}</p>
+        {extra}
         <div className="modal-actions">
           <button className="ghost-button" onClick={onCancel} type="button">
             {cancelLabel}

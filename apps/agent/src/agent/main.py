@@ -43,6 +43,7 @@ AGENT_CAPABILITIES = {
     "filesystem-usage",
     "qemu-usb-attach",
     "qemu-usb-detach",
+    "disk-spin-down",
 }
 
 
@@ -628,6 +629,96 @@ def qemu_usb_detach_result(vmid: int, slot: str) -> dict[str, Any]:
         "return_code": result.returncode,
         "vmid": vmid,
         "slot": slot,
+    }
+
+
+def spin_down_disk_result(identifier: str) -> dict[str, Any]:
+    """Best-effort attempt to stop a disk from spinning after USB passthrough
+    detach returns it to this host. Unlike Windows' "safely remove hardware",
+    ejecting here only unmounts the filesystem and removes the QEMU USB
+    passthrough config — nothing tells the physical drive to power down, so
+    without this it keeps spinning with its LED lit until physically
+    unplugged.
+
+    Neither step below is guaranteed to work: `hdparm -y` needs the drive to
+    honor an ATA STANDBY command over its USB-SATA bridge, and `udisksctl
+    power-off` needs the physical USB port to support per-port power
+    switching — most onboard motherboard root-hub ports don't, in which case
+    the LED stays lit purely because the port still supplies 5V, and no
+    software running on this host can change that. A failure here never
+    blocks the eject; the disk is already safe to remove regardless.
+    """
+    attempts: list[dict[str, Any]] = []
+    try:
+        disk, _ = resolve_disk(identifier)
+        device_path = str(disk["path"])
+    except FileNotFoundError as exc:
+        return {
+            "ok": True,
+            "success": True,
+            "message": f"Could not resolve disk `{identifier}` to spin it down: {exc}",
+            "attempts": attempts,
+        }
+
+    hdparm = shutil.which("hdparm")
+    if hdparm:
+        result = run_subprocess([hdparm, "-y", device_path], timeout_seconds=30)
+        attempts.append(
+            {
+                "step": "hdparm_standby",
+                "command_summary": redact_command([hdparm, "-y", device_path]),
+                "ok": result.returncode == 0,
+                "stdout_log": result.stdout,
+                "stderr_log": result.stderr,
+            }
+        )
+    else:
+        attempts.append(
+            {
+                "step": "hdparm_standby",
+                "command_summary": None,
+                "ok": False,
+                "stdout_log": None,
+                "stderr_log": "hdparm is not installed on this host; skipped.",
+            }
+        )
+
+    udisksctl = shutil.which("udisksctl")
+    if udisksctl:
+        result = run_subprocess([udisksctl, "power-off", "-b", device_path], timeout_seconds=30)
+        attempts.append(
+            {
+                "step": "usb_power_off",
+                "command_summary": redact_command([udisksctl, "power-off", "-b", device_path]),
+                "ok": result.returncode == 0,
+                "stdout_log": result.stdout,
+                "stderr_log": result.stderr,
+            }
+        )
+    else:
+        attempts.append(
+            {
+                "step": "usb_power_off",
+                "command_summary": None,
+                "ok": False,
+                "stdout_log": None,
+                "stderr_log": "udisksctl is not installed on this host; skipped.",
+            }
+        )
+
+    any_ok = any(attempt["ok"] for attempt in attempts)
+    return {
+        "ok": True,
+        "success": True,
+        "message": (
+            "Disk spin-down/power-off attempted."
+            if any_ok
+            else (
+                "Neither hdparm standby nor USB power-off succeeded; the disk may "
+                "keep spinning until physically unplugged (hardware/driver limitation)."
+            )
+        ),
+        "attempts": attempts,
     }
 
 

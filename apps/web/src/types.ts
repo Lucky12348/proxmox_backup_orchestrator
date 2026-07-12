@@ -256,6 +256,7 @@ export interface ExternalBackupRun {
   pbs_remote_id: string | null;
   pbs_task_upid: string | null;
   elapsed_seconds: number | null;
+  auto_eject_after_success: boolean;
   mode: ExternalBackupMode;
   created_at: string;
 }

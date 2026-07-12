@@ -764,6 +764,15 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .modal-tone-info    { color: var(--ac); }
 .modal-body { display: grid; gap: 14px; margin-top: 8px; }
 .modal-description { margin: 0; font-size: 13px; color: var(--t2); line-height: 1.6; }
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--t1);
+}
+.checkbox-field input[type="checkbox"] { width: 15px; height: 15px; flex: none; }
 .modal-actions {
   display: flex;
   align-items: center;

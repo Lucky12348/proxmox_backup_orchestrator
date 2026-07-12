@@ -9,6 +9,7 @@ from app.schemas.base import UTCDateTimeModel
 class ExternalBackupRunRequest(BaseModel):
     disk_id: int = Field(gt=0)
     confirmation: bool = False
+    auto_eject_after_success: bool = False
 
 
 class ExternalBackupRunRead(UTCDateTimeModel):
@@ -45,6 +46,7 @@ class ExternalBackupRunRead(UTCDateTimeModel):
     pbs_remote_id: str | None
     pbs_task_upid: str | None
     elapsed_seconds: int | None
+    auto_eject_after_success: bool
     mode: ExternalBackupMode
     created_at: datetime
 
@@ -82,6 +84,7 @@ class ExternalBackupRunSummaryRead(UTCDateTimeModel):
     pbs_remote_id: str | None
     pbs_task_upid: str | None
     elapsed_seconds: int | None
+    auto_eject_after_success: bool
     mode: ExternalBackupMode
     created_at: datetime
 

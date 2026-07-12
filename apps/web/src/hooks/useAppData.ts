@@ -326,7 +326,7 @@ export function useAppData() {
     }
   }
 
-  async function startExternalBackup(diskId: number, successMessage: string) {
+  async function startExternalBackup(diskId: number, successMessage: string, autoEjectAfterSuccess = false) {
     const key = `external-backup-${diskId}`;
     startSaving(key);
     setBannerError(null);
@@ -334,7 +334,7 @@ export function useAppData() {
 
     try {
       setSyncMessage("External backup run started. Live progress is available on the Activity page.");
-      const run = await runExternalBackup(diskId);
+      const run = await runExternalBackup(diskId, autoEjectAfterSuccess);
       setData((current) =>
         current
           ? {

@@ -267,10 +267,14 @@ export function getExternalBackupPreview(diskId: number) {
   return request<ExternalBackupPreview>(`/external-backups/preview/${diskId}`);
 }
 
-export function runExternalBackup(diskId: number) {
+export function runExternalBackup(diskId: number, autoEjectAfterSuccess = false) {
   return request<ExternalBackupRun>("/external-backups/run", {
     method: "POST",
-    body: JSON.stringify({ disk_id: diskId, confirmation: true }),
+    body: JSON.stringify({
+      disk_id: diskId,
+      confirmation: true,
+      auto_eject_after_success: autoEjectAfterSuccess,
+    }),
   });
 }
 

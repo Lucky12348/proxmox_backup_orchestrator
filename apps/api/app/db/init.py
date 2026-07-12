@@ -140,6 +140,10 @@ def ensure_external_backup_run_schema() -> None:
         "pbs_remote_id": "ALTER TABLE external_backup_runs ADD COLUMN pbs_remote_id VARCHAR(255)",
         "pbs_task_upid": "ALTER TABLE external_backup_runs ADD COLUMN pbs_task_upid TEXT",
         "elapsed_seconds": "ALTER TABLE external_backup_runs ADD COLUMN elapsed_seconds INTEGER",
+        "auto_eject_after_success": (
+            "ALTER TABLE external_backup_runs "
+            "ADD COLUMN auto_eject_after_success BOOLEAN NOT NULL DEFAULT FALSE"
+        ),
     }
 
     with engine.begin() as connection:
