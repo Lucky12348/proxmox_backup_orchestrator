@@ -13,11 +13,24 @@ import type { ProxmoxBackupJob, ProxmoxBackupJobFormValues } from "../types";
 import { formatDateTime, getRuntimeTone, getSourceTone } from "../utils";
 import type { AssetPageProps } from "./shared";
 
+const DAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+type DayCode = (typeof DAY_CODES)[number];
+const DAY_LABELS: Record<DayCode, string> = {
+  mon: "Lun",
+  tue: "Mar",
+  wed: "Mer",
+  thu: "Jeu",
+  fri: "Ven",
+  sat: "Sam",
+  sun: "Dim",
+};
+
 interface JobFormState {
   mode: "create" | "edit";
   jobId: string | null;
   storage: string;
-  schedule: string;
+  scheduleDays: Set<DayCode>;
+  scheduleTime: string;
   node: string;
   jobMode: string;
   enabled: boolean;
@@ -30,19 +43,22 @@ interface JobFormState {
   selectedVmids: Set<number>;
 }
 
-const BLANK_JOB_FORM: Omit<JobFormState, "mode" | "jobId" | "selectedVmids"> = {
-  storage: "",
-  schedule: "",
-  node: "",
-  jobMode: "snapshot",
-  enabled: true,
-  comment: "",
-  keepLast: "",
-  keepDaily: "",
-  keepWeekly: "",
-  keepMonthly: "",
-  keepYearly: "",
-};
+function blankJobForm(): Omit<JobFormState, "mode" | "jobId" | "selectedVmids"> {
+  return {
+    storage: "",
+    scheduleDays: new Set(DAY_CODES),
+    scheduleTime: "03:00",
+    node: "",
+    jobMode: "snapshot",
+    enabled: true,
+    comment: "",
+    keepLast: "",
+    keepDaily: "",
+    keepWeekly: "",
+    keepMonthly: "",
+    keepYearly: "",
+  };
+}
 
 function parseRetention(retention: string | null): Record<string, string> {
   const parsed: Record<string, string> = {};
@@ -54,13 +70,36 @@ function parseRetention(retention: string | null): Record<string, string> {
   return parsed;
 }
 
+// Proxmox schedules are systemd-style calendar events; this only understands
+// (and only ever produces) the common "day1,day2,... HH:MM" shape shown in
+// Proxmox's own job editor — anything else falls back to every day at 03:00
+// rather than guessing, and the raw value stays visible via the job list.
+function parseSchedule(schedule: string | null): { days: Set<DayCode>; time: string } {
+  const fallback = { days: new Set<DayCode>(DAY_CODES), time: "03:00" };
+  const match = schedule?.trim().match(/^([a-z,]+)\s+(\d{1,2}:\d{2})$/i);
+  if (!match) return fallback;
+  const days = new Set<DayCode>();
+  for (const token of match[1].toLowerCase().split(",")) {
+    if ((DAY_CODES as readonly string[]).includes(token)) days.add(token as DayCode);
+  }
+  return { days: days.size > 0 ? days : fallback.days, time: match[2] };
+}
+
+function buildSchedule(days: Set<DayCode>, time: string): string {
+  const ordered = DAY_CODES.filter((day) => days.has(day));
+  const dayPart = ordered.length === 0 || ordered.length === DAY_CODES.length ? DAY_CODES.join(",") : ordered.join(",");
+  return `${dayPart} ${time || "03:00"}`;
+}
+
 function jobFormFromExisting(job: ProxmoxBackupJob): JobFormState {
   const retention = parseRetention(job.retention);
+  const schedule = parseSchedule(job.schedule);
   return {
     mode: "edit",
     jobId: job.job_id,
     storage: job.storage ?? "",
-    schedule: job.schedule ?? "",
+    scheduleDays: schedule.days,
+    scheduleTime: schedule.time,
     node: job.node ?? "",
     jobMode: "snapshot",
     enabled: job.enabled,
@@ -78,7 +117,7 @@ function toFormValues(form: JobFormState): ProxmoxBackupJobFormValues {
   const toOptionalInt = (value: string) => (value.trim() === "" ? null : Number(value));
   return {
     storage: form.storage.trim(),
-    schedule: form.schedule.trim(),
+    schedule: buildSchedule(form.scheduleDays, form.scheduleTime),
     node: form.node.trim() || null,
     selected_vmids: Array.from(form.selectedVmids).sort((a, b) => a - b),
     mode: form.jobMode,
@@ -157,7 +196,7 @@ export function AssetsPage({
 
   function openCreateJobForm() {
     setJobFormError(null);
-    setJobForm({ mode: "create", jobId: null, selectedVmids: new Set(), ...BLANK_JOB_FORM });
+    setJobForm({ mode: "create", jobId: null, selectedVmids: new Set(), ...blankJobForm() });
   }
 
   function openEditJobForm(job: ProxmoxBackupJob) {
@@ -174,6 +213,16 @@ export function AssetsPage({
     setJobForm((current) => (current ? { ...current, ...patch } : current));
   }
 
+  function toggleScheduleDay(day: DayCode) {
+    setJobForm((current) => {
+      if (!current) return current;
+      const next = new Set(current.scheduleDays);
+      if (next.has(day)) next.delete(day);
+      else next.add(day);
+      return { ...current, scheduleDays: next };
+    });
+  }
+
   function toggleJobFormVmid(vmid: number) {
     setJobForm((current) => {
       if (!current) return current;
@@ -186,8 +235,8 @@ export function AssetsPage({
 
   async function submitJobForm() {
     if (!jobForm) return;
-    if (!jobForm.storage.trim() || !jobForm.schedule.trim()) {
-      setJobFormError("Le stockage et la planification sont obligatoires.");
+    if (!jobForm.storage.trim() || !jobForm.scheduleTime.trim()) {
+      setJobFormError("Le stockage et l'heure de planification sont obligatoires.");
       return;
     }
     if (jobForm.selectedVmids.size === 0) {
@@ -532,14 +581,28 @@ export function AssetsPage({
                   value={jobForm.node}
                 />
               </label>
-              <label className="field">
+              <div className="field" style={{ gridColumn: "1 / -1" }}>
                 <span>Planning *</span>
-                <input
-                  onChange={(event) => updateJobForm({ schedule: event.target.value })}
-                  placeholder="sun 03:00"
-                  value={jobForm.schedule}
-                />
-              </label>
+                <div className="schedule-picker">
+                  <div className="schedule-days">
+                    {DAY_CODES.map((day) => (
+                      <button
+                        className={`day-toggle${jobForm.scheduleDays.has(day) ? " day-toggle-active" : ""}`}
+                        key={day}
+                        onClick={() => toggleScheduleDay(day)}
+                        type="button"
+                      >
+                        {DAY_LABELS[day]}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    onChange={(event) => updateJobForm({ scheduleTime: event.target.value })}
+                    type="time"
+                    value={jobForm.scheduleTime}
+                  />
+                </div>
+              </div>
               <label className="field">
                 <span>Mode</span>
                 <select
@@ -568,44 +631,42 @@ export function AssetsPage({
               </label>
             </div>
 
-            <p className="modal-description" style={{ marginTop: 16 }}>
-              Retention (laisser vide = pas de limite pour cette periode) :
-            </p>
-            <div className="job-form-grid">
-              <label className="field">
-                <span>keep-last</span>
+            <div className="retention-row">
+              <span className="retention-label">Retention (vide = illimite) :</span>
+              <label className="retention-field">
+                <span>Dernier</span>
                 <input
                   inputMode="numeric"
                   onChange={(event) => updateJobForm({ keepLast: event.target.value })}
                   value={jobForm.keepLast}
                 />
               </label>
-              <label className="field">
-                <span>keep-daily</span>
+              <label className="retention-field">
+                <span>Jour</span>
                 <input
                   inputMode="numeric"
                   onChange={(event) => updateJobForm({ keepDaily: event.target.value })}
                   value={jobForm.keepDaily}
                 />
               </label>
-              <label className="field">
-                <span>keep-weekly</span>
+              <label className="retention-field">
+                <span>Semaine</span>
                 <input
                   inputMode="numeric"
                   onChange={(event) => updateJobForm({ keepWeekly: event.target.value })}
                   value={jobForm.keepWeekly}
                 />
               </label>
-              <label className="field">
-                <span>keep-monthly</span>
+              <label className="retention-field">
+                <span>Mois</span>
                 <input
                   inputMode="numeric"
                   onChange={(event) => updateJobForm({ keepMonthly: event.target.value })}
                   value={jobForm.keepMonthly}
                 />
               </label>
-              <label className="field">
-                <span>keep-yearly</span>
+              <label className="retention-field">
+                <span>Annee</span>
                 <input
                   inputMode="numeric"
                   onChange={(event) => updateJobForm({ keepYearly: event.target.value })}

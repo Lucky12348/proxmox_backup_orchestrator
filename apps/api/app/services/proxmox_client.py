@@ -8,6 +8,35 @@ import httpx
 from app.core.config import Settings, get_settings
 
 
+def _describe_pve_error(response: httpx.Response) -> str:
+    """Build a diagnostic message from a failed Proxmox API response.
+
+    `response.raise_for_status()` alone only reports the HTTP status line
+    (e.g. "400 Parameter verification failed") — Proxmox puts the actually
+    useful detail (which parameter, and why) in the JSON body's `errors`
+    dict, which was previously discarded. Surfacing it here means a bad
+    request is self-diagnosing from the app's error message instead of
+    requiring an SSH session to read the API's own logs.
+    """
+    prefix = f"HTTP {response.status_code} for {response.request.method} {response.request.url.path}"
+    try:
+        body = response.json()
+    except ValueError:
+        text = response.text.strip()
+        return f"{prefix}: {text[:500]}" if text else prefix
+
+    parts = []
+    message = body.get("message")
+    if message:
+        parts.append(str(message))
+    errors = body.get("errors")
+    if isinstance(errors, dict) and errors:
+        parts.append("; ".join(f"{field}: {reason}" for field, reason in errors.items()))
+    if not parts:
+        return prefix
+    return f"{prefix}: {' — '.join(parts)}"
+
+
 class ProxmoxClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -32,7 +61,8 @@ class ProxmoxClient:
             timeout=20.0,
         ) as client:
             response = client.request(method, path.lstrip("/"), data=data)
-            response.raise_for_status()
+            if response.is_error:
+                raise RuntimeError(_describe_pve_error(response))
             payload = response.json()
 
         return payload.get("data", payload)

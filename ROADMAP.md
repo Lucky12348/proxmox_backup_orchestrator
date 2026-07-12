@@ -242,6 +242,21 @@ one function, one bug class closed for both read and write paths. Covered by
 `test_update_backup_job_selection_flattens_multi_rule_retention` and the
 `FlattenPveScalarPropertyValueTests` suite in `apps/api/tests/`.
 
+**Follow-up (2026-07-12, same day)**: the user hit the same generic "400
+Parameter verification failed" again on the same job after deploying this
+fix, with no way to tell whether it was a different field or the fix hadn't
+landed — `ProxmoxClient._request()` only ever surfaced
+`response.raise_for_status()`'s status line, discarding the response body
+where Proxmox actually names the bad field. Fixed by
+`_describe_pve_error()`: on any error response, parse the JSON body's
+`message`/`errors` and raise a `RuntimeError` with the real detail instead of
+a bare `httpx.HTTPStatusError` — every route's existing `except RuntimeError`
+handler (already present alongside `except httpx.HTTPError` in every
+`proxmox.py`/`integrations_proxmox.py` handler) now surfaces this directly to
+the UI as a 400 with the actual Proxmox complaint, no SSH/log session needed
+to diagnose the *next* "parameter verification failed". Covered by
+`DescribePveErrorTests` in `apps/api/tests/test_proxmox_client.py`.
+
 ### 1.5 Proxmox backup job management: create/delete from the app — Done (MVP scope) — 2026-07-12
 
 Requested by the user after fixing §1.4: manage Proxmox backup jobs (the
@@ -272,6 +287,16 @@ an identical signature, acceptable for a single-operator home lab.
 styling; "+ Nouveau job", "Modifier", "Supprimer" actions per job card.
 Deliberately kept the surrounding hardcoded-French strings instead of adding
 `i18n` keys, matching this section's existing (already non-i18n'd) style.
+
+**Follow-up (2026-07-12, same day)**: the user found the first version's
+schedule field (a raw "sun 03:00"-style text box) unfriendly and the form
+generally too long. Replaced with a day-of-week toggle-button picker
+(Lun–Dim) + a native `<input type="time">`, composed into the
+`day1,day2,... HH:MM` calendar-event shape Proxmox's own editor produces
+(`parseSchedule`/`buildSchedule` in `AssetsPage.tsx`; unrecognized existing
+schedules fall back to every day at 03:00 rather than guessing). Retention
+inputs (`keep-last/daily/weekly/monthly/yearly`) were also collapsed from 5
+stacked labeled fields into a single compact row to shorten the modal.
 
 **Tests**: `apps/api/tests/test_proxmox_backup_jobs.py` (payload building,
 retention parsing, job-signature matching) and

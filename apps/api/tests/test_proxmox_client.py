@@ -1,8 +1,11 @@
 from types import SimpleNamespace
 from unittest import TestCase
 
+import httpx
+
 from app.services.proxmox_client import (
     ProxmoxClient,
+    _describe_pve_error,
     flatten_pve_property_value,
     is_include_selected_backup_job,
     parse_backup_job_vmids,
@@ -112,6 +115,35 @@ class ProxmoxClientConfigUpdateTests(TestCase):
         sent = client.put_calls[0][1]
         self.assertEqual(sent["prune-backups"], "keep-last=4,keep-monthly=8")
         self.assertIsInstance(sent["prune-backups"], str)
+
+
+class DescribePveErrorTests(TestCase):
+    def test_surfaces_the_errors_dict_from_the_response_body(self):
+        # This is the actual detail Proxmox returns for a rejected parameter —
+        # previously discarded, leaving only the opaque "400 Parameter
+        # verification failed" the user saw with no indication of which field.
+        request = httpx.Request("PUT", "https://pve.example/api2/json/cluster/backup/backup-123")
+        response = httpx.Response(
+            400,
+            json={"data": None, "message": "Parameter verification failed.", "errors": {"schedule": "value does not look like a valid calendar event"}},
+            request=request,
+        )
+
+        message = _describe_pve_error(response)
+
+        self.assertIn("400", message)
+        self.assertIn("Parameter verification failed", message)
+        self.assertIn("schedule", message)
+        self.assertIn("calendar event", message)
+
+    def test_falls_back_to_raw_text_when_body_is_not_json(self):
+        request = httpx.Request("GET", "https://pve.example/api2/json/cluster/backup")
+        response = httpx.Response(502, text="Bad Gateway", request=request)
+
+        message = _describe_pve_error(response)
+
+        self.assertIn("502", message)
+        self.assertIn("Bad Gateway", message)
 
 
 class FlattenPveScalarPropertyValueTests(TestCase):
