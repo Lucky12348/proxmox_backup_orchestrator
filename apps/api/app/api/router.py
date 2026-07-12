@@ -30,6 +30,7 @@ protected_router = APIRouter(
 )
 
 protected_router.include_router(overview.router)
+protected_router.include_router(agent.status_router)
 protected_router.include_router(assets.router)
 protected_router.include_router(vms.router)
 protected_router.include_router(disks.router)

@@ -11,7 +11,7 @@ export function AssetsPage({
   data,
   language,
   pbsInventoryByVmId,
-  savingKey,
+  isSaving,
   t,
   onAssetIgnoreChange,
   onBackupJobSelectionChange,
@@ -145,7 +145,7 @@ export function AssetsPage({
                 </div>
                 <button
                   className="action-button secondary"
-                  disabled={!job.supported || savingKey === `backup-job-${job.job_id}`}
+                  disabled={!job.supported || isSaving(`backup-job-${job.job_id}`)}
                   onClick={() => openSelectionModal(job.job_id)}
                   type="button"
                 >
@@ -251,7 +251,7 @@ export function AssetsPage({
                         <input
                           type="checkbox"
                           checked={ignored}
-                          disabled={savingKey === `vm-ignore-${vm.id}`}
+                          disabled={isSaving(`vm-ignore-${vm.id}`)}
                           onChange={(event) => onAssetIgnoreChange(vm, event.target.checked)}
                         />
                         <span className="toggle-slider" />
@@ -263,7 +263,7 @@ export function AssetsPage({
                       {targetJob && vmid !== null ? (
                         <button
                           className="tiny-action"
-                          disabled={!targetJob.supported || savingKey === `backup-job-${targetJob.job_id}`}
+                          disabled={!targetJob.supported || isSaving(`backup-job-${targetJob.job_id}`)}
                           onClick={() => {
                             const next = includedInTarget
                               ? targetJob.selected_vmids.filter((item) => item !== vmid)

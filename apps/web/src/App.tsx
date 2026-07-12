@@ -56,7 +56,7 @@ function AuthenticatedApp() {
     error,
     bannerError,
     syncMessage,
-    savingKey,
+    isSaving,
     proxmoxSyncing,
     pbsSyncing,
     pbsInventoryByVmId,
@@ -251,7 +251,7 @@ function AuthenticatedApp() {
                 onAssetIgnoreChange={(vm, ignored) => void mutateAssetIgnore(vm, ignored)}
                 onBackupJobSelectionChange={(jobId, vmids) => void mutateBackupJobSelection(jobId, vmids)}
                 pbsInventoryByVmId={pbsInventoryByVmId}
-                savingKey={savingKey} t={t}
+                isSaving={isSaving} t={t}
               />
             }
             path="/assets"
@@ -264,7 +264,7 @@ function AuthenticatedApp() {
                 onDiskEjectRequest={handleDiskEjectRequest}
                 onExternalBackupRequest={(disk) => void handleExternalBackupRequest(disk)}
                 onDiskToggleRequest={handleDiskToggleRequest}
-                savingKey={savingKey} t={t}
+                isSaving={isSaving} t={t}
               />
             }
             path="/disks"
@@ -285,7 +285,7 @@ function AuthenticatedApp() {
             element={
               <ActivityPage
                 data={data}
-                cleanupSaving={savingKey === "activity-cleanup"}
+                cleanupSaving={isSaving("activity-cleanup")}
                 externalBackupRuns={data.externalBackupRuns}
                 language={language}
                 onCleanupOldRunsRequest={handleActivityCleanupRequest}

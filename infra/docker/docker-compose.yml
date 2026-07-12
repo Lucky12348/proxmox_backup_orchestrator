@@ -60,7 +60,9 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-proxmox_backup_orchestrator}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # No weak fallback: fail loudly at `docker compose up` instead of silently
+      # starting with a well-known default password reachable from the LAN.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
     healthcheck:
       test:
         [
@@ -72,7 +74,11 @@ services:
       retries: 5
       start_period: 10s
     ports:
-      - "5432:5432"
+      # Bound to loopback only: the api/web containers reach Postgres over the
+      # internal compose network via the `db` hostname, they don't need this
+      # published port. This is only for local admin access (psql, GUI clients)
+      # from the app VM itself.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 

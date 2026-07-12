@@ -160,10 +160,18 @@ The script prints a Compose-safe `AUTH_PASSWORD_HASH=...` line. Keep the doubled
 
 ## Agent Onboarding
 
-Repo-local Codex skills live under `.codex/skills` and are intended to speed up future work:
+**[`AGENTS.md`](AGENTS.md)** is the primary, tool-agnostic onboarding file for any
+AI coding agent (Claude Code, Codex, Cursor, Copilot, etc.). Read it first — it
+covers architecture, repo map, entrypoints, sensitive workflows, local dev
+commands, testing status, and the hard rule that agents must never commit or
+push on their own initiative.
+
+Repo-local Codex skills also live under `.codex/skills` for tools that support
+Codex-style skills, mirroring the same guidance in task-specific slices:
 
 - `project-orientation`
 - `backup-workflow-backend`
 - `ops-and-agents`
 
-Use them as navigation and safety guides, then defer to the docs and source of truth in the repository.
+See [`ROADMAP.md`](ROADMAP.md) for planned work and known gaps (CI, e2e tests,
+multi-user support, auto-eject coverage, etc.).

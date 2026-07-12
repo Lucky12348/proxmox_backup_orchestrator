@@ -10,7 +10,7 @@ export interface PageCommonProps {
 
 export interface AssetPageProps extends PageCommonProps {
   pbsInventoryByVmId: Map<number, { protected: boolean; last_backup_at: string | null }>;
-  savingKey: string | null;
+  isSaving: (key: string) => boolean;
   onAssetIgnoreChange: (vm: VirtualMachine, ignored: boolean) => void;
   onBackupJobSelectionChange: (jobId: string, selectedVmids: number[]) => void;
 }
@@ -22,7 +22,7 @@ export interface DiskActionRequest {
 }
 
 export interface DisksPageProps extends PageCommonProps {
-  savingKey: string | null;
+  isSaving: (key: string) => boolean;
   onDiskToggleRequest: (request: DiskActionRequest) => void;
   onExternalBackupRequest: (disk: ExternalDisk) => void;
   onDiskEjectRequest: (disk: ExternalDisk) => void;

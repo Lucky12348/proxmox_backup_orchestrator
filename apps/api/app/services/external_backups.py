@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
+from threading import Lock
 from typing import Literal
 
 from fastapi import HTTPException, status
@@ -152,6 +153,16 @@ def cleanup_external_export_objects() -> dict[str, object]:
     }
 
 
+# Serializes the "no active run" check with run creation. Without this, two
+# near-simultaneous POST /external-backups/run calls can both pass
+# assert_no_active_external_backup() before either commits, creating two
+# concurrent runs that then drive the same USB passthrough/PBS slot at once.
+# A single uvicorn worker is used (see infra/docker/api.Dockerfile), so an
+# in-process lock is sufficient and stays correct against both Postgres (prod)
+# and the SQLite test database.
+_external_backup_run_lock = Lock()
+
+
 def run_external_backup(
     db: Session,
     disk_id: int,
@@ -164,48 +175,49 @@ def run_external_backup(
             detail="External backup execution requires explicit confirmation.",
         )
 
-    assert_no_active_external_backup(db)
+    with _external_backup_run_lock:
+        assert_no_active_external_backup(db)
 
-    disk = _get_disk_or_404(db, disk_id)
-    if not disk.trusted:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only trusted disks can be used for external backups.",
+        disk = _get_disk_or_404(db, disk_id)
+        if not disk.trusted:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only trusted disks can be used for external backups.",
+            )
+
+        if not disk.connected:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Disk must be connected before an external backup can run.",
+            )
+
+        plan = build_external_backup_plan(disk)
+        settings = get_settings()
+        now = datetime.utcnow()
+        run = ExternalBackupRun(
+            disk_id=disk.id,
+            status=BackupRunStatus.PENDING,
+            started_at=now,
+            finished_at=None,
+            target_path=plan.target_path,
+            datastore_name=datastore_name or settings.pbs_datastore,
+            message=None,
+            stdout_log=None,
+            stderr_log=None,
+            command_summary=None,
+            execution_cwd=None,
+            return_code=None,
+            current_step="starting",
+            progress_message="External backup run queued.",
+            last_log_at=now,
+            warning_messages=[],
+            failed_groups=[],
+            mode=plan.mode,
+            created_at=now,
         )
-
-    if not disk.connected:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Disk must be connected before an external backup can run.",
-        )
-
-    plan = build_external_backup_plan(disk)
-    settings = get_settings()
-    now = datetime.utcnow()
-    run = ExternalBackupRun(
-        disk_id=disk.id,
-        status=BackupRunStatus.PENDING,
-        started_at=now,
-        finished_at=None,
-        target_path=plan.target_path,
-        datastore_name=datastore_name or settings.pbs_datastore,
-        message=None,
-        stdout_log=None,
-        stderr_log=None,
-        command_summary=None,
-        execution_cwd=None,
-        return_code=None,
-        current_step="starting",
-        progress_message="External backup run queued.",
-        last_log_at=now,
-        warning_messages=[],
-        failed_groups=[],
-        mode=plan.mode,
-        created_at=now,
-    )
-    db.add(run)
-    db.commit()
-    db.refresh(run)
+        db.add(run)
+        db.commit()
+        db.refresh(run)
 
     append_external_backup_run_log(
         db,

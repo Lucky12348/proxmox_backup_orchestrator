@@ -35,6 +35,13 @@ SERVER_STARTED_AT = datetime.now(timezone.utc).isoformat()
 
 app = FastAPI(title="Proxmox Backup Orchestrator Agent", version="0.1.0")
 
+# Proxmox Backup Server datastore names: safe charset only, and never allowed to
+# start with `-` so it can't be parsed as a CLI option by `proxmox-backup-manager`.
+DATASTORE_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$"
+# QEMU USB host mapping: either "<busnum>-<port>[.<port>...]" or "<vendid>:<prodid>"
+# hex pairs (see apps/api/app/services/disk_handoff.py:_qemu_usb_host_mapping).
+QEMU_USB_HOST_PATTERN = r"^(?:[0-9]+-[0-9]+(?:\.[0-9]+)*|[0-9A-Fa-f]{4}:[0-9A-Fa-f]{4})$"
+
 
 class PrepareDiskRequest(BaseModel):
     disk: str = Field(min_length=1)
@@ -54,18 +61,18 @@ class PrepareExternalDatastoreRequest(BaseModel):
 
 class RunExternalExportRequest(BaseModel):
     target_path: str = Field(min_length=1)
-    datastore_name: str = Field(min_length=1)
+    datastore_name: str = Field(pattern=DATASTORE_NAME_PATTERN)
     mode: str
     callback_run_id: int | None = Field(default=None, gt=0)
     callback_url: str | None = Field(default=None, min_length=1)
     callback_token: str | None = Field(default=None, min_length=1)
-    target_datastore_name: str | None = Field(default=None, min_length=1)
+    target_datastore_name: str | None = Field(default=None, pattern=DATASTORE_NAME_PATTERN)
     persist_target_datastore: bool = False
 
 
 class PrepareDedicatedPbsDatastoreRequest(BaseModel):
     disk: str = Field(min_length=1)
-    datastore_name: str = Field(min_length=1)
+    datastore_name: str = Field(pattern=DATASTORE_NAME_PATTERN)
     confirmation: bool = False
     force_format: bool = False
     mount_path: str | None = Field(default=None, min_length=1)
@@ -76,7 +83,7 @@ class PrepareDedicatedPbsDatastoreRequest(BaseModel):
 
 class EjectDedicatedPbsDatastoreRequest(BaseModel):
     serial: str = Field(min_length=1)
-    datastore_name: str = Field(min_length=1)
+    datastore_name: str = Field(pattern=DATASTORE_NAME_PATTERN)
     mount_path: str = Field(min_length=1)
 
 
@@ -92,7 +99,7 @@ class FilesystemUsageRequest(BaseModel):
 class QemuUsbAttachRequest(BaseModel):
     vmid: int = Field(gt=0)
     slot: str = Field(pattern=r"^usb\d+$")
-    host: str = Field(min_length=1)
+    host: str = Field(pattern=QEMU_USB_HOST_PATTERN)
     usb3: bool | None = None
 
 

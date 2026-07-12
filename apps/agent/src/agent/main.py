@@ -66,7 +66,11 @@ class AgentSettings:
     pbs_api_url: str = os.getenv("PBS_API_URL", "")
     pbs_auth_id: str = os.getenv("PBS_TOKEN_ID", "")
     pbs_auth_secret: str = os.getenv("PBS_TOKEN_SECRET", "")
-    pbs_verify_ssl: bool = parse_bool(os.getenv("PBS_VERIFY_SSL"), default=False)
+    # Note: the agent talks to PBS via `proxmox-backup-manager` (trust is
+    # established with `pbs_fingerprint` below), not a direct HTTPS client, so
+    # there is no `verify=`-style TLS toggle to wire PBS_VERIFY_SSL into here.
+    # apps/api/app/core/config.py has its own PBS_VERIFY_SSL-backed setting for
+    # the API's own PBS REST client (apps/api/app/services/pbs_client.py).
     pbs_fingerprint: str | None = os.getenv("PBS_FINGERPRINT") or None
     export_timeout_seconds: float = float(os.getenv("AGENT_EXPORT_TIMEOUT_SECONDS", "7200"))
     datastore_create_timeout_seconds: float = float(
@@ -91,7 +95,11 @@ class ExternalExportProgress:
         self.settings = settings
         self.run_id = run_id
         self.callback_url = callback_url
-        self.callback_token = callback_token or settings.server_token
+        # Do not fall back to `settings.server_token`: that is this agent's own
+        # inbound-API secret, and leaking it to an externally-supplied callback_url
+        # would let a caller exfiltrate the master token. The API always supplies
+        # its own callback_token explicitly for real progress callbacks.
+        self.callback_token = callback_token
 
     def post(
         self,
@@ -133,7 +141,7 @@ def post_heartbeat(settings: AgentSettings) -> None:
         "agent_version": settings.agent_version,
         "observed_at": current_timestamp(),
     }
-    post_json(settings, "/agent/heartbeat", payload)
+    post_json(settings, "/agent/heartbeat", payload, token=settings.server_token)
     logger.info("Heartbeat sent for host %s", settings.hostname)
 
 
@@ -144,7 +152,7 @@ def post_real_disk_report(settings: AgentSettings) -> None:
         "observed_at": current_timestamp(),
         "disks": disks,
     }
-    post_json(settings, "/agent/disks/report", payload)
+    post_json(settings, "/agent/disks/report", payload, token=settings.server_token)
     logger.info("Real disk report sent for host %s with %s disks", settings.hostname, len(disks))
 
 
@@ -154,7 +162,7 @@ def post_mock_disk_report(settings: AgentSettings) -> None:
         "observed_at": current_timestamp(),
         "disks": mock_disks(),
     }
-    post_json(settings, "/agent/disks/report", payload)
+    post_json(settings, "/agent/disks/report", payload, token=settings.server_token)
     logger.info("Mock disk report sent for host %s", settings.hostname)
 
 
@@ -357,6 +365,7 @@ def prepare_dedicated_pbs_datastore_result(
     _assert_safe_dedicated_disk(disk)
 
     mount_path = Path(preferred_mount_path).resolve(strict=False) if preferred_mount_path else default_mount_base_path(None) / serial / "pbs-datastore"
+    _assert_safe_pbo_datastore_mount_path(mount_path, action="mount")
     partition_path = _first_partition_path(device_path)
     command_summaries: list[str] = []
     stdout_logs: list[str] = []
@@ -521,7 +530,7 @@ def eject_dedicated_pbs_datastore_result(
             "Refusing to eject "
             f"`{requested_mount}` because it is not an expected PBO path for disk serial `{clean_serial}`."
         )
-    _assert_safe_eject_mount_path(resolved_mount)
+    _assert_safe_pbo_datastore_mount_path(resolved_mount, action="unmount")
 
     manager = shutil.which("proxmox-backup-manager")
     if manager is None:
@@ -1017,6 +1026,7 @@ def prepare_disk_result(
         if not confirm_destructive:
             raise RuntimeError("Dedicated backup mode requires destructive confirmation.")
 
+        _assert_safe_dedicated_disk(disk)
         target_node = find_format_target(disk)
         run_command(["mkfs.ext4", "-F", target_node["path"]])
         filesystem_type = "ext4"
@@ -1341,6 +1351,16 @@ def _assert_safe_dedicated_disk(disk: dict[str, Any]) -> None:
             except ValueError:
                 continue
             raise RuntimeError(f"Refusing to format disk because it contains source datastore `{datastore_path}`.")
+
+    # The explicit mountpoint checks above miss the common Proxmox case where the
+    # system/root disk is an LVM (or ZFS) member: its physical partition has no
+    # mountpoint of its own (the logical volume is what's mounted), so it would
+    # otherwise sail through. Reuse the same exclusion logic used to keep such
+    # disks out of the discovery/report listing (see discover_real_disks) so a
+    # bad or manipulated disk identifier can't reach wipefs/sgdisk/mkfs here.
+    reason = get_exclusion_reason(disk, load_udev_properties(device_name(disk)))
+    if reason is not None:
+        raise RuntimeError(f"Refusing to format disk `{disk['path']}`: it {reason}.")
 
 
 def _find_ext4_partition(disk: dict[str, Any]) -> dict[str, Any] | None:
@@ -2117,7 +2137,14 @@ def _cleanup_stale_export_sync_objects(
             raise RuntimeError(format_command_failure(f"Failed to remove stale remote `{remote_name}`.", result))
 
 
-def _assert_safe_eject_mount_path(mount_path: Path) -> None:
+def _assert_safe_pbo_datastore_mount_path(mount_path: Path, *, action: str = "use") -> None:
+    """Confine a dedicated-PBS-datastore mount path to `<base>/<serial>/pbs-datastore`.
+
+    `<base>` is `default_mount_base_path(None)` (`/mnt/pbo` in production). Used
+    both before mounting (prepare) and before unmounting (eject) a dedicated
+    datastore, so a caller-supplied `mount_path`/`preferred_mount_path` can
+    never point at `/`, `/boot`, or anywhere outside the managed layout.
+    """
     dangerous_mounts = {
         Path("/"),
         Path("/boot"),
@@ -2125,15 +2152,16 @@ def _assert_safe_eject_mount_path(mount_path: Path) -> None:
         Path("/mnt/datastore/backup-store"),
     }
     if mount_path in dangerous_mounts:
-        raise RuntimeError(f"Refusing to unmount protected path `{mount_path}`.")
-    if not str(mount_path).startswith("/mnt/pbo/") or mount_path.name != "pbs-datastore":
-        raise RuntimeError(f"Refusing to unmount non-PBO datastore path `{mount_path}`.")
+        raise RuntimeError(f"Refusing to {action} protected path `{mount_path}`.")
+    base_path = default_mount_base_path(None)
+    if mount_path.name != "pbs-datastore":
+        raise RuntimeError(f"Refusing to {action} non-PBO datastore path `{mount_path}`.")
     try:
-        mount_path.relative_to(Path("/mnt/pbo"))
+        mount_path.relative_to(base_path)
     except ValueError as exc:
-        raise RuntimeError(f"Refusing to unmount non-PBO datastore path `{mount_path}`.") from exc
-    if mount_path.parent.parent != Path("/mnt/pbo"):
-        raise RuntimeError(f"Refusing to unmount non-PBO datastore path `{mount_path}`.")
+        raise RuntimeError(f"Refusing to {action} non-PBO datastore path `{mount_path}`.") from exc
+    if mount_path.parent.parent != base_path:
+        raise RuntimeError(f"Refusing to {action} non-PBO datastore path `{mount_path}`.")
 
 
 def _assert_safe_filesystem_usage_mount_path(mount_path: Path) -> None:

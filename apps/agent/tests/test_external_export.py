@@ -10,7 +10,7 @@ from agent.main import (
     filesystem_usage_for_mount_path,
     filesystem_usage_result,
     _ensure_loop_image_mounted,
-    _assert_safe_eject_mount_path,
+    _assert_safe_pbo_datastore_mount_path,
     _expected_pbo_datastore_mount_paths,
     _find_mount_source,
     _fuser_process_lines,
@@ -246,7 +246,7 @@ class ExternalExportDatastoreCreateTests(TestCase):
             mount.mkdir(parents=True)
             with (
                 patch("agent.main.default_mount_base_path", return_value=Path(temp_dir)),
-                patch("agent.main._assert_safe_eject_mount_path"),
+                patch("agent.main._assert_safe_pbo_datastore_mount_path"),
                 patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
                 patch("agent.main._pbs_datastore_has_running_tasks", return_value=False),
                 patch("agent.main._pbo_export_sync_job_running", return_value=True),
@@ -274,7 +274,7 @@ class ExternalExportDatastoreCreateTests(TestCase):
 
             with (
                 patch("agent.main.default_mount_base_path", return_value=base),
-                patch("agent.main._assert_safe_eject_mount_path"),
+                patch("agent.main._assert_safe_pbo_datastore_mount_path"),
                 patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
                 patch("agent.main._pbs_datastore_has_running_tasks", return_value=False),
                 patch("agent.main._pbo_export_sync_job_running", return_value=False),
@@ -301,7 +301,7 @@ class ExternalExportDatastoreCreateTests(TestCase):
 
         with (
             patch("agent.main.default_mount_base_path", return_value=Path("/mnt/pbo")),
-            patch("agent.main._assert_safe_eject_mount_path"),
+            patch("agent.main._assert_safe_pbo_datastore_mount_path"),
             patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
             patch("agent.main._pbs_datastore_has_running_tasks", return_value=False),
             patch("agent.main._pbo_export_sync_job_running", return_value=False),
@@ -344,7 +344,7 @@ class ExternalExportDatastoreCreateTests(TestCase):
     def test_eject_refuses_unsafe_mount_paths(self):
         for path in ["/", "/boot", "/boot/efi", "/mnt/datastore/backup-store", "/tmp/WXD2DA1L1E7C/pbs-datastore", "/mnt/pbo/WXD2DA1L1E7C/not-pbs"]:
             with self.subTest(path=path), self.assertRaises(RuntimeError):
-                _assert_safe_eject_mount_path(Path(path))
+                _assert_safe_pbo_datastore_mount_path(Path(path))
 
     def test_eject_busy_datastore_restarts_pbs_services_when_only_pbs_blocks_mount(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -369,7 +369,7 @@ class ExternalExportDatastoreCreateTests(TestCase):
             )
             with (
                 patch("agent.main.default_mount_base_path", return_value=base),
-                patch("agent.main._assert_safe_eject_mount_path"),
+                patch("agent.main._assert_safe_pbo_datastore_mount_path"),
                 patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
                 patch("agent.main._pbs_datastore_has_running_tasks", return_value=False),
                 patch("agent.main._pbo_export_sync_job_running", return_value=False),
@@ -428,7 +428,7 @@ class ExternalExportDatastoreCreateTests(TestCase):
             )
             with (
                 patch("agent.main.default_mount_base_path", return_value=base),
-                patch("agent.main._assert_safe_eject_mount_path"),
+                patch("agent.main._assert_safe_pbo_datastore_mount_path"),
                 patch("agent.main.shutil.which", return_value="/usr/sbin/proxmox-backup-manager"),
                 patch("agent.main._pbs_datastore_has_running_tasks", return_value=False),
                 patch("agent.main._pbo_export_sync_job_running", return_value=False),

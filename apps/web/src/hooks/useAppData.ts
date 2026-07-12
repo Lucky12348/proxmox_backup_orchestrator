@@ -134,9 +134,36 @@ export function useAppData() {
   const [error, setError] = useState<string | null>(null);
   const [bannerError, setBannerError] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [savingKey, setSavingKey] = useState<string | null>(null);
+  // A Set (not a single string) so that two independent mutations in flight at
+  // once (e.g. ejecting disk A while toggling "trusted" on disk B) each keep
+  // their own button disabled instead of the second one clearing the first's
+  // key early and allowing a double-submit on a destructive action.
+  const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set());
   const [proxmoxSyncing, setProxmoxSyncing] = useState(false);
   const [pbsSyncing, setPbsSyncing] = useState(false);
+
+  function startSaving(key: string) {
+    setSavingKeys((current) => {
+      const next = new Set(current);
+      next.add(key);
+      return next;
+    });
+  }
+
+  function stopSaving(key: string) {
+    setSavingKeys((current) => {
+      if (!current.has(key)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+  }
+
+  function isSaving(key: string) {
+    return savingKeys.has(key);
+  }
 
   async function load() {
     setLoading(true);
@@ -212,7 +239,8 @@ export function useAppData() {
   }, [hasActiveExternalBackup]);
 
   async function mutateVmCritical(vmId: number, critical: boolean) {
-    setSavingKey(`vm-${vmId}`);
+    const key = `vm-${vmId}`;
+    startSaving(key);
     setBannerError(null);
 
     try {
@@ -228,7 +256,7 @@ export function useAppData() {
     } catch (mutationError) {
       setBannerError(mutationError instanceof Error ? mutationError.message : "Unknown error");
     } finally {
-      setSavingKey(null);
+      stopSaving(key);
     }
   }
 
@@ -248,7 +276,8 @@ export function useAppData() {
       >
     >,
   ) {
-    setSavingKey(`disk-${diskId}`);
+    const key = `disk-${diskId}`;
+    startSaving(key);
     setBannerError(null);
 
     try {
@@ -257,7 +286,7 @@ export function useAppData() {
     } catch (mutationError) {
       setBannerError(mutationError instanceof Error ? mutationError.message : "Unknown error");
     } finally {
-      setSavingKey(null);
+      stopSaving(key);
     }
   }
 
@@ -298,7 +327,8 @@ export function useAppData() {
   }
 
   async function startExternalBackup(diskId: number, successMessage: string) {
-    setSavingKey(`external-backup-${diskId}`);
+    const key = `external-backup-${diskId}`;
+    startSaving(key);
     setBannerError(null);
     setSyncMessage(null);
 
@@ -318,7 +348,7 @@ export function useAppData() {
     } catch (runError) {
       setBannerError(runError instanceof Error ? runError.message : "Unknown error");
     } finally {
-      setSavingKey(null);
+      stopSaving(key);
     }
 
     return null;
@@ -333,7 +363,8 @@ export function useAppData() {
     },
     successMessage: string,
   ) {
-    setSavingKey(`disk-prep-${diskId}`);
+    const key = `disk-prep-${diskId}`;
+    startSaving(key);
     setBannerError(null);
     setSyncMessage(null);
 
@@ -345,7 +376,7 @@ export function useAppData() {
     } catch (runError) {
       setBannerError(runError instanceof Error ? runError.message : "Unknown error");
     } finally {
-      setSavingKey(null);
+      stopSaving(key);
     }
 
     return null;
@@ -353,7 +384,8 @@ export function useAppData() {
 
   async function mutateAssetIgnore(vm: VirtualMachine, ignored: boolean, reason?: string | null) {
     const vmid = vm.external_id ?? String(vm.id);
-    setSavingKey(`vm-ignore-${vm.id}`);
+    const key = `vm-ignore-${vm.id}`;
+    startSaving(key);
     setBannerError(null);
 
     try {
@@ -362,12 +394,13 @@ export function useAppData() {
     } catch (mutationError) {
       setBannerError(mutationError instanceof Error ? mutationError.message : "Unknown error");
     } finally {
-      setSavingKey(null);
+      stopSaving(key);
     }
   }
 
   async function mutateBackupJobSelection(jobId: string, selectedVmids: number[]) {
-    setSavingKey(`backup-job-${jobId}`);
+    const key = `backup-job-${jobId}`;
+    startSaving(key);
     setBannerError(null);
     setSyncMessage(null);
 
@@ -378,12 +411,13 @@ export function useAppData() {
     } catch (mutationError) {
       setBannerError(mutationError instanceof Error ? mutationError.message : "Unknown error");
     } finally {
-      setSavingKey(null);
+      stopSaving(key);
     }
   }
 
   async function ejectDisk(diskId: number, successMessage: string) {
-    setSavingKey(`disk-eject-${diskId}`);
+    const key = `disk-eject-${diskId}`;
+    startSaving(key);
     setBannerError(null);
     setSyncMessage(null);
 
@@ -395,14 +429,15 @@ export function useAppData() {
     } catch (ejectError) {
       setBannerError(ejectError instanceof Error ? ejectError.message : "Unknown error");
     } finally {
-      setSavingKey(null);
+      stopSaving(key);
     }
 
     return false;
   }
 
   async function cleanupActivityRuns(keepLast: number, successMessage: string) {
-    setSavingKey("activity-cleanup");
+    const key = "activity-cleanup";
+    startSaving(key);
     setBannerError(null);
     setSyncMessage(null);
 
@@ -418,7 +453,7 @@ export function useAppData() {
     } catch (cleanupError) {
       setBannerError(cleanupError instanceof Error ? cleanupError.message : "Unknown error");
     } finally {
-      setSavingKey(null);
+      stopSaving(key);
     }
   }
 
@@ -433,7 +468,7 @@ export function useAppData() {
     error,
     bannerError,
     syncMessage,
-    savingKey,
+    isSaving,
     proxmoxSyncing,
     pbsSyncing,
     pbsInventoryByVmId,

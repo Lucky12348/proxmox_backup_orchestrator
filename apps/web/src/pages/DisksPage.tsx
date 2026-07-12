@@ -51,7 +51,7 @@ function CapacityBar({
 export function DisksPage({
   data,
   language,
-  savingKey,
+  isSaving,
   t,
   onDiskToggleRequest,
   onExternalBackupRequest,
@@ -123,7 +123,7 @@ export function DisksPage({
                       <input
                         type="checkbox"
                         checked={disk.trusted}
-                        disabled={savingKey === `disk-${disk.id}` || unusable}
+                        disabled={isSaving(`disk-${disk.id}`) || unusable}
                         onChange={(event) =>
                           onDiskToggleRequest({
                             disk,
@@ -147,7 +147,7 @@ export function DisksPage({
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button
                         className="action-button"
-                        disabled={savingKey === `external-backup-${disk.id}` || !disk.connected || unusable || Boolean(activeExternalBackup) || !agentsCompatible}
+                        disabled={isSaving(`external-backup-${disk.id}`) || !disk.connected || unusable || Boolean(activeExternalBackup) || !agentsCompatible}
                         onClick={() => {
                           if (activeExternalBackup) {
                             window.location.hash = "#activity";
@@ -171,12 +171,12 @@ export function DisksPage({
                       </button>
                       <button
                         className="ghost-button"
-                        disabled={savingKey === `disk-eject-${disk.id}` || !disk.connected}
+                        disabled={isSaving(`disk-eject-${disk.id}`) || !disk.connected}
                         onClick={() => onDiskEjectRequest(disk)}
                         type="button"
                         style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
                       >
-                        {savingKey === `disk-eject-${disk.id}` ? t.ejectingDisk : t.ejectDiskAction}
+                        {isSaving(`disk-eject-${disk.id}`) ? t.ejectingDisk : t.ejectDiskAction}
                       </button>
                     </div>
                   </td>

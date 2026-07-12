@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from pathlib import PurePosixPath
 
@@ -13,6 +14,8 @@ from app.services.external_backup_execution import build_dedicated_datastore_nam
 from app.services.external_backups import append_external_backup_run_log
 from app.services.notifications import notify_disk_eject_ready
 
+
+logger = logging.getLogger(__name__)
 
 RUNNING_EJECT_REFUSAL = "Impossible d’éjecter le disque: une tâche PBS est en cours."
 EJECT_SUCCESS_MESSAGE = "Le disque est pr\u00eat. Vous pouvez le retirer."
@@ -107,9 +110,13 @@ def eject_dedicated_external_disk(db: Session, disk_id: int) -> ExternalDisk:
         return disk
     except AgentCommandError as exc:
         _finish_eject_activity_failed(db, run, str(exc), exc.stdout_log, exc.stderr_log, exc.command_summary, exc.execution_cwd, exc.return_code)
+        logger.warning("Dedicated PBS datastore eject failed for disk %s: %s", disk.serial_number, exc)
         if "running" in str(exc).casefold() or "sync job" in str(exc).casefold() or "task" in str(exc).casefold():
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=RUNNING_EJECT_REFUSAL) from exc
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to eject disk. Check the activity log for this run for details.",
+        ) from exc
     except HTTPException as exc:
         message = (
             PARTIAL_DETACH_FAILURE_MESSAGE
