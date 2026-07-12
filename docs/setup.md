@@ -11,7 +11,7 @@
 1. Copy `.env.example` to `.env`
 2. Review and adjust environment variables
 3. Run `make bootstrap` to verify the local URLs and environment file
-4. Start the local stack with `docker compose -f infra/docker/docker-compose.yml up --build`
+4. Start the local stack with `docker compose --env-file .env -f infra/docker/docker-compose.yml up --build`
 5. Open the web dashboard and API docs in the browser
 6. Install local app dependencies only if you want to run API or web outside Docker
 
@@ -22,10 +22,19 @@ The `.env` file must live at the repository root:
 
 - `proxmox_backup_orchestrator/.env`
 
-When you run `docker-compose -f infra/docker/docker-compose.yml up ...` or
-`docker compose -f infra/docker/docker-compose.yml up ...`, the API and web
-services explicitly load that root `.env` file into their container runtime
-environment.
+Always pass `--env-file .env` when running `docker-compose -f
+infra/docker/docker-compose.yml up ...` or `docker compose -f
+infra/docker/docker-compose.yml up ...` from the repository root. The `api`
+and `web` services also declare `env_file: - ../../.env`, which loads that
+root `.env` into the container runtime — but the compose file's own
+`environment:` block re-references several of those same variables as
+`${VAR}` (e.g. `NOTIFICATIONS_ENABLED`, `NTFY_BASE_URL`), and Compose resolves
+those specific references using its own env-file lookup, independent of
+`env_file:`. Without `--env-file .env`, Compose looks for a `.env` next to the
+compose file (`infra/docker/.env`, which doesn't exist), resolves those
+references to empty strings, and **that empty value overwrites the correct
+one `env_file:` just loaded** — silently reverting settings like ntfy
+notifications to their defaults on every rebuild.
 
 For read-only Proxmox inventory sync, configure these variables in `.env`:
 
@@ -378,7 +387,7 @@ sudo systemctl list-timers proxmox-backup-orchestrator-agent.timer
 ```bash
 cp .env.example .env
 make bootstrap
-docker compose -f infra/docker/docker-compose.yml up --build
+docker compose --env-file .env -f infra/docker/docker-compose.yml up --build
 ```
 
 Once the stack is running, open `http://localhost:5173`.

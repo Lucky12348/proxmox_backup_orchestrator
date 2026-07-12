@@ -119,8 +119,14 @@ python scripts/generate_password_hash.py
 Paste the complete printed line into `.env`, then restart the API:
 
 ```bash
-docker compose -f infra/docker/docker-compose.yml up -d api
+docker compose --env-file .env -f infra/docker/docker-compose.yml up -d api
 ```
+
+`--env-file .env` is required (run from the repository root) — without it,
+Compose re-resolves several `environment:` entries in the compose file
+(notifications config among them) against a nonexistent `infra/docker/.env`
+instead of the real one, silently blanking them out even though `env_file:`
+loaded them correctly moments earlier.
 
 **`code_secret` still works**
 

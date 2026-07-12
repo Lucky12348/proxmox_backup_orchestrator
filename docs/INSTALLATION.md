@@ -136,11 +136,13 @@ Health check on the App VM:
 curl -H "X-Agent-Token: <app-maintenance-agent-token>" http://127.0.0.1:8092/health
 ```
 
-Start the app stack:
+Start the app stack (run from the repository root; `--env-file .env` is
+required — see the note in `docs/setup.md` about why omitting it silently
+reverts settings like notifications to their defaults):
 
 ```bash
-docker compose -f infra/docker/docker-compose.yml up -d --build
-docker compose -f infra/docker/docker-compose.yml ps
+docker compose --env-file .env -f infra/docker/docker-compose.yml up -d --build
+docker compose --env-file .env -f infra/docker/docker-compose.yml ps
 ```
 
 Login and protected API check:

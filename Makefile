@@ -16,7 +16,7 @@ test:
 	@echo "Run test suites across the monorepo (placeholder)"
 
 up:
-	docker compose -f infra/docker/docker-compose.yml up --build -d
+	docker compose --env-file .env -f infra/docker/docker-compose.yml up --build -d
 
 down:
-	docker compose -f infra/docker/docker-compose.yml down
+	docker compose --env-file .env -f infra/docker/docker-compose.yml down

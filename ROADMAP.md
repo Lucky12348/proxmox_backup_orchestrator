@@ -119,6 +119,41 @@ that changes `apps/agent` — worth a quick check the first time it happens.
   Proxmox host) are harmless leftovers from this migration and the previous
   PVE upgrade; safe to delete once confident, not urgent.
 
+### 1.3 Manual `docker compose` commands silently blank out `.env` settings — Done — 2026-07-12
+
+**Problem, raised by the user.** Notifications (ntfy) config kept reverting
+to defaults after rebuilding the App VM stack manually. Root cause: the `api`
+service in `infra/docker/docker-compose.yml` declares both `env_file: -
+../../.env` (loads the real `.env`) **and** an `environment:` block that
+re-references some of the same variables as `${VAR}` (e.g.
+`NOTIFICATIONS_ENABLED`, `NTFY_BASE_URL`, `NTFY_TOPIC`). Compose resolves
+those `${VAR}` references using its *own* env-file lookup — by default a
+`.env` next to the compose file (`infra/docker/.env`, which doesn't exist) —
+independent of the service's `env_file:` directive. Without `--env-file .env`
+passed to the `docker compose` command itself, those references resolve to
+empty strings and **overwrite** the correct values `env_file:` just loaded,
+one block earlier in the same file. Every documented manual command
+(`README.md`, `AGENTS.md`, `docs/setup.md`, `docs/OPERATIONS.md`,
+`docs/INSTALLATION.md`, `Makefile` `up`/`down` targets) was missing this flag
+— only the automated `app-maintenance-agent` update flow got it right.
+
+**Fix.** Added `--env-file .env` to every documented/scripted
+`docker compose -f infra/docker/docker-compose.yml ...` invocation across the
+7 files above. `AGENTS.md` now has an explicit warning in the "Deployment
+mechanics" section so no AI agent suggests the bare command again.
+
+**Considered and rejected:** moving ntfy config into the database (in
+addition to env), so the operator could edit it from the UI. Rejected because
+it treats a symptom, not the cause — the same missing-flag bug would still
+silently blank out *any* other env-based setting (Proxmox/PBS API tokens,
+`AUTH_SECRET_KEY`, agent tokens...) on a manual rebuild; fixing the actual
+deployment commands closes the gap for all of them at once. The existing
+`NotificationPreferences` DB-override mechanism already lets an operator
+toggle individual notification *events* from the UI — a fuller "ntfy
+server/credentials in DB" mode remains a legitimate but separate, larger
+feature if wanted later (secrets-at-rest handling, a settings-edit UI, merge
+precedence with env) rather than a fix for this incident.
+
 ## 2. CI/CD — Not started
 
 - No `.github/workflows` exists. Add a pipeline that at minimum lints and tests

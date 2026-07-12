@@ -263,6 +263,17 @@ touches `apps/agent`, confirm the target machine actually satisfies both
 conditions above (ask the user, or check `git status`/`.env` on that
 machine) rather than assuming the button covered it.
 
+**Never suggest a bare `docker compose -f infra/docker/docker-compose.yml
+...` command for the App VM — always include `--env-file .env`.** Without it,
+Compose resolves the `${VAR}` references inside the compose file's
+`environment:` block using its own default env-file lookup next to the
+compose file (`infra/docker/.env`, which doesn't exist), not the real `.env`
+at the repo root — silently blanking settings like notifications even though
+`env_file: ../../.env` loaded them correctly one line earlier in the same
+file. This has already caused a real incident (ntfy config reverting to
+defaults after a manual rebuild). `app-maintenance-agent`'s own update flow
+already gets this right; a manually-typed command is where it goes wrong.
+
 ## Local development
 
 ```powershell
@@ -279,7 +290,7 @@ npm run dev
 
 # Full stack via Docker Compose
 Copy-Item .env.example .env
-docker compose -f infra/docker/docker-compose.yml up --build
+docker compose --env-file .env -f infra/docker/docker-compose.yml up --build
 
 # Admin password hash
 py scripts/generate_password_hash.py

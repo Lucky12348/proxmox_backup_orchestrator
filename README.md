@@ -118,8 +118,15 @@ npm run dev
 
 ```powershell
 Copy-Item .env.example .env
-docker compose -f infra/docker/docker-compose.yml up --build
+docker compose --env-file .env -f infra/docker/docker-compose.yml up --build
 ```
+
+`--env-file .env` is required, not optional: without it, Compose resolves the
+`${VAR}` references inside `docker-compose.yml`'s `environment:` block against
+its own default env-file lookup (next to the compose file, i.e.
+`infra/docker/.env`, which doesn't exist) instead of the real `.env` at the
+repo root — silently blanking out settings like the ntfy notification config
+even though `env_file: ../../.env` loaded them correctly one line earlier.
 
 ### Generate the admin password hash
 
