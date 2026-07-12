@@ -1675,6 +1675,29 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
   width: min(820px, calc(100vw - 28px));
 }
 
+.job-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.toggle-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--t1);
+  align-self: end;
+  padding-bottom: 6px;
+}
+
+.toggle-field input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--ac);
+}
+
 .selection-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

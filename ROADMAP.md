@@ -87,9 +87,28 @@ time (`Unable to resolve disk from identifier: ...`). Fixed by
 then retry `resolve_disk()` up to 4 times with a 1s pause between attempts
 before giving up. Covered by
 `test_spin_down_waits_for_disk_to_reappear_after_usb_detach` in
-`apps/agent/tests/test_external_export.py`. Not yet re-verified against real
-hardware after this fix — do that before considering the LED/spin-down
-behavior fully validated.
+`apps/agent/tests/test_external_export.py`.
+
+**Paused — 2026-07-12, not urgent.** Re-tested after the race-condition fix:
+the disk was resolved correctly this time and the agent reported
+`"Disk spin-down/power-off attempted."` (i.e. at least one of `hdparm -y` /
+`udisksctl power-off` returned success) — but the physical disk was still
+spinning with its LED lit. Two things are still unknown and left for later:
+
+1. `_attempt_disk_spin_down()` (`apps/api/app/services/disk_eject.py`) only
+   surfaces the agent's one-line summary message into the run's activity
+   log, not the per-tool `attempts` detail (each tool's own return code /
+   stdout / stderr) that `spin_down_disk_result()` already returns. Logging
+   that detail would show directly in the app which of the two commands
+   "succeeded" and with what output, instead of requiring SSH + manual
+   `hdparm`/`udisksctl` runs to diagnose.
+2. Whether `udisksctl power-off` returning success on this hardware actually
+   means anything (vs. a hub/port that silently no-ops) is still unverified.
+
+Next time this is picked up: surface the detailed `attempts` array in the
+activity log first (small, contained change), then re-test — that alone
+should answer whether it's the known hardware limitation or something else,
+without needing a manual SSH diagnostic session.
 
 ### 1.2 Agent updates don't reach the Proxmox host / PBS VM — Done — 2026-07-12
 
@@ -200,6 +219,66 @@ server/credentials in DB" mode remains a legitimate but separate, larger
 feature if wanted later (secrets-at-rest handling, a settings-edit UI, merge
 precedence with env) rather than a fix for this incident.
 
+### 1.4 Updating a Proxmox backup job's VM selection could 400 — Done — 2026-07-12
+
+**Problem, raised by the user.** Adding/removing a VM from an existing
+Proxmox backup job (Assets page → "Gerer la selection") failed with
+`Proxmox API rejected update: Client error '400 Parameter verification
+failed'` on jobs configured with more than one `keep-*` retention rule.
+
+**Root cause**: the same dict-vs-string quirk as the `retention` display bug
+(§ elsewhere this session) — `ProxmoxClient.update_backup_job_selection()`
+(`apps/api/app/services/proxmox_client.py`) round-trips every field from a
+`GET` straight into the `PUT` body. When `prune-backups` has more than one
+rule, Proxmox returns it as a dict on `GET` (e.g. `{"keep-last": "4",
+"keep-monthly": "8"}`); sending that dict back verbatim in a form-encoded
+`PUT` body is what Proxmox rejects.
+
+**Fix**: extracted the flattening logic into a shared
+`flatten_pve_property_value()` (`proxmox_client.py`), used both by
+`update_backup_job_selection()` before sending and by the existing
+`_format_retention()` (`apps/api/app/api/routes/proxmox.py`) for display —
+one function, one bug class closed for both read and write paths. Covered by
+`test_update_backup_job_selection_flattens_multi_rule_retention` and the
+`FlattenPveScalarPropertyValueTests` suite in `apps/api/tests/`.
+
+### 1.5 Proxmox backup job management: create/delete from the app — Done (MVP scope) — 2026-07-12
+
+Requested by the user after fixing §1.4: manage Proxmox backup jobs (the
+`Datacenter → Backup` jobs feeding PBS) directly from the Assets page instead
+of only being able to tweak VM selection on jobs created in Proxmox itself.
+
+**Scope, deliberately limited (user's choice)**: node, storage, schedule,
+mode, enabled/comment, a simple `keep-*` retention (last/daily/weekly/monthly/
+yearly counts), and VM/CT selection. **Not** covered — matches Proxmox's own
+"Notifications" / "Note Template" / "Advanced" tabs; use the Proxmox UI
+directly for those.
+
+**Backend**: `ProxmoxBackupJobUpsert` schema
+(`apps/api/app/schemas/integrations_proxmox.py`); `create_backup_job` /
+`replace_backup_job` / `delete_backup_job` on `ProxmoxClient`
+(`proxmox_client.py`); `POST` / `PUT` / `DELETE /proxmox/backup-jobs[/{id}]`
+routes (`apps/api/app/api/routes/proxmox.py`). Unlike the existing
+selection-update endpoint, create/replace send **only** the fields the form
+actually exposes (no round-tripping unknown fields from `GET`) — simpler and
+avoids reintroducing bugs like §1.4 for fields outside this MVP's scope.
+`POST /cluster/backup`'s response doesn't reliably carry the new job's id
+across PVE versions, so the created job is located afterwards by matching
+schedule/storage/vmid (`_find_job_by_signature`) — fragile if two jobs share
+an identical signature, acceptable for a single-operator home lab.
+
+**Frontend**: new create/edit modal on the Assets page
+(`apps/web/src/pages/AssetsPage.tsx`) reusing the existing VM-selection grid
+styling; "+ Nouveau job", "Modifier", "Supprimer" actions per job card.
+Deliberately kept the surrounding hardcoded-French strings instead of adding
+`i18n` keys, matching this section's existing (already non-i18n'd) style.
+
+**Tests**: `apps/api/tests/test_proxmox_backup_jobs.py` (payload building,
+retention parsing, job-signature matching) and
+`apps/api/tests/test_proxmox_client.py` (client method wiring). No test
+exercises the new routes end-to-end through FastAPI's dependency injection —
+same pre-existing gap as the rest of `proxmox.py` (see §3).
+
 ## 2. CI/CD — Not started
 
 - No `.github/workflows` exists. Add a pipeline that at minimum lints and tests
@@ -218,8 +297,9 @@ precedence with env) rather than a fix for this incident.
   `node --test tests/`) so it actually runs somewhere other than manually.
 - No test file exists for these API routes: `backup_runs.py`, `maintenance.py`,
   `agent.py`, `integrations_pbs.py`, `overview.py`, `vms.py`,
-  `integrations_proxmox.py`, `proxmox.py`, `assets.py`, `system.py`,
-  `health.py`.
+  `integrations_proxmox.py`, `assets.py`, `system.py`, `health.py`.
+  (`proxmox.py` now has partial coverage — see §1.4 — but only for the pure
+  helper functions, not the routes themselves end-to-end.)
 - No test file exists for these services: `proxmox_sync.py`, `pbs_client.py`,
   `disk_preparation_agent.py`, `disk_preparations.py`, `sync_state.py`,
   `asset_ignores.py`, `overview.py`, `pbs_progress.py`, `host_agent.py`,

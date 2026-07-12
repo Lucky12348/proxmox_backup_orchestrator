@@ -13,6 +13,7 @@ export interface AssetPageProps extends PageCommonProps {
   isSaving: (key: string) => boolean;
   onAssetIgnoreChange: (vm: VirtualMachine, ignored: boolean) => void;
   onBackupJobSelectionChange: (jobId: string, selectedVmids: number[]) => void;
+  onRefresh: () => Promise<void>;
 }
 
 export interface DiskActionRequest {

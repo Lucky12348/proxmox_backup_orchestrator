@@ -66,6 +66,7 @@ function AuthenticatedApp() {
     pbsSyncing,
     pbsInventoryByVmId,
     load,
+    refresh,
     clearBannerError,
     clearSyncMessage,
     mutateAssetIgnore,
@@ -269,6 +270,7 @@ function AuthenticatedApp() {
                 data={data} language={language}
                 onAssetIgnoreChange={(vm, ignored) => void mutateAssetIgnore(vm, ignored)}
                 onBackupJobSelectionChange={(jobId, vmids) => void mutateBackupJobSelection(jobId, vmids)}
+                onRefresh={refresh}
                 pbsInventoryByVmId={pbsInventoryByVmId}
                 isSaving={isSaving} t={t}
               />

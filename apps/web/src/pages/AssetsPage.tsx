@@ -1,11 +1,96 @@
 import { useMemo, useState } from "react";
 
+import {
+  createProxmoxBackupJob,
+  deleteProxmoxBackupJob,
+  replaceProxmoxBackupJob,
+} from "../api";
 import { DataTable } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import type { ProxmoxBackupJob, ProxmoxBackupJobFormValues } from "../types";
 import { formatDateTime, getRuntimeTone, getSourceTone } from "../utils";
 import type { AssetPageProps } from "./shared";
+
+interface JobFormState {
+  mode: "create" | "edit";
+  jobId: string | null;
+  storage: string;
+  schedule: string;
+  node: string;
+  jobMode: string;
+  enabled: boolean;
+  comment: string;
+  keepLast: string;
+  keepDaily: string;
+  keepWeekly: string;
+  keepMonthly: string;
+  keepYearly: string;
+  selectedVmids: Set<number>;
+}
+
+const BLANK_JOB_FORM: Omit<JobFormState, "mode" | "jobId" | "selectedVmids"> = {
+  storage: "",
+  schedule: "",
+  node: "",
+  jobMode: "snapshot",
+  enabled: true,
+  comment: "",
+  keepLast: "",
+  keepDaily: "",
+  keepWeekly: "",
+  keepMonthly: "",
+  keepYearly: "",
+};
+
+function parseRetention(retention: string | null): Record<string, string> {
+  const parsed: Record<string, string> = {};
+  if (!retention) return parsed;
+  for (const part of retention.split(",")) {
+    const [key, value] = part.split("=");
+    if (key && value) parsed[key.trim()] = value.trim();
+  }
+  return parsed;
+}
+
+function jobFormFromExisting(job: ProxmoxBackupJob): JobFormState {
+  const retention = parseRetention(job.retention);
+  return {
+    mode: "edit",
+    jobId: job.job_id,
+    storage: job.storage ?? "",
+    schedule: job.schedule ?? "",
+    node: job.node ?? "",
+    jobMode: "snapshot",
+    enabled: job.enabled,
+    comment: job.comment ?? "",
+    keepLast: retention["keep-last"] ?? "",
+    keepDaily: retention["keep-daily"] ?? "",
+    keepWeekly: retention["keep-weekly"] ?? "",
+    keepMonthly: retention["keep-monthly"] ?? "",
+    keepYearly: retention["keep-yearly"] ?? "",
+    selectedVmids: new Set(job.selected_vmids),
+  };
+}
+
+function toFormValues(form: JobFormState): ProxmoxBackupJobFormValues {
+  const toOptionalInt = (value: string) => (value.trim() === "" ? null : Number(value));
+  return {
+    storage: form.storage.trim(),
+    schedule: form.schedule.trim(),
+    node: form.node.trim() || null,
+    selected_vmids: Array.from(form.selectedVmids).sort((a, b) => a - b),
+    mode: form.jobMode,
+    enabled: form.enabled,
+    comment: form.comment.trim() || null,
+    keep_last: toOptionalInt(form.keepLast),
+    keep_daily: toOptionalInt(form.keepDaily),
+    keep_weekly: toOptionalInt(form.keepWeekly),
+    keep_monthly: toOptionalInt(form.keepMonthly),
+    keep_yearly: toOptionalInt(form.keepYearly),
+  };
+}
 
 export function AssetsPage({
   data,
@@ -15,6 +100,7 @@ export function AssetsPage({
   t,
   onAssetIgnoreChange,
   onBackupJobSelectionChange,
+  onRefresh,
 }: AssetPageProps) {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "vm" | "ct">("all");
@@ -24,6 +110,10 @@ export function AssetsPage({
   const [selectedJobId, setSelectedJobId] = useState<string>("");
   const [manageJobId, setManageJobId] = useState<string | null>(null);
   const [selectionDraft, setSelectionDraft] = useState<Set<number>>(new Set());
+  const [jobForm, setJobForm] = useState<JobFormState | null>(null);
+  const [jobFormError, setJobFormError] = useState<string | null>(null);
+  const [jobFormSaving, setJobFormSaving] = useState(false);
+  const [jobDeleting, setJobDeleting] = useState<string | null>(null);
 
   const defaultJob = useMemo(() => {
     const enabledPbsJob = data.proxmoxBackupJobs.find((job) => job.enabled && job.storage === "pbs");
@@ -63,6 +153,79 @@ export function AssetsPage({
     }
     onBackupJobSelectionChange(job.job_id, Array.from(selectionDraft).sort((a, b) => a - b));
     setManageJobId(null);
+  }
+
+  function openCreateJobForm() {
+    setJobFormError(null);
+    setJobForm({ mode: "create", jobId: null, selectedVmids: new Set(), ...BLANK_JOB_FORM });
+  }
+
+  function openEditJobForm(job: ProxmoxBackupJob) {
+    setJobFormError(null);
+    setJobForm(jobFormFromExisting(job));
+  }
+
+  function closeJobForm() {
+    setJobForm(null);
+    setJobFormError(null);
+  }
+
+  function updateJobForm(patch: Partial<JobFormState>) {
+    setJobForm((current) => (current ? { ...current, ...patch } : current));
+  }
+
+  function toggleJobFormVmid(vmid: number) {
+    setJobForm((current) => {
+      if (!current) return current;
+      const next = new Set(current.selectedVmids);
+      if (next.has(vmid)) next.delete(vmid);
+      else next.add(vmid);
+      return { ...current, selectedVmids: next };
+    });
+  }
+
+  async function submitJobForm() {
+    if (!jobForm) return;
+    if (!jobForm.storage.trim() || !jobForm.schedule.trim()) {
+      setJobFormError("Le stockage et la planification sont obligatoires.");
+      return;
+    }
+    if (jobForm.selectedVmids.size === 0) {
+      setJobFormError("Selectionnez au moins une VM/CT pour ce job.");
+      return;
+    }
+
+    setJobFormError(null);
+    setJobFormSaving(true);
+    try {
+      const values = toFormValues(jobForm);
+      if (jobForm.mode === "create") {
+        await createProxmoxBackupJob(values);
+      } else if (jobForm.jobId) {
+        await replaceProxmoxBackupJob(jobForm.jobId, values);
+      }
+      await onRefresh();
+      setJobForm(null);
+    } catch (submitError) {
+      setJobFormError(submitError instanceof Error ? submitError.message : "Erreur inconnue.");
+    } finally {
+      setJobFormSaving(false);
+    }
+  }
+
+  async function requestDeleteJob(job: ProxmoxBackupJob) {
+    if (!window.confirm(`Supprimer definitivement le job Proxmox ${job.schedule ?? ""} / ${job.storage ?? ""} ?`)) {
+      return;
+    }
+    setJobDeleting(job.job_id);
+    try {
+      await deleteProxmoxBackupJob(job.job_id);
+      await onRefresh();
+    } catch (deleteError) {
+      window.alert(deleteError instanceof Error ? deleteError.message : "Erreur inconnue lors de la suppression.");
+    } finally {
+      setJobDeleting(null);
+    }
   }
 
   const filteredAssets = useMemo(() => {
@@ -125,6 +288,9 @@ export function AssetsPage({
               ))}
             </select>
           ) : null}
+          <button className="action-button" onClick={openCreateJobForm} type="button">
+            + Nouveau job
+          </button>
         </div>
         {data.proxmoxBackupJobs.length === 0 ? (
           <p className="muted-text">Aucun job Proxmox existant disponible.</p>
@@ -143,14 +309,31 @@ export function AssetsPage({
                   <p className="muted-text">{job.selected_vmids.length} VM/CT selectionnes</p>
                   {!job.supported ? <p className="form-error">{job.unsupported_reason}</p> : null}
                 </div>
-                <button
-                  className="action-button secondary"
-                  disabled={!job.supported || isSaving(`backup-job-${job.job_id}`)}
-                  onClick={() => openSelectionModal(job.job_id)}
-                  type="button"
-                >
-                  Gerer la selection
-                </button>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button
+                    className="action-button secondary"
+                    disabled={!job.supported || isSaving(`backup-job-${job.job_id}`)}
+                    onClick={() => openSelectionModal(job.job_id)}
+                    type="button"
+                  >
+                    Gerer la selection
+                  </button>
+                  <button
+                    className="ghost-button"
+                    onClick={() => openEditJobForm(job)}
+                    type="button"
+                  >
+                    Modifier
+                  </button>
+                  <button
+                    className="ghost-button action-danger"
+                    disabled={jobDeleting === job.job_id}
+                    onClick={() => void requestDeleteJob(job)}
+                    type="button"
+                  >
+                    {jobDeleting === job.job_id ? "Suppression..." : "Supprimer"}
+                  </button>
+                </div>
               </article>
             ))}
           </div>
@@ -313,6 +496,150 @@ export function AssetsPage({
             <div className="modal-actions">
               <button className="secondary-button" onClick={() => setManageJobId(null)} type="button">{t.cancel}</button>
               <button className="action-button" onClick={saveSelection} type="button">Enregistrer</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {jobForm ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <section className="modal-card selection-modal">
+            <div className="modal-header">
+              <h2 className="page-title">
+                {jobForm.mode === "create" ? "Nouveau job de sauvegarde Proxmox" : "Modifier le job"}
+              </h2>
+              <button className="icon-button" onClick={closeJobForm} type="button">x</button>
+            </div>
+            <p className="modal-description">
+              Champs de base uniquement (noeud, stockage, planning, VM, retention simple). Pour les
+              notifications, le modele de note ou les options avancees, utilise directement Proxmox.
+            </p>
+
+            <div className="job-form-grid">
+              <label className="field">
+                <span>Stockage *</span>
+                <input
+                  onChange={(event) => updateJobForm({ storage: event.target.value })}
+                  placeholder="pbs"
+                  value={jobForm.storage}
+                />
+              </label>
+              <label className="field">
+                <span>Noeud (vide = tous)</span>
+                <input
+                  onChange={(event) => updateJobForm({ node: event.target.value })}
+                  placeholder="promox"
+                  value={jobForm.node}
+                />
+              </label>
+              <label className="field">
+                <span>Planning *</span>
+                <input
+                  onChange={(event) => updateJobForm({ schedule: event.target.value })}
+                  placeholder="sun 03:00"
+                  value={jobForm.schedule}
+                />
+              </label>
+              <label className="field">
+                <span>Mode</span>
+                <select
+                  onChange={(event) => updateJobForm({ jobMode: event.target.value })}
+                  value={jobForm.jobMode}
+                >
+                  <option value="snapshot">Snapshot</option>
+                  <option value="suspend">Suspend</option>
+                  <option value="stop">Stop</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Commentaire</span>
+                <input
+                  onChange={(event) => updateJobForm({ comment: event.target.value })}
+                  value={jobForm.comment}
+                />
+              </label>
+              <label className="toggle-field">
+                <input
+                  checked={jobForm.enabled}
+                  onChange={(event) => updateJobForm({ enabled: event.target.checked })}
+                  type="checkbox"
+                />
+                <span>Job actif</span>
+              </label>
+            </div>
+
+            <p className="modal-description" style={{ marginTop: 16 }}>
+              Retention (laisser vide = pas de limite pour cette periode) :
+            </p>
+            <div className="job-form-grid">
+              <label className="field">
+                <span>keep-last</span>
+                <input
+                  inputMode="numeric"
+                  onChange={(event) => updateJobForm({ keepLast: event.target.value })}
+                  value={jobForm.keepLast}
+                />
+              </label>
+              <label className="field">
+                <span>keep-daily</span>
+                <input
+                  inputMode="numeric"
+                  onChange={(event) => updateJobForm({ keepDaily: event.target.value })}
+                  value={jobForm.keepDaily}
+                />
+              </label>
+              <label className="field">
+                <span>keep-weekly</span>
+                <input
+                  inputMode="numeric"
+                  onChange={(event) => updateJobForm({ keepWeekly: event.target.value })}
+                  value={jobForm.keepWeekly}
+                />
+              </label>
+              <label className="field">
+                <span>keep-monthly</span>
+                <input
+                  inputMode="numeric"
+                  onChange={(event) => updateJobForm({ keepMonthly: event.target.value })}
+                  value={jobForm.keepMonthly}
+                />
+              </label>
+              <label className="field">
+                <span>keep-yearly</span>
+                <input
+                  inputMode="numeric"
+                  onChange={(event) => updateJobForm({ keepYearly: event.target.value })}
+                  value={jobForm.keepYearly}
+                />
+              </label>
+            </div>
+
+            <p className="modal-description" style={{ marginTop: 16 }}>
+              VM/CT a sauvegarder ({jobForm.selectedVmids.size} selectionnes) :
+            </p>
+            <div className="selection-grid">
+              {selectableAssets.map(({ vm, vmid }) => {
+                const selected = jobForm.selectedVmids.has(vmid);
+                return (
+                  <label className={`selection-row ${vm.ignored ? "asset-row-ignored" : ""}`} key={`job-form-${vm.source}-${vm.node_name}-${vmid}`}>
+                    <input checked={selected} onChange={() => toggleJobFormVmid(vmid)} type="checkbox" />
+                    <span className="selection-main">
+                      <strong>{vm.name}</strong>
+                      <small>{vm.node_name ?? t.notAvailable} - VMID {vmid}</small>
+                    </span>
+                    {vm.ignored ? <StatusBadge tone="neutral">Ignore</StatusBadge> : null}
+                  </label>
+                );
+              })}
+            </div>
+
+            {jobFormError ? <p className="form-error">{jobFormError}</p> : null}
+
+            <div className="modal-actions">
+              <button className="secondary-button" onClick={closeJobForm} type="button">{t.cancel}</button>
+              <button className="action-button" disabled={jobFormSaving} onClick={() => void submitJobForm()} type="button">
+                {jobFormSaving ? "Enregistrement..." : "Enregistrer"}
+              </button>
             </div>
           </section>
         </div>

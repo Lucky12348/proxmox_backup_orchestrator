@@ -26,6 +26,7 @@ import type {
   PBSSyncSummary,
   ProxmoxStatus,
   ProxmoxBackupJob,
+  ProxmoxBackupJobFormValues,
   ProxmoxSyncSummary,
   PlanningOverview,
   SystemVersion,
@@ -172,6 +173,26 @@ export function updateProxmoxBackupJobSelection(jobId: string, selectedVmids: nu
   return request<ProxmoxBackupJob>(`/proxmox/backup-jobs/${encodeURIComponent(jobId)}/selection`, {
     method: "PATCH",
     body: JSON.stringify({ selected_vmids: selectedVmids }),
+  });
+}
+
+export function createProxmoxBackupJob(payload: ProxmoxBackupJobFormValues) {
+  return request<ProxmoxBackupJob>("/proxmox/backup-jobs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function replaceProxmoxBackupJob(jobId: string, payload: ProxmoxBackupJobFormValues) {
+  return request<ProxmoxBackupJob>(`/proxmox/backup-jobs/${encodeURIComponent(jobId)}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteProxmoxBackupJob(jobId: string) {
+  return request<void>(`/proxmox/backup-jobs/${encodeURIComponent(jobId)}`, {
+    method: "DELETE",
   });
 }
 

@@ -46,6 +46,9 @@ class ProxmoxClient:
     def _put(self, path: str, *, data: Mapping[str, Any] | None = None) -> Any:
         return self._request("PUT", path, data=data)
 
+    def _delete(self, path: str) -> Any:
+        return self._request("DELETE", path)
+
     def get_cluster_status(self) -> list[dict]:
         data = self._get("cluster/status")
         return data if isinstance(data, list) else [data]
@@ -78,13 +81,22 @@ class ProxmoxClient:
             raise RuntimeError("Backup job selection mode is not supported for modification in PBO")
 
         data = {
-            key: value
+            key: flatten_pve_property_value(value)
             for key, value in current.items()
             if key not in {"id", "digest", "next-run", "next_run"}
         }
         data["vmid"] = ",".join(str(vmid) for vmid in sorted(set(selected_vmids)))
         data["all"] = 0
         return self._put(f"cluster/backup/{quote(job_id, safe='')}", data=data)
+
+    def create_backup_job(self, data: Mapping[str, Any]) -> Any:
+        return self._post("cluster/backup", data=data)
+
+    def replace_backup_job(self, job_id: str, data: Mapping[str, Any]) -> Any:
+        return self._put(f"cluster/backup/{quote(job_id, safe='')}", data=data)
+
+    def delete_backup_job(self, job_id: str) -> Any:
+        return self._delete(f"cluster/backup/{quote(job_id, safe='')}")
 
     def get_qemu_config(self, node_name: str, vm_id: int) -> dict:
         data = self._get(f"nodes/{node_name}/qemu/{vm_id}/config")
@@ -152,6 +164,26 @@ class ProxmoxClient:
             return self._get(f"nodes/{node_name}/tasks/{quoted_upid}/log")
         except Exception as exc:
             return f"Unable to fetch task log: {exc}"
+
+
+def flatten_pve_property_value(value: Any) -> Any:
+    """Re-flatten a PVE "property string" field back to its `key=value,...`
+    wire format.
+
+    The Proxmox API returns most property-string fields (notably
+    `prune-backups`) as a plain string when they have a single component, but
+    expands them into a JSON object when they have more than one (e.g.
+    `{"keep-last": "4", "keep-monthly": "8"}`). That object form is only ever
+    valid for reading — sending it back verbatim in a PUT/POST body (as
+    `update_backup_job_selection` does, by round-tripping every field from a
+    GET) makes the Proxmox API reject the whole request with a generic
+    `400 Parameter verification failed`, since it doesn't understand a form
+    field whose value is a nested object. Keys are sorted for a stable,
+    deterministic order.
+    """
+    if isinstance(value, dict):
+        return ",".join(f"{key}={value[key]}" for key in sorted(value))
+    return value
 
 
 def parse_backup_job_vmids(job: Mapping[str, Any]) -> list[int]:

@@ -13,6 +13,7 @@ from app.schemas.external_backup import (
 from app.schemas.integrations_proxmox import (
     ProxmoxBackupJobRead,
     ProxmoxBackupJobSelectionUpdate,
+    ProxmoxBackupJobUpsert,
     ProxmoxStatusRead,
     ProxmoxSyncRead,
 )

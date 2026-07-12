@@ -146,6 +146,25 @@ export interface ProxmoxBackupJob {
   available_assets: ProxmoxBackupJobAsset[];
 }
 
+// Mirrors the backend's ProxmoxBackupJobUpsert — the "MVP" fields an operator
+// sets day-to-day (node, storage, schedule, VM selection, simple retention).
+// Not full parity with Proxmox's own editor (no notifications/note
+// template/advanced tabs) — use the Proxmox UI directly for those.
+export interface ProxmoxBackupJobFormValues {
+  storage: string;
+  schedule: string;
+  node: string | null;
+  selected_vmids: number[];
+  mode: string;
+  enabled: boolean;
+  comment: string | null;
+  keep_last: number | null;
+  keep_daily: number | null;
+  keep_weekly: number | null;
+  keep_monthly: number | null;
+  keep_yearly: number | null;
+}
+
 export interface PBSStatus {
   connected: boolean;
   datastore: string;

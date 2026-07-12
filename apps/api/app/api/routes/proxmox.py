@@ -7,10 +7,11 @@ from sqlalchemy import select
 from app.api.dependencies import DbSession
 from app.core.config import get_settings
 from app.models import VirtualMachine
-from app.schemas import ProxmoxBackupJobRead, ProxmoxBackupJobSelectionUpdate
+from app.schemas import ProxmoxBackupJobRead, ProxmoxBackupJobSelectionUpdate, ProxmoxBackupJobUpsert
 from app.services.asset_ignores import get_asset_ignore_map, is_vm_ignored
 from app.services.proxmox_client import (
     ProxmoxClient,
+    flatten_pve_property_value,
     is_include_selected_backup_job,
     parse_backup_job_vmids,
 )
@@ -70,6 +71,122 @@ def update_backup_job_selection(
     return _job_to_read(updated, db)
 
 
+@router.post("/backup-jobs", response_model=ProxmoxBackupJobRead, status_code=status.HTTP_201_CREATED)
+def create_backup_job(payload: ProxmoxBackupJobUpsert, db: DbSession) -> ProxmoxBackupJobRead:
+    if not payload.selected_vmids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selectionnez au moins une VM/CT pour ce job.",
+        )
+
+    client = ProxmoxClient(get_settings())
+    data = _build_backup_job_payload(payload)
+    try:
+        client.create_backup_job(data)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Proxmox API rejected creation: {exc}") from exc
+
+    created = _find_job_by_signature(client, data)
+    if created is None:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Job cree sur Proxmox mais introuvable ensuite pour confirmation. Verifie dans Proxmox directement.",
+        )
+    return _job_to_read(created, db)
+
+
+@router.put("/backup-jobs/{job_id}", response_model=ProxmoxBackupJobRead)
+def replace_backup_job(job_id: str, payload: ProxmoxBackupJobUpsert, db: DbSession) -> ProxmoxBackupJobRead:
+    if not payload.selected_vmids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selectionnez au moins une VM/CT pour ce job.",
+        )
+
+    client = ProxmoxClient(get_settings())
+    try:
+        current = client.get_backup_job(job_id)
+        if not current:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxmox backup job not found")
+        client.replace_backup_job(job_id, _build_backup_job_payload(payload))
+        updated = client.get_backup_job(job_id)
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Proxmox API rejected update: {exc}") from exc
+
+    return _job_to_read(updated, db)
+
+
+@router.delete("/backup-jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_backup_job(job_id: str) -> None:
+    client = ProxmoxClient(get_settings())
+    try:
+        current = client.get_backup_job(job_id)
+        if not current:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxmox backup job not found")
+        client.delete_backup_job(job_id)
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Proxmox API rejected deletion: {exc}") from exc
+
+
+def _build_backup_job_payload(payload: ProxmoxBackupJobUpsert) -> dict[str, object]:
+    data: dict[str, object] = {
+        "storage": payload.storage,
+        "schedule": payload.schedule,
+        "mode": payload.mode,
+        "enabled": 1 if payload.enabled else 0,
+        "all": 0,
+        "vmid": ",".join(str(vmid) for vmid in sorted(set(payload.selected_vmids))),
+    }
+    if payload.node:
+        data["node"] = payload.node
+    if payload.comment:
+        data["comment"] = payload.comment
+    retention = _build_retention_string(payload)
+    if retention:
+        data["prune-backups"] = retention
+    return data
+
+
+def _build_retention_string(payload: ProxmoxBackupJobUpsert) -> str | None:
+    parts = [
+        f"{key}={value}"
+        for key, value in (
+            ("keep-last", payload.keep_last),
+            ("keep-daily", payload.keep_daily),
+            ("keep-weekly", payload.keep_weekly),
+            ("keep-monthly", payload.keep_monthly),
+            ("keep-yearly", payload.keep_yearly),
+        )
+        if value is not None
+    ]
+    return ",".join(parts) if parts else None
+
+
+def _find_job_by_signature(client: ProxmoxClient, submitted: dict[str, object]) -> dict | None:
+    """Proxmox's `POST /cluster/backup` response doesn't reliably carry the
+    new job's id across all PVE versions, so locate it by matching the
+    schedule/storage/vmid we just submitted among the freshly listed jobs
+    (there's no other stable handle to fetch the single record we created)."""
+    for job in client.list_backup_jobs():
+        if (
+            job.get("schedule") == submitted.get("schedule")
+            and job.get("storage") == submitted.get("storage")
+            and str(job.get("vmid")) == str(submitted.get("vmid"))
+        ):
+            return job
+    return None
+
+
 def _job_to_read(job: dict, db: DbSession) -> ProxmoxBackupJobRead:
     selected_vmids = parse_backup_job_vmids(job)
     supported = is_include_selected_backup_job(job)
@@ -127,18 +244,11 @@ def _truthy_disabled(value) -> bool:
 def _format_retention(value: object) -> str | None:
     """Normalize a PVE `prune-backups` value to a display string.
 
-    The Proxmox API returns this field as a plain string when the property
-    string has a single component, but expands it to a dict (one entry per
-    keep-* rule) when it has more than one — e.g. `{"keep-last": "4",
-    "keep-monthly": "8"}`. `ProxmoxBackupJobRead.retention` is a plain string,
-    so a dict here must be joined back into PVE's own `key=value,...` format
-    (sorted for a stable, deterministic display) instead of being passed
-    through as-is.
+    `ProxmoxBackupJobRead.retention` is a plain string, but the Proxmox API
+    can return this field as a dict (see `flatten_pve_property_value`) — flatten
+    it back for display instead of passing it through as-is.
     """
     if value is None:
         return None
-    if isinstance(value, str):
-        return value
-    if isinstance(value, dict):
-        return ",".join(f"{key}={value[key]}" for key in sorted(value))
-    return str(value)
+    flattened = flatten_pve_property_value(value)
+    return flattened if isinstance(flattened, str) else str(flattened)

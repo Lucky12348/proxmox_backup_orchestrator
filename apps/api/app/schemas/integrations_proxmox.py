@@ -50,3 +50,24 @@ class ProxmoxBackupJobRead(BaseModel):
 
 class ProxmoxBackupJobSelectionUpdate(BaseModel):
     selected_vmids: list[int]
+
+
+class ProxmoxBackupJobUpsert(BaseModel):
+    """Request body for both creating a new job (POST) and replacing an
+    existing one's core fields (PUT). Deliberately covers only the fields an
+    operator sets day-to-day (node, storage, schedule, VM selection, a simple
+    keep-* retention) — not the full Proxmox editor (notifications, note
+    template, advanced). Use the Proxmox UI directly for those."""
+
+    storage: str = Field(min_length=1)
+    schedule: str = Field(min_length=1)
+    node: str | None = None
+    selected_vmids: list[int] = Field(default_factory=list)
+    mode: str = "snapshot"
+    enabled: bool = True
+    comment: str | None = None
+    keep_last: int | None = Field(default=None, ge=0)
+    keep_daily: int | None = Field(default=None, ge=0)
+    keep_weekly: int | None = Field(default=None, ge=0)
+    keep_monthly: int | None = Field(default=None, ge=0)
+    keep_yearly: int | None = Field(default=None, ge=0)
