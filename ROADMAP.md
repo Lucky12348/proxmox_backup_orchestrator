@@ -52,6 +52,47 @@ whether the disk is a dedicated PBS datastore or a coexistence/generic disk.
    that flag set. Add coverage for both the scheduled and manual paths, and for
    both dedicated and coexistence disks.
 
+### 1.2 Agent updates don't reach the Proxmox host / PBS VM — Done (code), deployment pending — 2026-07-12
+
+**Problem, discovered live in production.** A security fix to
+`apps/agent/src/agent/main.py` was pushed and "Tout mettre à jour" reported
+success, but the running host and PBS agents kept executing the old code for
+hours (visible as a repeated 401 loop on the periodic heartbeat job). Root
+cause, confirmed on the actual servers: `AGENT_REPO_PATH`
+(`/opt/proxmox-backup-orchestrator-agent` and `-pbs-agent`) were plain
+directories populated by manual file copies, not git checkouts — `git
+fetch`/`pull` in the maintenance flow had nothing to do. Separately, even a
+real `git pull` would not have reloaded the running `-http.service` process,
+since nothing restarted it.
+
+**Fix shipped in code** (`apps/agent/src/agent/main.py`,
+`maintenance_update_result` / `_maintenance_restart_http_service*`,
+2026-07-12): after a successful `git pull --ff-only`, the agent now schedules
+a delayed self-restart of its own HTTP service via `systemd-run
+--on-active=10 ... systemctl restart <AGENT_HTTP_SERVICE_NAME>` (falling back
+to `systemctl try-restart ... --no-block`) — the same pattern
+`apps/app-maintenance-agent` already used for itself. New setting:
+`AGENT_HTTP_SERVICE_NAME` (see `.env.example`, `docs/MAINTENANCE.md`).
+Covered by `apps/agent/tests/test_maintenance.py`.
+
+**Still needed — one-time manual setup per machine (not yet done on the real
+Proxmox host / PBS VM as of 2026-07-12):**
+
+1. Convert `/opt/proxmox-backup-orchestrator-agent` (and `-pbs-agent`) from a
+   flat file copy into a real git clone at a sibling path (e.g.
+   `-agent-repo/`), with `src/` and `tests/` replaced by symlinks into
+   `<repo>/apps/agent/{src,tests}` — see the step-by-step in
+   `docs/MAINTENANCE.md` ("`AGENT_REPO_PATH` must be a real git checkout").
+   This keeps the existing `.venv` and systemd unit files untouched.
+2. Set `AGENT_REPO_PATH` and `AGENT_HTTP_SERVICE_NAME` in each agent's `.env`,
+   then restart the `-http.service` once by hand to pick up the `.env`
+   change.
+3. Note the shipped systemd unit filenames in
+   `apps/agent/deploy/systemd/*-api.service` don't match the real installed
+   unit names on this deployment (`*-http.service`) — reconcile these or
+   document the discrepancy so a fresh install doesn't silently diverge from
+   what's actually running.
+
 ## 2. CI/CD — Not started
 
 - No `.github/workflows` exists. Add a pipeline that at minimum lints and tests

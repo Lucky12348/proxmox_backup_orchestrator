@@ -94,11 +94,57 @@ git rev-parse @{u}
 git pull --ff-only
 ```
 
+If the pull succeeds, the agent then schedules a restart of its own HTTP
+service (`AGENT_HTTP_SERVICE_NAME`) via `systemd-run --on-active=10 ...
+systemctl restart <service>` (or `systemctl try-restart ... --no-block` if
+`systemd-run` is unavailable) — the same delayed self-restart pattern the App
+VM maintenance agent already uses for itself. The restart is delayed a few
+seconds because the request handling the update is itself running inside the
+process being restarted. If `AGENT_HTTP_SERVICE_NAME` is not set, the pull
+still succeeds but the update is reported as failed with a clear message that
+the service needs a manual restart — the "Tout mettre à jour" click alone is
+not enough in that case.
+
 Configure each agent `.env` with:
 
 ```env
-AGENT_REPO_PATH=/opt/proxmox-backup-orchestrator-agent
+AGENT_REPO_PATH=/opt/proxmox-backup-orchestrator-agent-repo
 AGENT_MAINTENANCE_TIMEOUT_SECONDS=120
+AGENT_HTTP_SERVICE_NAME=proxmox-backup-orchestrator-agent-http.service
 ```
 
-Use `/opt/proxmox-backup-orchestrator-pbs-agent` for the PBS VM agent.
+Use `/opt/proxmox-backup-orchestrator-pbs-agent-repo` and
+`proxmox-backup-orchestrator-pbs-agent-http.service` for the PBS VM agent.
+
+### `AGENT_REPO_PATH` must be a real git checkout
+
+`git pull` only does something useful if `AGENT_REPO_PATH` is an actual git
+repository tracking this project's remote. A directory populated by copying
+files (`scp`/`rsync`) has no `.git`, so every maintenance update silently
+fails at `git fetch` — the agent keeps running whatever code was last copied
+onto it, no matter how many times "Tout mettre à jour" is clicked.
+
+One-time setup per machine (host agent and PBS agent), so the existing
+`.venv` and systemd units never have to move:
+
+```bash
+# 1. Full clone of the monorepo next to the existing agent directory.
+git clone git@github.com:<you>/proxmox_backup_orchestrator.git /opt/proxmox-backup-orchestrator-agent-repo
+
+# 2. Point the running agent's src/tests at the clone via symlinks, replacing
+#    the plain directories that were there before (back them up first if
+#    unsure). The .venv and systemd unit paths are untouched.
+rm -rf /opt/proxmox-backup-orchestrator-agent/src /opt/proxmox-backup-orchestrator-agent/tests
+ln -s /opt/proxmox-backup-orchestrator-agent-repo/apps/agent/src   /opt/proxmox-backup-orchestrator-agent/src
+ln -s /opt/proxmox-backup-orchestrator-agent-repo/apps/agent/tests /opt/proxmox-backup-orchestrator-agent/tests
+
+# 3. Set AGENT_REPO_PATH and AGENT_HTTP_SERVICE_NAME in the agent's .env (see
+#    above), then restart the HTTP service once by hand to pick up the .env
+#    change.
+systemctl restart proxmox-backup-orchestrator-agent-http.service
+```
+
+Repeat with `-pbs-agent`/`-pbs-agent-repo` paths on the PBS VM. After this
+one-time setup, `git pull` in `AGENT_REPO_PATH` updates `apps/agent/src`
+through the symlink, and the maintenance flow's own restart step reloads it —
+no more manual `scp` + `systemctl restart` per update.

@@ -82,6 +82,12 @@ class AgentSettings:
     server_token: str = os.getenv("AGENT_SERVER_TOKEN", "")
     repo_path: str = os.getenv("AGENT_REPO_PATH", os.getcwd())
     maintenance_timeout_seconds: float = float(os.getenv("AGENT_MAINTENANCE_TIMEOUT_SECONDS", "120"))
+    # systemd unit for this agent's own long-running HTTP server (e.g.
+    # proxmox-backup-orchestrator-agent-http.service). Used to self-restart
+    # after a successful `git pull` so a code update actually takes effect
+    # without a manual `systemctl restart`. Empty means "not configured" and
+    # the restart step is skipped with a clear error in the maintenance log.
+    http_service_name: str = os.getenv("AGENT_HTTP_SERVICE_NAME", "")
 
 
 class ExternalExportProgress:
@@ -2730,6 +2736,8 @@ def maintenance_update_result(settings: AgentSettings | None = None) -> dict[str
         settings.maintenance_timeout_seconds,
     )
     status_payload = _maintenance_git_status(repo, settings.maintenance_timeout_seconds)
+    if all(item["return_code"] == 0 for item in logs) and status_payload["status"] != "error":
+        logs.append(_maintenance_restart_http_service(repo, settings))
     ok = all(item["return_code"] == 0 for item in logs) and status_payload["status"] != "error"
     return {
         "ok": ok,
@@ -2739,6 +2747,48 @@ def maintenance_update_result(settings: AgentSettings | None = None) -> dict[str
         "logs": logs,
         "return_code": 0 if ok else 1,
     }
+
+
+def _maintenance_restart_http_service_command(settings: AgentSettings) -> list[str]:
+    if shutil.which("systemd-run"):
+        return [
+            "systemd-run",
+            "--on-active=10",
+            "--unit",
+            "pbo-agent-http-restart",
+            "systemctl",
+            "restart",
+            settings.http_service_name,
+        ]
+    return ["systemctl", "try-restart", settings.http_service_name, "--no-block"]
+
+
+def _maintenance_restart_http_service(repo: Path, settings: AgentSettings) -> dict[str, Any]:
+    if not settings.http_service_name:
+        return {
+            "command": "systemctl restart <AGENT_HTTP_SERVICE_NAME>",
+            "stdout": None,
+            "stderr": (
+                "AGENT_HTTP_SERVICE_NAME is not configured; code was pulled but the "
+                "running agent HTTP service was not restarted. Restart it manually."
+            ),
+            "return_code": 1,
+        }
+    if not shutil.which("systemctl"):
+        return {
+            "command": "systemctl restart " + settings.http_service_name,
+            "stdout": None,
+            "stderr": "systemctl is not available; restart the agent HTTP service manually.",
+            "return_code": 1,
+        }
+    # This request's own process is a child of the -http.service being restarted, so the
+    # restart is scheduled a few seconds out (systemd-run --on-active) rather than run inline
+    # — otherwise systemctl would tear down the process handling this very HTTP response.
+    return _maintenance_run(
+        repo,
+        _maintenance_restart_http_service_command(settings),
+        settings.maintenance_timeout_seconds,
+    )
 
 
 def _maintenance_git_status(repo: Path, timeout_seconds: float) -> dict[str, Any]:

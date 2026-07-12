@@ -231,6 +231,38 @@ agent, PBS agent, or maintenance agent), trace the exact HTTP boundary and
 token/env dependency before proposing a fix, and update matching docs when
 deployment assumptions, ports, service names, or required env vars change.
 
+## Deployment mechanics — what "Update All" actually does
+
+Read `docs/MAINTENANCE.md` in full before telling a user their change is
+"just a click away" — the update button's coverage differs per component, and
+telling the user the wrong thing here has already caused a real production
+incident (a live deployment kept running old, unauthenticated agent code for
+hours because these gaps weren't obvious).
+
+- **App VM** (web/api/db): fully automatic. `git pull` + `docker compose up
+  --build -d` recreates the containers, and `create_tables()` applies
+  additive DB schema changes on API startup.
+- **Proxmox host agent / PBS agent**: `git pull --ff-only` in
+  `AGENT_REPO_PATH`, then (if `AGENT_HTTP_SERVICE_NAME` is configured) a
+  delayed self-restart of the agent's own `-http.service` — see
+  `_maintenance_restart_http_service` in `apps/agent/src/agent/main.py`. This
+  only works end-to-end if **both** of these hold on the target machine:
+  1. `AGENT_REPO_PATH` points at a real git clone of this repo (not a
+     directory populated by `scp`/`rsync` — that has no `.git`, so `git
+     fetch`/`pull` fails silently and the agent keeps running whatever code
+     was last copied there, no matter how many times the button is clicked).
+  2. `AGENT_HTTP_SERVICE_NAME` is set to the actual systemd unit name for that
+     machine's agent HTTP service. Without it, the pull can succeed while the
+     long-running process still serves old code from memory.
+- **App maintenance agent**: has its own equivalent self-restart, already
+  wired (`_restart_agent_service` in
+  `apps/app-maintenance-agent/src/app_maintenance_agent/main.py`).
+
+Before claiming a change is fully deployed after "Update All": if the change
+touches `apps/agent`, confirm the target machine actually satisfies both
+conditions above (ask the user, or check `git status`/`.env` on that
+machine) rather than assuming the button covered it.
+
 ## Local development
 
 ```powershell
