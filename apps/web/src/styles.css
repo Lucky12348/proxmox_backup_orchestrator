@@ -57,6 +57,25 @@ button, input, select { font: inherit; }
   z-index: 20;
 }
 
+.sidebar-overlay { display: none; }
+
+.mobile-nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--bd);
+  border-radius: var(--r6);
+  background: none;
+  color: var(--t2);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.mobile-nav-toggle:hover { background: var(--bg3); color: var(--t1); }
+
 .sidebar-brand {
   padding: 20px 16px 16px;
   border-bottom: 1px solid var(--bd);
@@ -809,7 +828,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .log-details-body pre,
 .log-pre {
   margin: 0;
-  max-width: 520px;
+  max-width: min(520px, 100%);
   max-height: 200px;
   overflow: auto;
   padding: 10px 12px;
@@ -922,14 +941,44 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 @media (max-width: 960px) {
   :root { --sidebar-w: 0px; }
   .shell { grid-template-columns: 1fr; }
-  .sidebar { display: none; }
+
+  .mobile-nav-toggle { display: flex; }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: min(280px, 82vw);
+    height: 100vh;
+    transform: translateX(-100%);
+    transition: transform 200ms ease;
+    z-index: 50;
+  }
+
+  .sidebar-open {
+    transform: translateX(0);
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.45);
+  }
+
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(1, 4, 9, 0.6);
+    z-index: 40;
+  }
+
   .topbar { padding: 0 16px; }
   .page-container { padding: 16px 16px 32px; }
 }
 
+@media (max-width: 900px) {
+  .filters-bar { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 720px) {
   .page-header { flex-direction: column; }
-  .stats-grid, .stats-grid-compact, .integration-grid, .filters-bar { grid-template-columns: 1fr; }
+  .stats-grid, .stats-grid-compact, .integration-grid { grid-template-columns: 1fr; }
 }
 
 
@@ -1557,6 +1606,20 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 
   .calendar-shell .calendar-year-grid {
     grid-template-columns: 1fr;
+  }
+
+  .calendar-month-scroll {
+    overflow-x: auto;
+    padding-bottom: 4px;
+    margin: 0 -4px;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .calendar-month-scroll .calendar-grid-header,
+  .calendar-month-scroll .calendar-grid {
+    min-width: 640px;
+    grid-template-columns: repeat(7, minmax(88px, 1fr));
   }
 }
 

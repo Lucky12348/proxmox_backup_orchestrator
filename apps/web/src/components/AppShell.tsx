@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { getSystemTime } from "../api";
 import { useAuth } from "../AuthContext";
 import type { Language, TranslationDictionary } from "../i18n";
@@ -93,10 +93,24 @@ const NAV_ITEMS = [
 
 export function AppShell({ children, language, onLanguageChange, t }: AppShellProps) {
   const { logout } = useAuth();
+  const location = useLocation();
   const [apiTime, setApiTime] = useState<string>("--:--:--");
   const [timeOffsetMs, setTimeOffsetMs] = useState<number | null>(null);
   const [lastTimeSyncAt, setLastTimeSyncAt] = useState<number | null>(null);
   const [timeSyncFailed, setTimeSyncFailed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,7 +176,15 @@ export function AppShell({ children, language, onLanguageChange, t }: AppShellPr
 
   return (
     <div className="shell">
-      <aside className="sidebar">
+      {mobileNavOpen ? (
+        <div
+          aria-hidden="true"
+          className="sidebar-overlay"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      ) : null}
+
+      <aside className={mobileNavOpen ? "sidebar sidebar-open" : "sidebar"}>
         <div className="sidebar-brand">
           <p className="sidebar-kicker">PBO</p>
           <h1>{t.title}</h1>
@@ -239,6 +261,27 @@ export function AppShell({ children, language, onLanguageChange, t }: AppShellPr
       <div className="shell-main">
         <header className="topbar">
           <div className="topbar-left">
+            <button
+              aria-expanded={mobileNavOpen}
+              aria-label={t.navigation}
+              className="mobile-nav-toggle"
+              onClick={() => setMobileNavOpen((open) => !open)}
+              type="button"
+            >
+              <svg
+                aria-hidden="true"
+                fill="none"
+                height="18"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.7"
+                viewBox="0 0 16 16"
+                width="18"
+              >
+                <path d="M2 4h12M2 8h12M2 12h12" />
+              </svg>
+            </button>
             <span className="topbar-breadcrumb">PBO</span>
             <span className="topbar-sep">›</span>
             <span className="topbar-title">{t.adminConsole}</span>

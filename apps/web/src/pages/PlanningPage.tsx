@@ -418,7 +418,7 @@ function MonthView({ month, occurrences, onCreate, onOpen }: { month: Date; occu
   const days = Array.from({ length: 42 }, (_, index) => addDays(range.start, index));
   const currentMonth = month.getMonth();
   return (
-    <>
+    <div className="calendar-month-scroll">
       <div className="calendar-grid calendar-grid-header">
         {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((day) => <div key={day}>{day}</div>)}
       </div>
@@ -445,7 +445,7 @@ function MonthView({ month, occurrences, onCreate, onOpen }: { month: Date; occu
           );
         })}
       </div>
-    </>
+    </div>
   );
 }
 
