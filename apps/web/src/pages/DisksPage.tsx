@@ -156,7 +156,6 @@ export function DisksPage({
                           onExternalBackupRequest(disk);
                         }}
                         type="button"
-                        style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
                         title={
                           unusable
                             ? disk.detection_reason ?? undefined
@@ -174,7 +173,6 @@ export function DisksPage({
                         disabled={isSaving(`disk-eject-${disk.id}`) || !disk.connected}
                         onClick={() => onDiskEjectRequest(disk)}
                         type="button"
-                        style={{ fontSize: 11, padding: "0 10px", minHeight: 28 }}
                       >
                         {isSaving(`disk-eject-${disk.id}`) ? t.ejectingDisk : t.ejectDiskAction}
                       </button>

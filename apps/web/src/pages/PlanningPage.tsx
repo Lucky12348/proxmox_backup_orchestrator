@@ -87,6 +87,15 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
     setForm((current) => (current ? { ...current, auto_eject_after_success: nextValue } : current));
   }, [form, selectedDisk, autoEjectEligible]);
 
+  const formOpen = form !== null;
+  useEffect(() => {
+    if (!formOpen) return;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [formOpen]);
+
   useEffect(() => {
     let cancelled = false;
     void refreshPlanning({ silent: true, cancelled: () => cancelled });
@@ -233,7 +242,7 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
                 {VIEW_LABELS[view]}
               </button>
             ))}
-            <button className="action-button" onClick={() => openNewEvent(defaultEventDate(visibleDate))} type="button">Nouvel evenement</button>
+            <button className="action-button calendar-new-event-btn" onClick={() => openNewEvent(defaultEventDate(visibleDate))} type="button">Nouvel evenement</button>
           </div>
         </div>
 
@@ -367,12 +376,19 @@ function DayView({ date, occurrences, onCreate, onOpen }: { date: Date; occurren
   const dayOccurrences = occurrences.filter((item) => localDateKey(new Date(item.window_starts_at)) === localDateKey(date));
   const today = isToday(date);
   return (
-    <div className="calendar-time-grid calendar-day-view">
-      <div className="calendar-time-labels">{HOURS.map((hour) => <div key={hour}>{hourLabel(hour)}</div>)}</div>
-      <div className={today ? "calendar-time-column calendar-today-column" : "calendar-time-column"} onDoubleClick={(event) => onCreate(slotDateFromClick(date, event))}>
-        {HOURS.map((hour) => <button aria-label={`Creer a ${hourLabel(hour)}`} className="calendar-hour-line" key={hour} onClick={() => onCreate(withHour(date, hour))} type="button" />)}
-        {today ? <CurrentTimeIndicator /> : null}
-        {dayOccurrences.map((occurrence) => <OccurrenceBlock key={occurrence.occurrence_id} occurrence={occurrence} onOpen={onOpen} />)}
+    <div className="calendar-day-wrap">
+      <div className="calendar-time-grid calendar-day-view">
+        <div className="calendar-time-labels">{HOURS.map((hour) => <div key={hour}>{hourLabel(hour)}</div>)}</div>
+        <div className={today ? "calendar-time-column calendar-today-column" : "calendar-time-column"} onDoubleClick={(event) => onCreate(slotDateFromClick(date, event))}>
+          {HOURS.map((hour) => <button aria-label={`Creer a ${hourLabel(hour)}`} className="calendar-hour-line" key={hour} onClick={() => onCreate(withHour(date, hour))} type="button" />)}
+          {today ? <CurrentTimeIndicator /> : null}
+          {dayOccurrences.map((occurrence) => <OccurrenceBlock key={occurrence.occurrence_id} occurrence={occurrence} onOpen={onOpen} />)}
+        </div>
+      </div>
+      <div className="calendar-agenda-fallback">
+        {dayOccurrences.length === 0 ? <EmptyState title="Aucun evenement ce jour" /> : dayOccurrences.map((occurrence) => (
+          <CalendarListItem key={occurrence.occurrence_id} occurrence={occurrence} onOpen={onOpen} />
+        ))}
       </div>
     </div>
   );

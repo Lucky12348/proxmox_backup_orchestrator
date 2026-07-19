@@ -46,8 +46,11 @@ export function LoginPage({ t }: LoginPageProps) {
             <input
               id="pbo-username"
               type="text"
+              autoCapitalize="none"
               autoComplete="username"
+              autoCorrect="off"
               autoFocus
+              spellCheck={false}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               placeholder="admin"

@@ -360,7 +360,7 @@ export function AssetsPage({
                 </div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <button
-                    className="action-button secondary"
+                    className="action-button"
                     disabled={!job.supported || isSaving(`backup-job-${job.job_id}`)}
                     onClick={() => openSelectionModal(job.job_id)}
                     type="button"

@@ -15,7 +15,7 @@ export function ErrorBanner({
     <section className={`banner ${tone === "info" ? "banner-info" : "banner-error"}`}>
       <p>{message}</p>
       {onDismiss ? (
-        <button className="ghost-button" onClick={onDismiss} type="button" style={{ minHeight: 28, fontSize: 12 }}>
+        <button className="ghost-button" onClick={onDismiss} type="button">
           {dismissLabel}
         </button>
       ) : null}
