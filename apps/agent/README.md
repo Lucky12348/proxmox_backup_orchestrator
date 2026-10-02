@@ -16,6 +16,11 @@ This phase does not implement hotplug watching yet. It provides:
 - a real PBS-native-like external export command boundary when host dependencies are present
 - optional mock disk report submission for development
 - a simple CLI contract for future host-side integration
+- (Proxmox host role) management of the host's file-driven ntfy notification engine:
+  `GET`/`PUT /notifications/templates`, `POST /notifications/test`,
+  `GET /notifications/history`, `GET /notifications/queue` — see
+  `docs/NOTIFICATIONS.md` § "Host notification engine". Code in
+  `src/agent/ntfy_notif.py`; it never reads `/etc/ntfy-notif/ntfy.conf` (ntfy token).
 
 ## Environment
 
@@ -32,6 +37,12 @@ This phase does not implement hotplug watching yet. It provides:
 - `PBS_TOKEN_SECRET`
 - `PBS_FINGERPRINT`
 - `AGENT_EXPORT_TIMEOUT_SECONDS`
+- Optional, Proxmox host role only (defaults match the standard host install):
+  `NTFY_NOTIF_TEMPLATES_PATH` (`/etc/ntfy-notif/templates.json`),
+  `NTFY_NOTIF_BACKUPS_DIR` (`/etc/ntfy-notif/backups`),
+  `NTFY_NOTIF_HISTORY_PATH` (`/var/log/ntfy-notif/history.jsonl`),
+  `NTFY_NOTIF_QUEUE_DIR` (`/var/spool/ntfy-queue`),
+  `NTFY_NOTIF_SEND_COMMAND` (`/usr/local/bin/ntfy-send`)
 
 ## Run locally
 
@@ -52,7 +63,11 @@ This phase does not implement hotplug watching yet. It provides:
 The same agent app is deployed in two pragmatic roles:
 
 - Proxmox host agent:
-  disk detection, heartbeat/report sync, disk preparation, mount-path handling
+  disk detection, heartbeat/report sync, disk preparation, mount-path handling,
+  host ntfy notification templates/history/queue (`/notifications/*`). Saving
+  templates requires the HTTP service to run as root (`User=root`): it rewrites
+  `/etc/ntfy-notif/templates.json` as `root:nut` `0664` and keeps backups in
+  `/etc/ntfy-notif/backups/`. A non-root agent gets an explicit 403 instead of a workaround.
 - PBS execution agent:
   PBS-native export execution through `proxmox-backup-manager`
 

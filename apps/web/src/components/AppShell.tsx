@@ -80,6 +80,16 @@ const NAV_ITEMS = [
     ),
   },
   {
+    to: "/notifications",
+    key: "notifications" as const,
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 11V7a4 4 0 0 1 8 0v4l1.5 1.5h-11L4 11z"/>
+        <path d="M6.5 14a1.5 1.5 0 0 0 3 0"/>
+      </svg>
+    ),
+  },
+  {
     to: "/settings",
     key: "settings" as const,
     icon: (

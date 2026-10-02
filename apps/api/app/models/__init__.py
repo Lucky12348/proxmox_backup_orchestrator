@@ -1,3 +1,4 @@
+from app.models.activity_event import ActivityEvent
 from app.models.agent_heartbeat import AgentHeartbeat
 from app.models.asset_ignore import AssetIgnore
 from app.models.backup_run import BackupRun, BackupRunStatus
@@ -16,6 +17,7 @@ from app.models.scheduled_backup import (
 from app.models.virtual_machine import VMType, VirtualMachine
 
 __all__ = [
+    "ActivityEvent",
     "AgentHeartbeat",
     "AssetIgnore",
     "BackupRun",

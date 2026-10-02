@@ -6,6 +6,7 @@ from app.api.routes import (
     backup_runs,
     disks,
     external_backups,
+    host_notifications,
     integrations_pbs,
     integrations_proxmox,
     maintenance,
@@ -43,6 +44,8 @@ protected_router.include_router(proxmox.router)
 protected_router.include_router(system.router)
 protected_router.include_router(maintenance.router)
 protected_router.include_router(notifications.router)
+protected_router.include_router(host_notifications.router)
+protected_router.include_router(host_notifications.activity_router)
 
 api_router = APIRouter()
 api_router.include_router(public_router)

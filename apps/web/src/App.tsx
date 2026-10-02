@@ -16,6 +16,7 @@ import { AssetsPage } from "./pages/AssetsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DisksPage } from "./pages/DisksPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
+import { NotificationsPage } from "./pages/NotificationsPage";
 import { PlanningPage } from "./pages/PlanningPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import type { DiskActionRequest } from "./pages/shared";
@@ -315,6 +316,7 @@ function AuthenticatedApp() {
             }
             path="/activity"
           />
+          <Route element={<NotificationsPage language={language} t={t} />} path="/notifications" />
           <Route element={<SettingsPage t={t} />} path="/settings" />
         </Routes>
       </AppShell>

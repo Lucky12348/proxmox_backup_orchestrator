@@ -1,5 +1,6 @@
 import { getStoredToken } from "./AuthContext";
 import type {
+  ActivityEvent,
   AgentStatus,
   AssetIgnore,
   AutoSyncResult,
@@ -10,6 +11,12 @@ import type {
   ExternalBackupPreview,
   ExternalBackupRun,
   ExternalDisk,
+  HostNotifHistory,
+  HostNotifHistoryStatus,
+  HostNotifQueue,
+  HostNotifTemplates,
+  HostNotifTemplatesResponse,
+  HostNotifTestResult,
   MaintenanceAction,
   MaintenanceComponentStatus,
   MaintenanceStatus,
@@ -65,8 +72,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await response.text();
     let parsedDetail: string | undefined;
     try {
-      const parsed = JSON.parse(body) as { detail?: string | { message?: string } };
-      parsedDetail = typeof parsed.detail === "string" ? parsed.detail : parsed.detail?.message;
+      const parsed = JSON.parse(body) as {
+        detail?: string | { message?: string } | { loc?: (string | number)[]; msg?: string }[];
+      };
+      if (Array.isArray(parsed.detail)) {
+        // FastAPI request-validation errors: render "field.path: message" lines.
+        parsedDetail = parsed.detail
+          .map((item) => `${(item.loc ?? []).filter((part) => part !== "body").join(".")}: ${item.msg ?? ""}`)
+          .join("\n");
+      } else {
+        parsedDetail = typeof parsed.detail === "string" ? parsed.detail : parsed.detail?.message;
+      }
     } catch {
       parsedDetail = undefined;
     }
@@ -410,4 +426,38 @@ export function sendTestNotification() {
   return request<NotificationTestResult>("/notifications/test", {
     method: "POST",
   });
+}
+
+export function getHostNotifTemplates() {
+  return request<HostNotifTemplatesResponse>("/notifications/host/templates");
+}
+
+export function saveHostNotifTemplates(templates: HostNotifTemplates) {
+  return request<HostNotifTemplatesResponse>("/notifications/host/templates", {
+    method: "PUT",
+    body: JSON.stringify(templates),
+  });
+}
+
+export function testHostNotifEvent(event: string, vars: Record<string, string>) {
+  return request<HostNotifTestResult>("/notifications/host/test", {
+    method: "POST",
+    body: JSON.stringify({ event, vars }),
+  });
+}
+
+export function getHostNotifHistory(filters: { limit?: number; event?: string; status?: HostNotifHistoryStatus | "" }) {
+  const params = new URLSearchParams();
+  params.set("limit", String(filters.limit ?? 200));
+  if (filters.event) params.set("event", filters.event);
+  if (filters.status) params.set("status", filters.status);
+  return request<HostNotifHistory>(`/notifications/host/history?${params.toString()}`);
+}
+
+export function getHostNotifQueue() {
+  return request<HostNotifQueue>("/notifications/host/queue");
+}
+
+export function getActivityEvents(limit = 100) {
+  return request<ActivityEvent[]>(`/activity-events?limit=${limit}`);
 }

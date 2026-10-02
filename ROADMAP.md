@@ -315,6 +315,50 @@ retention parsing, job-signature matching) and
 exercises the new routes end-to-end through FastAPI's dependency injection —
 same pre-existing gap as the rest of `proxmox.py` (see §3).
 
+### 1.6 Host ntfy notification engine managed from the app — Done — 2026-10-02
+
+Requested by the user: a **Notifications** page to manage the file-driven ntfy
+engine installed on the Proxmox host (`/etc/ntfy-notif/templates.json`,
+`ntfy-send`, `history.jsonl`, spool queue) without SSH. Full reference:
+`docs/NOTIFICATIONS.md` § "Host notification engine".
+
+**Agent** (`apps/agent/src/agent/ntfy_notif.py`, endpoints in `server.py`,
+capability `ntfy-notifications`): strict validation that rejects unknown keys,
+atomic write (temp file + `os.replace`, `root:nut` `0664`), timestamped
+backups (10 kept), `ntfy-send` test as an argument list with no shell and a 30 s
+timeout, history read backwards from the end of the file, queue count and age.
+Never reads `ntfy.conf`. Refuses to write with an explicit 403 if not running as root.
+
+**API**: `/api/v1/notifications/host/*` relays
+(`routes/host_notifications.py`, `services/host_notifications.py`, schemas
+mirroring the agent rules). `HostAgentClient` gained `get(params)`/`put` and
+`HostAgentError` now carries the agent's HTTP status/payload. New
+`activity_events` table + `GET /api/v1/activity-events`: every template save
+and test is journaled. Deliberately **not** reusing `backup_runs`, which
+drives the dashboard's latest-backup status.
+
+**Web**: `pages/NotificationsPage.tsx` (general settings, events grouped by
+category, emoji picker, clickable variable chips, live Android-style preview,
+per-event test, custom events, single save with unsaved-change detection,
+history tab in Europe/Paris time, queue badge). Logic in
+`src/hostNotifCatalog.ts`. The Activity page gained an "Operations journal" section.
+
+**Tests**: `apps/agent/tests/test_ntfy_notif.py`,
+`apps/api/tests/test_host_notifications.py`,
+`apps/web/tests/hostNotifCatalog.test.ts` (run with `node --test`, still not
+wired to an npm script; see §3).
+
+**Known limits / follow-ups**:
+- No optimistic-concurrency check. A save overwrites edits made on the host
+  (SSH) since the page was loaded. The previous version is still in
+  `/etc/ntfy-notif/backups/`. A follow-up could send the loaded `modified_at`
+  and have the agent refuse the save if the file changed since then.
+- Per-event `click`/`icon` overrides are kept as they are on save but are not
+  editable in the UI yet.
+- No restore-from-backup button. Backups are restored by hand on the host.
+- The `beforeunload` guard covers tab close/reload, not in-app navigation
+  (the app uses a non-data `BrowserRouter`, so `useBlocker` is unavailable).
+
 ## 2. CI/CD — Not started
 
 - No `.github/workflows` exists. Add a pipeline that at minimum lints and tests

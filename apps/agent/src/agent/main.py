@@ -44,6 +44,7 @@ AGENT_CAPABILITIES = {
     "qemu-usb-attach",
     "qemu-usb-detach",
     "disk-spin-down",
+    "ntfy-notifications",
 }
 
 

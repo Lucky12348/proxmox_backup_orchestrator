@@ -480,3 +480,74 @@ export interface NotificationTestResult {
   sent: boolean;
   message: string;
 }
+
+// Host-local ntfy engine on the Proxmox host (/etc/ntfy-notif/templates.json).
+export interface HostNotifDefaults {
+  topic: string;
+  click?: string;
+  icon?: string;
+  late_after_sec?: number;
+}
+
+export interface HostNotifEvent {
+  enabled: boolean;
+  priority: number;
+  emoji: string;
+  title: string;
+  message: string;
+  topic?: string;
+  click?: string;
+  icon?: string;
+}
+
+export interface HostNotifTemplates {
+  defaults: HostNotifDefaults;
+  events: Record<string, HostNotifEvent>;
+}
+
+export interface HostNotifTemplatesResponse {
+  path: string | null;
+  modified_at: string | null;
+  backup_path?: string | null;
+  templates: HostNotifTemplates;
+}
+
+export interface HostNotifTestResult {
+  ok: boolean;
+  event: string;
+  return_code: number | null;
+  message: string;
+  stdout_log: string | null;
+  stderr_log: string | null;
+}
+
+export type HostNotifHistoryStatus = "queued" | "sent" | "muted";
+
+export interface HostNotifHistoryEntry {
+  ts: number | null;
+  event: string;
+  status: string;
+  title: string | null;
+  message: string | null;
+}
+
+export interface HostNotifHistory {
+  entries: HostNotifHistoryEntry[];
+  skipped_lines: number;
+}
+
+export interface HostNotifQueue {
+  count: number;
+  oldest_ts: number | null;
+  oldest_age_seconds: number | null;
+}
+
+export interface ActivityEvent {
+  id: number;
+  created_at: string;
+  category: string;
+  action: string;
+  status: string;
+  summary: string;
+  details: Record<string, unknown> | null;
+}

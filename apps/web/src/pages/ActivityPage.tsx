@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
-import { getExternalBackupRun } from "../api";
+import { getActivityEvents, getExternalBackupRun } from "../api";
 import { DataTable } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatDateTime, getBackupStatusTone } from "../utils";
-import type { ExternalBackupRun } from "../types";
+import type { ActivityEvent, ExternalBackupRun } from "../types";
 import type { ActivityPageProps } from "./shared";
 
 function isActiveRun(run: ExternalBackupRun) {
@@ -138,7 +138,62 @@ export function ActivityPage({
           </DataTable>
         )}
       </section>
+
+      <OperationsJournal language={language} t={t} />
     </div>
+  );
+}
+
+function OperationsJournal({ language, t }: Pick<ActivityPageProps, "language" | "t">) {
+  const [events, setEvents] = useState<ActivityEvent[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getActivityEvents(100)
+      .then((items) => { if (!cancelled) setEvents(items); })
+      .catch((err: unknown) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <section className="panel-card">
+      <div className="panel-card-header">
+        <h2>{t.operationsJournalTitle}</h2>
+      </div>
+      <p className="integration-message">{t.operationsJournalDescription}</p>
+      {error ? <p className="integration-message danger-text">{error}</p> : null}
+      {events !== null && events.length === 0 ? (
+        <EmptyState description={t.operationsJournalDescription} title={t.operationsJournalEmpty} />
+      ) : events !== null ? (
+        <DataTable>
+          <table>
+            <thead>
+              <tr>
+                <th>{t.operationsJournalDate}</th>
+                <th>{t.operationsJournalAction}</th>
+                <th>{t.operationsJournalStatus}</th>
+                <th>{t.operationsJournalSummary}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((event) => (
+                <tr key={event.id}>
+                  <td>{formatDateTime(event.created_at, language, t.notAvailable)}</td>
+                  <td>{t.operationsJournalActions[event.action] ?? event.action}</td>
+                  <td>
+                    <StatusBadge tone={event.status === "success" ? "success" : "danger"}>
+                      {event.status === "success" ? t.status.success : t.status.failed}
+                    </StatusBadge>
+                  </td>
+                  <td>{event.summary}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DataTable>
+      ) : null}
+    </section>
   );
 }
 

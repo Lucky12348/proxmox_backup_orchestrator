@@ -31,6 +31,8 @@ class HostAgentError(RuntimeError):
         command_summary: str | None,
         execution_cwd: str | None,
         return_code: int | None,
+        status_code: int | None = None,
+        payload: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.stdout_log = stdout_log
@@ -38,6 +40,9 @@ class HostAgentError(RuntimeError):
         self.command_summary = command_summary
         self.execution_cwd = execution_cwd
         self.return_code = return_code
+        # HTTP status and JSON body of a non-2xx agent response (None for transport errors).
+        self.status_code = status_code
+        self.payload = payload or {}
 
 
 class HostAgentClient:
@@ -58,14 +63,26 @@ class HostAgentClient:
     def post(self, path: str, payload: dict[str, Any]) -> HostAgentResult:
         return self._request("POST", path, payload)
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> HostAgentResult:
+    def get(self, path: str, params: dict[str, Any] | None = None) -> HostAgentResult:
+        return self._request("GET", path, params=params)
+
+    def put(self, path: str, payload: dict[str, Any]) -> HostAgentResult:
+        return self._request("PUT", path, payload)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> HostAgentResult:
         base_url = self.base_url.rstrip("/")
         url = f"{base_url}{path}"
         headers = {"X-Agent-Token": self.token}
 
         try:
             with httpx.Client(timeout=self.timeout_seconds, headers=headers) as client:
-                response = client.request(method, url, json=payload)
+                response = client.request(method, url, json=payload, params=params)
         except httpx.TimeoutException as exc:
             raise HostAgentError(
                 f"{self.label} request timed out after {self.timeout_seconds} seconds: `{method} {url}`.",
@@ -105,6 +122,8 @@ class HostAgentClient:
             command_summary=_optional_string(response_payload.get("command_summary")) or f"{method} {url}",
             execution_cwd=_optional_string(response_payload.get("execution_cwd")),
             return_code=_optional_int(response_payload.get("return_code")) or response.status_code,
+            status_code=response.status_code,
+            payload=response_payload,
         )
 
 
