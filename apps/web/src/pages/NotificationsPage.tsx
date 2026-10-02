@@ -76,6 +76,10 @@ export function NotificationsPage({ language, t }: NotificationsPageProps) {
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
   const [queue, setQueue] = useState<HostNotifQueue | null>(null);
   const [queueError, setQueueError] = useState(false);
+  // Accordion: only one event editor open at a time keeps the list scannable.
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [stateFilter, setStateFilter] = useState<"all" | "enabled" | "disabled">("all");
 
   const dirty = useMemo(() => stableStringify(draft) !== stableStringify(baseline), [draft, baseline]);
 
@@ -149,6 +153,9 @@ export function NotificationsPage({ language, t }: NotificationsPageProps) {
 
   function addEvent(code: string) {
     setDraft((current) => (current ? { ...current, events: { ...current.events, [code]: newCustomEvent(code) } } : current));
+    setSearch("");
+    setStateFilter("all");
+    setExpanded(code);
   }
 
   function deleteEvent(code: string) {
@@ -168,6 +175,17 @@ export function NotificationsPage({ language, t }: NotificationsPageProps) {
     setIssues(found);
     if (found.length > 0) {
       setBanner({ message: h.validationFailed, tone: "error" });
+      // Open the first faulty event so the inline field errors are visible.
+      const firstEvent = found.find((issue) => issue.field.startsWith("events."));
+      if (firstEvent) {
+        // Longest code first: "test.x" must win over "test" for field "events.test.x.title".
+        const code = Object.keys(draft.events).sort((a, b) => b.length - a.length).find((item) => firstEvent.field === `events.${item}` || firstEvent.field.startsWith(`events.${item}.`));
+        if (code) {
+          setSearch("");
+          setStateFilter("all");
+          setExpanded(code);
+        }
+      }
       return;
     }
     setSaving(true);
@@ -201,6 +219,17 @@ export function NotificationsPage({ language, t }: NotificationsPageProps) {
     }
     return map;
   }, [issues, h.validation]);
+
+  // Number of validation errors per event, shown as a red marker on collapsed rows.
+  const issueCountByEvent = useMemo(() => {
+    const counts = new Map<string, number>();
+    const codes = Object.keys(draft?.events ?? {}).sort((a, b) => b.length - a.length);
+    for (const issue of issues) {
+      const code = codes.find((item) => issue.field === `events.${item}` || issue.field.startsWith(`events.${item}.`));
+      if (code) counts.set(code, (counts.get(code) ?? 0) + 1);
+    }
+    return counts;
+  }, [issues, draft]);
 
   // Re-validate live once the user has tried to save, so errors disappear as they are fixed.
   useEffect(() => {
@@ -264,33 +293,83 @@ export function NotificationsPage({ language, t }: NotificationsPageProps) {
 
           <section className="panel-card">
             <div className="panel-card-header">
-              <h2>{h.eventsTitle}</h2>
+              <div>
+                <h2>{h.eventsTitle}</h2>
+                <p className="muted-text">
+                  {fill(h.enabledCount, {
+                    enabled: Object.values(draft.events).filter((event) => event.enabled).length,
+                    total: Object.keys(draft.events).length,
+                  })}
+                </p>
+              </div>
               <AddEventForm existing={Object.keys(draft.events)} h={h} onAdd={addEvent} />
             </div>
-            {groupEventCodes(Object.keys(draft.events)).map(([category, codes]) => (
-              <details className="hn-category" key={category} open>
-                <summary>
-                  {h.categories[category] ?? category} <span className="muted-text">({codes.length})</span>
-                </summary>
-                <div className="hn-event-list">
-                  {codes.map((code) => (
-                    <EventCard
-                      code={code}
-                      defaultTopic={draft.defaults.topic}
-                      event={draft.events[code]}
-                      h={h}
-                      issuesByField={issuesByField}
-                      key={code}
-                      language={language}
-                      onChange={(patch) => patchEvent(code, patch)}
-                      onDelete={() => deleteEvent(code)}
-                      savedEvent={baseline.events[code]}
-                      t={t}
-                    />
-                  ))}
+
+            <div className="hn-toolbar">
+              <input
+                aria-label={h.searchPlaceholder}
+                className="text-input hn-search"
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={h.searchPlaceholder}
+                type="search"
+                value={search}
+              />
+              <div className="button-row">
+                {(["all", "enabled", "disabled"] as const).map((item) => (
+                  <button
+                    aria-pressed={stateFilter === item}
+                    className={stateFilter === item ? "action-button" : "ghost-button"}
+                    key={item}
+                    onClick={() => setStateFilter(item)}
+                    type="button"
+                  >
+                    {item === "all" ? h.filterAll : item === "enabled" ? h.filterEnabled : h.filterDisabled}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {(() => {
+              const query = search.trim().toLowerCase();
+              const visible = Object.keys(draft.events).filter((code) => {
+                const event = draft.events[code];
+                if (stateFilter === "enabled" && !event.enabled) return false;
+                if (stateFilter === "disabled" && event.enabled) return false;
+                if (!query) return true;
+                return [code, BUILTIN_EVENTS[code]?.label[language] ?? "", event.title, event.message]
+                  .some((value) => value.toLowerCase().includes(query));
+              });
+              const groups = groupEventCodes(visible);
+              if (groups.length === 0) return <EmptyState title={h.noMatch} />;
+              return groups.map(([category, codes]) => (
+                <div className="hn-category" key={category}>
+                  <div className="hn-category-title">
+                    <span>{h.categories[category] ?? category}</span>
+                    <span className="hn-category-count">{codes.length}</span>
+                  </div>
+                  <div className="hn-event-list">
+                    {codes.map((code) => (
+                      <EventCard
+                        code={code}
+                        defaultTopic={draft.defaults.topic}
+                        event={draft.events[code]}
+                        expanded={expanded === code}
+                        h={h}
+                        issueCount={issueCountByEvent.get(code) ?? 0}
+                        issuesByField={issuesByField}
+                        key={code}
+                        language={language}
+                        onChange={(patch) => patchEvent(code, patch)}
+                        onDelete={() => deleteEvent(code)}
+                        onToggleExpanded={() => setExpanded((current) => (current === code ? null : code))}
+                        savedEvent={baseline.events[code]}
+                        t={t}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </details>
-            ))}
+              ));
+            })()}
           </section>
 
           <div className={dirty ? "hn-savebar hn-savebar-dirty" : "hn-savebar"}>
@@ -343,14 +422,14 @@ function GeneralSettings({
       <div className="panel-card-header">
         <h2>{h.generalTitle}</h2>
       </div>
-      <div className="settings-input-grid">
-        <label>
+      <div className="hn-general-grid">
+        <label className="hn-field">
           <span>{h.defaultTopic}</span>
           <input maxLength={64} onChange={(e) => onChange({ topic: e.target.value })} value={defaults.topic ?? ""} />
           <FieldErrors messages={issuesByField.get("defaults.topic")} />
         </label>
-        <label>
-          <span>{h.defaultClick} <em className="muted-text">({h.optional})</em></span>
+        <label className="hn-field">
+          <span>{h.defaultClick} <em className="hn-optional">{h.optional}</em></span>
           <input
             onChange={(e) => onChange({ click: e.target.value })}
             placeholder="https://"
@@ -359,8 +438,8 @@ function GeneralSettings({
           />
           <FieldErrors messages={issuesByField.get("defaults.click")} />
         </label>
-        <label>
-          <span>{h.defaultIcon} <em className="muted-text">({h.optional})</em></span>
+        <label className="hn-field">
+          <span>{h.defaultIcon} <em className="hn-optional">{h.optional}</em></span>
           <input
             onChange={(e) => onChange({ icon: e.target.value })}
             placeholder="https://"
@@ -369,7 +448,7 @@ function GeneralSettings({
           />
           <FieldErrors messages={issuesByField.get("defaults.icon")} />
         </label>
-        <label>
+        <label className="hn-field">
           <span>{h.lateAfter}</span>
           <input
             max={86400}
@@ -379,7 +458,7 @@ function GeneralSettings({
             type="number"
             value={defaults.late_after_sec ?? ""}
           />
-          <span className="muted-text">{h.lateAfterHint}</span>
+          <span className="hn-hint">{h.lateAfterHint}</span>
           <FieldErrors messages={issuesByField.get("defaults.late_after_sec")} />
         </label>
       </div>
@@ -436,11 +515,35 @@ interface EventCardProps {
   t: TranslationDictionary;
   language: Language;
   issuesByField: Map<string, string[]>;
+  issueCount: number;
+  expanded: boolean;
+  onToggleExpanded: () => void;
   onChange: (patch: Partial<HostNotifEvent>) => void;
   onDelete: () => void;
 }
 
-function EventCard({ code, event, savedEvent, defaultTopic, h, t, language, issuesByField, onChange, onDelete }: EventCardProps) {
+function priorityTone(priority: number) {
+  if (priority >= 5) return "danger" as const;
+  if (priority === 4) return "warning" as const;
+  if (priority === 3) return "info" as const;
+  return "neutral" as const;
+}
+
+function EventCard({
+  code,
+  event,
+  savedEvent,
+  defaultTopic,
+  h,
+  t,
+  language,
+  issuesByField,
+  issueCount,
+  expanded,
+  onToggleExpanded,
+  onChange,
+  onDelete,
+}: EventCardProps) {
   const builtin = isBuiltinEvent(code);
   const titleRef = useRef<HTMLInputElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
@@ -466,126 +569,152 @@ function EventCard({ code, event, savedEvent, defaultTopic, h, t, language, issu
     });
   }
 
+  const classes = ["hn-event", event.enabled ? "" : "hn-event-disabled", expanded ? "hn-event-open" : "", issueCount > 0 ? "hn-event-invalid" : ""]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <article className={event.enabled ? "hn-event" : "hn-event hn-event-disabled"}>
-      <div className="hn-event-head">
+    <article className={classes}>
+      <div className="hn-event-row">
         <label className="toggle" title={h.enabled}>
-          <input checked={event.enabled} onChange={(e) => onChange({ enabled: e.target.checked })} type="checkbox" />
+          <input
+            aria-label={`${h.enabled} — ${code}`}
+            checked={event.enabled}
+            onChange={(e) => onChange({ enabled: e.target.checked })}
+            type="checkbox"
+          />
           <span className="toggle-slider" />
         </label>
-        <div className="hn-event-name">
-          <code>{code}</code>
-          <span className="muted-text">
-            {BUILTIN_EVENTS[code]?.label[language] ?? h.custom}
-            {builtin ? ` · ${h.builtin}` : ""}
+        <button aria-expanded={expanded} className="hn-event-summary" onClick={onToggleExpanded} type="button">
+          <span className="hn-event-emoji" title={event.emoji}>{emojiChar(event.emoji) ?? "❔"}</span>
+          <span className="hn-event-name">
+            <code>{code}</code>
+            <span>{BUILTIN_EVENTS[code]?.label[language] ?? h.custom}</span>
           </span>
-        </div>
-        {changed ? <span className="hn-dirty-dot" title={h.unsaved} /> : null}
-        <div className="button-row hn-event-actions">
-          <button className="ghost-button" onClick={() => setTestOpen((open) => !open)} type="button">
-            {h.test}
-          </button>
-          {!builtin ? (
-            <button className="danger-button" onClick={onDelete} type="button">
-              {h.deleteEvent}
-            </button>
+          <span className="hn-event-title">{renderTemplate(event.title, examples) || "—"}</span>
+          <span className="hn-event-meta">
+            {issueCount > 0 ? <span className="hn-issue-count" title={h.validationFailed}>{issueCount}</span> : null}
+            {changed ? <span className="hn-dirty-dot" title={h.unsaved} /> : null}
+            {event.topic ? <span className="hn-topic-chip">#{event.topic}</span> : null}
+            <StatusBadge tone={priorityTone(event.priority)}>{h.priorities[event.priority] ?? event.priority}</StatusBadge>
+          </span>
+          <svg aria-hidden="true" className="hn-chevron" fill="none" height="14" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 16 16" width="14">
+            <path d="M6 4l4 4-4 4" />
+          </svg>
+        </button>
+      </div>
+
+      {expanded ? (
+        <div className="hn-event-editor">
+          <div className="hn-event-body">
+            <div className="hn-event-fields">
+              <div className="hn-row">
+                <div className="hn-field hn-field-emoji">
+                  <span>{h.emoji}</span>
+                  <EmojiPicker h={h} onChange={(emoji) => onChange({ emoji })} value={event.emoji} />
+                  <FieldErrors messages={issuesByField.get(`${prefix}.emoji`)} />
+                </div>
+                <label className="hn-field hn-field-grow">
+                  <span>
+                    {h.title} <em className="muted-text">{[...event.title].length}/{TITLE_MAX}</em>
+                  </span>
+                  <input
+                    maxLength={TITLE_MAX * 2}
+                    onChange={(e) => onChange({ title: e.target.value })}
+                    onFocus={() => { lastFocused.current = "title"; }}
+                    ref={titleRef}
+                    value={event.title}
+                  />
+                  <FieldErrors messages={issuesByField.get(`${prefix}.title`)} />
+                </label>
+              </div>
+              <label className="hn-field">
+                <span>
+                  {h.message} <em className="muted-text">{[...event.message].length}/{MESSAGE_MAX}</em>
+                </span>
+                <textarea
+                  onChange={(e) => onChange({ message: e.target.value })}
+                  onFocus={() => { lastFocused.current = "message"; }}
+                  ref={messageRef}
+                  rows={2}
+                  value={event.message}
+                />
+                <FieldErrors messages={issuesByField.get(`${prefix}.message`)} />
+              </label>
+              <div className="hn-field">
+                <span>{h.variables}</span>
+                {variables.length === 0 ? (
+                  <span className="muted-text">{h.noVariables}</span>
+                ) : (
+                  <div className="hn-chips">
+                    {variables.map((name) => (
+                      <button
+                        className="hn-chip"
+                        key={name}
+                        onClick={() => insertVariable(name)}
+                        onMouseDown={(e) => e.preventDefault()}
+                        title={examples[name]}
+                        type="button"
+                      >
+                        {`{${name}}`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="hn-row">
+                <label className="hn-field">
+                  <span>{h.priority}</span>
+                  <select onChange={(e) => onChange({ priority: Number(e.target.value) })} value={event.priority}>
+                    {[1, 2, 3, 4, 5].map((value) => (
+                      <option key={value} value={value}>{value} · {h.priorities[value]}</option>
+                    ))}
+                  </select>
+                  <FieldErrors messages={issuesByField.get(`${prefix}.priority`)} />
+                </label>
+                <label className="hn-field hn-field-grow">
+                  <span>{h.topic} <em className="hn-optional">{h.optional}</em></span>
+                  <input
+                    maxLength={64}
+                    onChange={(e) => onChange({ topic: e.target.value === "" ? undefined : e.target.value })}
+                    placeholder={fill(h.topicPlaceholder, { topic: defaultTopic })}
+                    value={event.topic ?? ""}
+                  />
+                  <FieldErrors messages={issuesByField.get(`${prefix}.topic`)} />
+                </label>
+              </div>
+            </div>
+
+            <NotificationPreview defaultTopic={defaultTopic} event={event} h={h} vars={examples} />
+          </div>
+
+          <div className="hn-editor-actions">
+            <span className="muted-text">{builtin ? h.builtinHint : h.customHint}</span>
+            <div className="button-row">
+              <button className={testOpen ? "action-button" : "ghost-button"} onClick={() => setTestOpen((open) => !open)} type="button">
+                {h.test}
+              </button>
+              {!builtin ? (
+                <button className="danger-button" onClick={onDelete} type="button">
+                  {h.deleteEvent}
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {testOpen ? (
+            <TestPanel
+              code={code}
+              dirty={changed}
+              examples={examples}
+              h={h}
+              // Remount when the variable set changes so new `{var}` fields get their example value.
+              key={variables.join(",")}
+              saved={savedEvent !== undefined}
+              t={t}
+            />
           ) : null}
         </div>
-      </div>
-
-      <div className="hn-event-body">
-        <div className="hn-event-fields">
-          <div className="hn-row">
-            <div className="hn-field hn-field-emoji">
-              <span>{h.emoji}</span>
-              <EmojiPicker h={h} onChange={(emoji) => onChange({ emoji })} value={event.emoji} />
-              <FieldErrors messages={issuesByField.get(`${prefix}.emoji`)} />
-            </div>
-            <label className="hn-field hn-field-grow">
-              <span>
-                {h.title} <em className="muted-text">{[...event.title].length}/{TITLE_MAX}</em>
-              </span>
-              <input
-                maxLength={TITLE_MAX * 2}
-                onChange={(e) => onChange({ title: e.target.value })}
-                onFocus={() => { lastFocused.current = "title"; }}
-                ref={titleRef}
-                value={event.title}
-              />
-              <FieldErrors messages={issuesByField.get(`${prefix}.title`)} />
-            </label>
-          </div>
-          <label className="hn-field">
-            <span>
-              {h.message} <em className="muted-text">{[...event.message].length}/{MESSAGE_MAX}</em>
-            </span>
-            <textarea
-              onChange={(e) => onChange({ message: e.target.value })}
-              onFocus={() => { lastFocused.current = "message"; }}
-              ref={messageRef}
-              rows={2}
-              value={event.message}
-            />
-            <FieldErrors messages={issuesByField.get(`${prefix}.message`)} />
-          </label>
-          <div className="hn-field">
-            <span>{h.variables}</span>
-            {variables.length === 0 ? (
-              <span className="muted-text">{h.noVariables}</span>
-            ) : (
-              <div className="hn-chips">
-                {variables.map((name) => (
-                  <button
-                    className="hn-chip"
-                    key={name}
-                    onClick={() => insertVariable(name)}
-                    onMouseDown={(e) => e.preventDefault()}
-                    title={examples[name]}
-                    type="button"
-                  >
-                    {`{${name}}`}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="hn-row">
-            <label className="hn-field">
-              <span>{h.priority}</span>
-              <select onChange={(e) => onChange({ priority: Number(e.target.value) })} value={event.priority}>
-                {[1, 2, 3, 4, 5].map((value) => (
-                  <option key={value} value={value}>{value} · {h.priorities[value]}</option>
-                ))}
-              </select>
-              <FieldErrors messages={issuesByField.get(`${prefix}.priority`)} />
-            </label>
-            <label className="hn-field hn-field-grow">
-              <span>{h.topic} <em className="muted-text">({h.optional})</em></span>
-              <input
-                maxLength={64}
-                onChange={(e) => onChange({ topic: e.target.value === "" ? undefined : e.target.value })}
-                placeholder={fill(h.topicPlaceholder, { topic: defaultTopic })}
-                value={event.topic ?? ""}
-              />
-              <FieldErrors messages={issuesByField.get(`${prefix}.topic`)} />
-            </label>
-          </div>
-        </div>
-
-        <NotificationPreview defaultTopic={defaultTopic} event={event} h={h} vars={examples} />
-      </div>
-
-      {testOpen ? (
-        <TestPanel
-          code={code}
-          dirty={changed}
-          examples={examples}
-          h={h}
-          // Remount when the variable set changes so new `{var}` fields get their example value.
-          key={variables.join(",")}
-          saved={savedEvent !== undefined}
-          t={t}
-        />
       ) : null}
     </article>
   );
