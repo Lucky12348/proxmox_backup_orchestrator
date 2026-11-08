@@ -21,6 +21,9 @@ from app.models import (
 from app.schemas.planning import ScheduledBackupEventCreate, ScheduledBackupEventUpdate
 from app.services.planning_scheduler import expand_occurrences, process_runs
 
+# Arbitrary on purpose: the product must never assume a source datastore name.
+SOURCE_DATASTORE_NAME = "store8to"
+
 
 class PlanningEventTests(TestCase):
     def setUp(self) -> None:
@@ -210,7 +213,7 @@ def _event(**overrides) -> ScheduledBackupEvent:
         "enabled": True,
         "disk_serial": "USB-123",
         "disk_label_or_model": "Disk USB-123",
-        "datastore": "backup-store",
+        "datastore": SOURCE_DATASTORE_NAME,
         "recurrence_type": ScheduledBackupRecurrenceType.WEEKLY,
         "recurrence_config": None,
         "timezone": "Europe/Paris",
@@ -247,7 +250,7 @@ def _external_run(status: BackupRunStatus) -> ExternalBackupRun:
         started_at=now,
         finished_at=now + timedelta(minutes=5) if status in {BackupRunStatus.SUCCESS, BackupRunStatus.FAILED} else None,
         target_path="/mnt/pbo/USB-123/pbs-datastore",
-        datastore_name="backup-store",
+        datastore_name=SOURCE_DATASTORE_NAME,
         message=None,
         stdout_log=None,
         stderr_log=None,

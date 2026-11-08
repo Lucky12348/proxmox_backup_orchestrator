@@ -12,6 +12,9 @@ from app.models import BackupRunStatus, ExternalBackupMode, ExternalBackupRun, E
 from app.services.disk_eject import _attempt_disk_spin_down
 from app.services.external_backups import execute_external_backup_run, run_external_backup
 
+# Arbitrary on purpose: the product must never assume a source datastore name.
+SOURCE_DATASTORE_NAME = "store8to"
+
 
 class _SessionContext:
     def __init__(self, session: Session) -> None:
@@ -73,7 +76,7 @@ def _run(disk_id: int, *, auto_eject_after_success: bool = False) -> ExternalBac
         started_at=now,
         finished_at=None,
         target_path="/mnt/pbo/disk/pbs-datastore",
-        datastore_name="backup-store",
+        datastore_name=SOURCE_DATASTORE_NAME,
         message=None,
         stdout_log=None,
         stderr_log=None,

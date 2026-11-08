@@ -38,7 +38,8 @@ class ScheduledBackupEventBase(BaseModel):
     enabled: bool = True
     disk_serial: str
     disk_label_or_model: str | None = None
-    datastore: str
+    # Source PBS datastore: required, no default name is assumed.
+    datastore: str = Field(min_length=1)
     recurrence_type: ScheduledBackupRecurrenceType = ScheduledBackupRecurrenceType.WEEKLY
     recurrence_config: dict | None = None
     timezone: str = "Europe/Paris"
@@ -58,7 +59,7 @@ class ScheduledBackupEventUpdate(BaseModel):
     enabled: bool | None = None
     disk_serial: str | None = None
     disk_label_or_model: str | None = None
-    datastore: str | None = None
+    datastore: str | None = Field(default=None, min_length=1)
     recurrence_type: ScheduledBackupRecurrenceType | None = None
     recurrence_config: dict | None = None
     timezone: str | None = None

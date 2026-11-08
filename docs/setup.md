@@ -53,7 +53,7 @@ For read-only PBS backup sync, configure these variables in `.env`:
 - `PBS_TOKEN_SECRET`
 - `PBS_VERIFY_SSL`
 - `PBS_FINGERPRINT` when the host-side sync remote needs an explicit certificate fingerprint
-- `PBS_DATASTORE` (recommended default: `backup-store`)
+- `PBS_DATASTORE`: required, the exact name of your source PBS datastore (no default name is assumed)
 
 For backend-to-host-agent execution, these variables are also relevant:
 
@@ -126,7 +126,7 @@ Configure:
 1. `PBS_API_URL` with your PBS API base URL ending in `/api2/json`
 2. `PBS_TOKEN_ID` with a PBS API token id such as `root@pam!pbo-pbs`
 3. `PBS_TOKEN_SECRET` with the generated token secret
-4. `PBS_DATASTORE` with the source datastore name to inspect and export, usually `backup-store`
+4. `PBS_DATASTORE` with the exact name of your source datastore to inspect and export (see `proxmox-backup-manager datastore list`)
 5. `PBS_VERIFY_SSL=false` for self-signed local setups, or `true` for trusted certificates
 
 After the stack starts, use the dashboard's PBS section to check connectivity and trigger a manual backup sync.
@@ -210,7 +210,7 @@ The recommended external PBS export workflow uses a dedicated PBS datastore disk
 - the PBS agent destructively formats the disk and creates one ext4 partition
 - the disk is mounted at `/mnt/pbo/<serial>/pbs-datastore`
 - PBS creates or reuses a datastore directly at that path
-- PBS sync copies from the configured source datastore, usually `backup-store`, to the dedicated disk datastore
+- PBS sync copies from the source datastore configured in `PBS_DATASTORE` to the dedicated disk datastore
 - coexistence loop-backed mode remains an advanced legacy mode behind `EXTERNAL_BACKUP_LEGACY_COEXISTENCE_ENABLED=true`
 - this phase replaces the earlier stub with a real split-agent PBS-native sync attempt
 - the backend uses the Proxmox API to attach the selected USB disk to the PBS VM

@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import os.path
+import posixpath
 import shutil
 import socket
 import stat
@@ -15,7 +16,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -33,6 +34,12 @@ logger = logging.getLogger("agent")
 EXCLUDED_DEVICE_PREFIXES = ("loop", "dm-", "zd", "sr")
 SYSTEM_MOUNTPOINTS = {"/", "/boot", "/boot/efi"}
 SYSTEM_FS_MARKERS = {"LVM2_member", "zfs_member"}
+# Default parent directory PBS uses for datastores (and for mounted removable
+# datastores). Nothing mounted there, above it or below it may ever be formatted.
+PBS_DATASTORE_ROOT = "/mnt/datastore"
+# Present on any machine where Proxmox Backup Server is installed.
+PBS_CONFIG_DIR = Path("/etc/proxmox-backup")
+PBS_DATASTORE_LIST_TIMEOUT_SECONDS = 60.0
 AGENT_PROTOCOL_VERSION = "2026-05-31"
 AGENT_CAPABILITIES = {
     "version-endpoint",
@@ -74,6 +81,10 @@ class AgentSettings:
     # apps/api/app/core/config.py has its own PBS_VERIFY_SSL-backed setting for
     # the API's own PBS REST client (apps/api/app/services/pbs_client.py).
     pbs_fingerprint: str | None = os.getenv("PBS_FINGERPRINT") or None
+    # Name of the *source* PBS datastore that exports copy from (whatever the
+    # operator named it). Never assume a default name: an empty value is
+    # reported as "not configured" by check_source_datastore().
+    pbs_datastore: str = os.getenv("PBS_DATASTORE", "").strip()
     export_timeout_seconds: float = float(os.getenv("AGENT_EXPORT_TIMEOUT_SECONDS", "7200"))
     datastore_create_timeout_seconds: float = float(
         os.getenv("AGENT_DATASTORE_CREATE_TIMEOUT_SECONDS", "14400")
@@ -429,6 +440,13 @@ def prepare_dedicated_pbs_datastore_result(
     if not confirmation:
         raise RuntimeError("Dedicated PBS datastore preparation requires destructive confirmation.")
 
+    # Last gate before wipefs/sgdisk/parted/mkfs. If an existing partition was
+    # mounted above, that mount is not in the lsblk snapshot held by `disk`.
+    _assert_disk_hosts_no_pbs_datastore(
+        disk,
+        settings,
+        extra_mount_paths=[str(mount_path)] if existing_partition is not None else None,
+    )
     progress.post("destructive_format", f"Preparing `{device_path}` as dedicated PBS datastore `{datastore_name}`.")
     for partition in list_partition_nodes(disk):
         mountpoint = partition.get("mountpoint")
@@ -1113,7 +1131,9 @@ def prepare_disk_result(
     mode: str,
     mount_base_path: str | None,
     confirm_destructive: bool,
+    settings: AgentSettings | None = None,
 ) -> dict[str, Any]:
+    settings = settings or AgentSettings()
     disk, _ = resolve_disk(identifier)
     serial = disk_serial_number(disk, load_udev_properties(device_name(disk))) or device_name(disk)
     mount_path = default_mount_base_path(mount_base_path) / serial
@@ -1150,6 +1170,7 @@ def prepare_disk_result(
             raise RuntimeError("Dedicated backup mode requires destructive confirmation.")
 
         _assert_safe_dedicated_disk(disk)
+        _assert_disk_hosts_no_pbs_datastore(disk, settings)
         target_node = find_format_target(disk)
         run_command(["mkfs.ext4", "-F", target_node["path"]])
         filesystem_type = "ext4"
@@ -1457,23 +1478,44 @@ def _first_partition_path(device_path: str) -> str:
     return f"{device_path}1"
 
 
+def _normalize_posix_path(value: str) -> PurePosixPath:
+    return PurePosixPath(posixpath.normpath(value))
+
+
+def _posix_paths_overlap(left: str, right: str) -> bool:
+    """True when one absolute POSIX path is equal to, inside, or above the other."""
+    left_path = _normalize_posix_path(left)
+    right_path = _normalize_posix_path(right)
+    return left_path == right_path or left_path.is_relative_to(right_path) or right_path.is_relative_to(left_path)
+
+
+def _disk_mountpoints(disk: dict[str, Any]) -> list[tuple[str, str]]:
+    """(node path, mountpoint) for the disk and every partition that is mounted."""
+    mounts: list[tuple[str, str]] = []
+    for node in [disk, *list_partition_nodes(disk)]:
+        mountpoint = node.get("mountpoint")
+        if isinstance(mountpoint, str) and mountpoint:
+            mounts.append((str(node["path"]), mountpoint))
+    return mounts
+
+
 def _assert_safe_dedicated_disk(disk: dict[str, Any]) -> None:
-    nodes = [disk, *list_partition_nodes(disk)]
-    dangerous_mounts = {"/", "/boot", "/boot/efi", "/mnt/datastore/backup-store"}
-    for node in nodes:
-        mountpoint = node.get("mountpoint")
-        if isinstance(mountpoint, str) and mountpoint:
-            if mountpoint in dangerous_mounts or mountpoint.startswith("/mnt/datastore/backup-store/"):
-                raise RuntimeError(f"Refusing to format disk because `{node['path']}` is mounted at `{mountpoint}`.")
-    datastore_path = Path("/mnt/datastore/backup-store")
-    for node in nodes:
-        mountpoint = node.get("mountpoint")
-        if isinstance(mountpoint, str) and mountpoint:
-            try:
-                datastore_path.relative_to(Path(mountpoint))
-            except ValueError:
-                continue
-            raise RuntimeError(f"Refusing to format disk because it contains source datastore `{datastore_path}`.")
+    """Static, PBS-independent checks run before any disk preparation.
+
+    The PBS-datastore check (`_assert_disk_hosts_no_pbs_datastore`) is separate
+    because it must run right before the destructive commands, after the
+    non-destructive reuse path has had its chance.
+    """
+    for node_path, mountpoint in _disk_mountpoints(disk):
+        if mountpoint in SYSTEM_MOUNTPOINTS:
+            raise RuntimeError(f"Refusing to format disk because `{node_path}` is mounted at `{mountpoint}`.")
+        # Covers anything mounted at, under, or above (e.g. `/mnt`) the PBS
+        # datastore root, whatever the datastores there are named.
+        if _posix_paths_overlap(mountpoint, PBS_DATASTORE_ROOT):
+            raise RuntimeError(
+                f"Refusing to format disk because `{node_path}` is mounted at `{mountpoint}`, "
+                f"which overlaps the PBS datastore root `{PBS_DATASTORE_ROOT}`."
+            )
 
     # The explicit mountpoint checks above miss the common Proxmox case where the
     # system/root disk is an LVM (or ZFS) member: its physical partition has no
@@ -1484,6 +1526,180 @@ def _assert_safe_dedicated_disk(disk: dict[str, Any]) -> None:
     reason = get_exclusion_reason(disk, load_udev_properties(device_name(disk)))
     if reason is not None:
         raise RuntimeError(f"Refusing to format disk `{disk['path']}`: it {reason}.")
+
+
+class PbsDatastoreListError(RuntimeError):
+    """PBS is installed here but its datastore list could not be read."""
+
+
+def list_pbs_datastores(settings: AgentSettings) -> list[dict[str, Any]] | None:
+    """Return every datastore PBS knows about, or None if PBS is not installed here.
+
+    The same agent code runs on the Proxmox host (no PBS) and on the PBS VM, so
+    "no `proxmox-backup-manager` and no `/etc/proxmox-backup`" means there is no
+    datastore to protect on this machine. Any other failure raises
+    PbsDatastoreListError so callers can fail closed.
+    """
+    manager = shutil.which("proxmox-backup-manager")
+    if manager is None:
+        if PBS_CONFIG_DIR.exists():
+            raise PbsDatastoreListError(
+                f"`{PBS_CONFIG_DIR}` exists but `proxmox-backup-manager` was not found in PATH."
+            )
+        return None
+    timeout = min(settings.export_timeout_seconds, PBS_DATASTORE_LIST_TIMEOUT_SECONDS)
+    try:
+        result = run_subprocess([manager, "datastore", "list", "--output-format", "json"], timeout)
+    except RuntimeError as exc:
+        raise PbsDatastoreListError(str(exc)) from exc
+    if result.returncode != 0:
+        raise PbsDatastoreListError(format_command_failure("Unable to list PBS datastores.", result))
+    try:
+        datastores = parse_json_output(result.stdout, "datastore list")
+    except RuntimeError as exc:
+        raise PbsDatastoreListError(str(exc)) from exc
+    for item in datastores:
+        if not isinstance(item.get("name"), str) or not item["name"]:
+            raise PbsDatastoreListError(f"PBS datastore entry without a name: {item!r}.")
+    return datastores
+
+
+def _mount_source_for_target(path: str) -> str | None:
+    """Block device backing the filesystem that contains `path` (best effort)."""
+    findmnt = shutil.which("findmnt")
+    if not findmnt:
+        return None
+    try:
+        output = run_command([findmnt, "-no", "SOURCE", "--target", path])
+    except (OSError, RuntimeError, subprocess.CalledProcessError):
+        return None
+    source = _first_non_empty_line(output)
+    # Bind mounts are reported as `/dev/sdc1[/sub/dir]`.
+    return source.split("[", 1)[0] if source else None
+
+
+def _assert_disk_hosts_no_pbs_datastore(
+    disk: dict[str, Any],
+    settings: AgentSettings,
+    extra_mount_paths: list[str] | None = None,
+) -> None:
+    """Refuse to format a disk that holds any PBS datastore, whatever its name.
+
+    Must be called immediately before wipefs/sgdisk/parted/mkfs. Fails closed:
+    if PBS is installed but the datastore list cannot be read, formatting is
+    refused. `extra_mount_paths` lists mounts of this disk made after `disk`
+    was resolved (lsblk data is a snapshot).
+    """
+    disk_path = str(disk["path"])
+    try:
+        datastores = list_pbs_datastores(settings)
+    except PbsDatastoreListError as exc:
+        raise RuntimeError(
+            f"Refusing to format disk `{disk_path}`: unable to read the PBS datastore list, "
+            f"so it cannot be proven that no datastore lives on it. {exc}"
+        ) from exc
+    if datastores is None:
+        return
+
+    node_paths = {disk_path, *(str(node["path"]) for node in list_partition_nodes(disk))}
+    mounts = _disk_mountpoints(disk) + [(disk_path, path) for path in extra_mount_paths or []]
+    filesystem_uuids: set[str] | None = None
+
+    for datastore in datastores:
+        name = datastore["name"]
+        path = datastore.get("path")
+        backing_device = datastore.get("backing-device")
+        checked = False
+
+        if isinstance(path, str) and path.startswith("/"):
+            checked = True
+            for node_path, mountpoint in mounts:
+                if _posix_paths_overlap(path, mountpoint):
+                    raise RuntimeError(
+                        f"Refusing to format disk `{disk_path}`: `{node_path}` is mounted at `{mountpoint}`, "
+                        f"which holds PBS datastore `{name}` (`{path}`)."
+                    )
+            source = _mount_source_for_target(path)
+            if source in node_paths:
+                raise RuntimeError(
+                    f"Refusing to format disk `{disk_path}`: PBS datastore `{name}` (`{path}`) "
+                    f"is stored on `{source}`."
+                )
+
+        # PBS removable datastores reference their disk by filesystem UUID.
+        if isinstance(backing_device, str) and backing_device:
+            checked = True
+            if filesystem_uuids is None:
+                filesystem_uuids = {
+                    uuid for node_path in node_paths if (uuid := get_blkid_info(node_path).get("UUID"))
+                }
+            if backing_device in filesystem_uuids:
+                raise RuntimeError(
+                    f"Refusing to format disk `{disk_path}`: it is the backing device of PBS removable "
+                    f"datastore `{name}`."
+                )
+
+        if not checked:
+            raise RuntimeError(
+                f"Refusing to format disk `{disk_path}`: cannot determine where PBS datastore `{name}` "
+                f"is stored (path=`{path}`)."
+            )
+
+
+def check_source_datastore(settings: AgentSettings) -> dict[str, Any]:
+    """Verify that PBS_DATASTORE names a datastore that really exists on this PBS.
+
+    Run at agent startup and surfaced in `/health`, so the orchestrator can warn
+    before a scheduled backup instead of failing at export time.
+    """
+    name = settings.pbs_datastore
+    state: dict[str, Any] = {
+        "name": name or None,
+        "ok": False,
+        "status": "unknown",
+        "message": "",
+        "available_datastores": [],
+        "checked_at": current_timestamp(),
+    }
+    try:
+        datastores = list_pbs_datastores(settings)
+    except PbsDatastoreListError as exc:
+        state.update(
+            status="unavailable",
+            message=f"Impossible de vérifier le datastore source : liste des datastores PBS illisible ({exc}).",
+        )
+        return state
+    if datastores is None:
+        state.update(
+            ok=True,
+            status="not_applicable",
+            message="PBS n'est pas installé sur cette machine ; vérification du datastore source ignorée.",
+        )
+        return state
+
+    available = sorted(str(item["name"]) for item in datastores)
+    state["available_datastores"] = available
+    available_text = ", ".join(available) or "aucun"
+    if not name:
+        state.update(
+            status="not_configured",
+            message=f"PBS_DATASTORE n'est pas défini sur cet agent ; datastores disponibles : {available_text}.",
+        )
+    elif name not in available:
+        state.update(
+            status="missing",
+            message=f"Le datastore source {name} n'existe pas sur ce PBS ; datastores disponibles : {available_text}.",
+        )
+    else:
+        state.update(ok=True, status="ok", message=f"Le datastore source {name} existe sur ce PBS.")
+    return state
+
+
+def log_source_datastore_state(state: dict[str, Any]) -> None:
+    if state["ok"]:
+        logger.info("Source datastore check: %s", state["message"])
+    else:
+        logger.error("Source datastore check (%s): %s", state["status"], state["message"])
 
 
 def _find_ext4_partition(disk: dict[str, Any]) -> dict[str, Any] | None:
@@ -2268,13 +2484,8 @@ def _assert_safe_pbo_datastore_mount_path(mount_path: Path, *, action: str = "us
     datastore, so a caller-supplied `mount_path`/`preferred_mount_path` can
     never point at `/`, `/boot`, or anywhere outside the managed layout.
     """
-    dangerous_mounts = {
-        Path("/"),
-        Path("/boot"),
-        Path("/boot/efi"),
-        Path("/mnt/datastore/backup-store"),
-    }
-    if mount_path in dangerous_mounts:
+    dangerous_mounts = {Path(path) for path in SYSTEM_MOUNTPOINTS}
+    if mount_path in dangerous_mounts or _posix_paths_overlap(mount_path.as_posix(), PBS_DATASTORE_ROOT):
         raise RuntimeError(f"Refusing to {action} protected path `{mount_path}`.")
     base_path = default_mount_base_path(None)
     if mount_path.name != "pbs-datastore":
@@ -2787,7 +2998,7 @@ def cleanup_legacy_external_export_objects(settings: AgentSettings | None = None
             name = item.get("id") or item.get("name") or item.get("store")
             if not isinstance(name, str) or not name.startswith("pbo-export-"):
                 continue
-            if name == settings.pbs_auth_id or name == "backup-store":
+            if name == settings.pbs_auth_id or (settings.pbs_datastore and name == settings.pbs_datastore):
                 continue
             remove_result = run_subprocess([*remove_prefix, name], settings.export_timeout_seconds)
             record_command_result(remove_result, command_summaries, stdout_logs, stderr_logs)

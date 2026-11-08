@@ -11,6 +11,15 @@ from app.services.sync_state import get_pbs_sync_state, run_pbs_sync_guarded
 
 router = APIRouter(prefix="/integrations/pbs", tags=["integrations-pbs"])
 
+DATASTORE_NOT_CONFIGURED_MESSAGE = (
+    "PBS_DATASTORE is not configured: set it to the name of your source PBS datastore "
+    "in the app VM .env and in the PBS agent .env, then restart."
+)
+
+
+def _with_datastore_warning(message: str, datastore: str) -> str:
+    return message if datastore else f"{message}. {DATASTORE_NOT_CONFIGURED_MESSAGE}"
+
 
 @router.get("/status", response_model=PBSStatusRead)
 def get_pbs_status() -> PBSStatusRead:
@@ -25,7 +34,7 @@ def get_pbs_status() -> PBSStatusRead:
             connected=False,
             datastore=settings.pbs_datastore,
             verify_ssl=settings.pbs_verify_ssl,
-            message=str(exc),
+            message=_with_datastore_warning(str(exc), settings.pbs_datastore),
             last_sync_at=sync_state.last_sync_at,
             sync_running=sync_state.sync_running,
             last_sync_error=sync_state.last_error,
@@ -35,7 +44,7 @@ def get_pbs_status() -> PBSStatusRead:
             connected=False,
             datastore=settings.pbs_datastore,
             verify_ssl=settings.pbs_verify_ssl,
-            message=f"Unable to reach PBS API: {exc}",
+            message=_with_datastore_warning(f"Unable to reach PBS API: {exc}", settings.pbs_datastore),
             last_sync_at=sync_state.last_sync_at,
             sync_running=sync_state.sync_running,
             last_sync_error=sync_state.last_error,
@@ -45,7 +54,7 @@ def get_pbs_status() -> PBSStatusRead:
         connected=True,
         datastore=settings.pbs_datastore,
         verify_ssl=settings.pbs_verify_ssl,
-        message="Connection to PBS API succeeded",
+        message=_with_datastore_warning("Connection to PBS API succeeded", settings.pbs_datastore),
         last_sync_at=sync_state.last_sync_at,
         sync_running=sync_state.sync_running,
         last_sync_error=sync_state.last_error,

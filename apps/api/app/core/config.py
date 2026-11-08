@@ -69,7 +69,9 @@ class Settings:
     pbs_token_id: str = os.getenv("PBS_TOKEN_ID", "")
     pbs_token_secret: str = os.getenv("PBS_TOKEN_SECRET", "")
     pbs_verify_ssl: bool = parse_bool(os.getenv("PBS_VERIFY_SSL"), default=False)
-    pbs_datastore: str = os.getenv("PBS_DATASTORE", "backup-store")
+    # Source PBS datastore name, chosen by the operator. No default name is
+    # assumed: empty means "not configured" and is reported as such.
+    pbs_datastore: str = os.getenv("PBS_DATASTORE", "").strip()
     host_agent_base_url: str = os.getenv("HOST_AGENT_BASE_URL", "http://proxmox-host:8081")
     host_agent_token: str = os.getenv("HOST_AGENT_TOKEN", "")
     host_agent_timeout_seconds: float = float(os.getenv("HOST_AGENT_TIMEOUT_SECONDS", "7200"))

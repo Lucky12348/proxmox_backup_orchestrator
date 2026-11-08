@@ -11,6 +11,9 @@ from app.models import BackupRunStatus, ExternalBackupMode, ExternalBackupRun, E
 from app.services.external_backup_agent import AgentCommandResult
 from app.services.external_backups import append_external_backup_run_log, build_external_backup_plan, run_external_backup
 
+# Arbitrary on purpose: the product must never assume a source datastore name.
+SOURCE_DATASTORE_NAME = "store8to"
+
 
 class ExternalBackupConflictProgressTests(TestCase):
     def setUp(self) -> None:
@@ -165,7 +168,7 @@ def _run(disk_id: int, status: BackupRunStatus) -> ExternalBackupRun:
         started_at=now,
         finished_at=None,
         target_path="/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore",
-        datastore_name="backup-store",
+        datastore_name=SOURCE_DATASTORE_NAME,
         message=None,
         stdout_log=None,
         stderr_log=None,

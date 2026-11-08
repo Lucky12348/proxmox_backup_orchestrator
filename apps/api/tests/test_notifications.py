@@ -15,6 +15,9 @@ from app.services.external_backups import execute_external_backup_run
 from app.services.maintenance import MaintenanceActionResult, MaintenanceCommandResult, MaintenanceComponentStatus
 from app.services.notifications import NotificationService, notify_low_coverage, validate_notification_settings
 
+# Arbitrary on purpose: the product must never assume a source datastore name.
+SOURCE_DATASTORE_NAME = "store8to"
+
 
 class _SessionContext:
     def __init__(self, session: Session) -> None:
@@ -258,7 +261,7 @@ def _external_run(disk_id: int, status: BackupRunStatus) -> ExternalBackupRun:
         started_at=now,
         finished_at=None,
         target_path="/mnt/pbo/disk/pbs-datastore",
-        datastore_name="backup-store",
+        datastore_name=SOURCE_DATASTORE_NAME,
         message=None,
         stdout_log=None,
         stderr_log=None,

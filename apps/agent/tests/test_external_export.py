@@ -32,6 +32,9 @@ from agent.main import (
     spin_down_disk_result,
 )
 
+# Arbitrary on purpose: the agent must never assume a source datastore name.
+SOURCE_DATASTORE_NAME = "store8to"
+
 
 class ExternalExportDatastoreCreateTests(TestCase):
     def test_qemu_usb_attach_runs_qm_set(self):
@@ -406,7 +409,16 @@ class ExternalExportDatastoreCreateTests(TestCase):
         self.assertIn("/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore", paths)
 
     def test_eject_refuses_unsafe_mount_paths(self):
-        for path in ["/", "/boot", "/boot/efi", "/mnt/datastore/backup-store", "/tmp/WXD2DA1L1E7C/pbs-datastore", "/mnt/pbo/WXD2DA1L1E7C/not-pbs"]:
+        for path in [
+            "/",
+            "/boot",
+            "/boot/efi",
+            "/mnt/datastore",
+            f"/mnt/datastore/{SOURCE_DATASTORE_NAME}",
+            f"/mnt/datastore/{SOURCE_DATASTORE_NAME}/pbs-datastore",
+            "/tmp/WXD2DA1L1E7C/pbs-datastore",
+            "/mnt/pbo/WXD2DA1L1E7C/not-pbs",
+        ]:
             with self.subTest(path=path), self.assertRaises(RuntimeError):
                 _assert_safe_pbo_datastore_mount_path(Path(path))
 

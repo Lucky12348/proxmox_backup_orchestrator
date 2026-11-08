@@ -36,6 +36,7 @@ This phase does not implement hotplug watching yet. It provides:
 - `PBS_TOKEN_ID`
 - `PBS_TOKEN_SECRET`
 - `PBS_FINGERPRINT`
+- `PBS_DATASTORE` (PBS agent role) — see "Source datastore" below
 - `AGENT_EXPORT_TIMEOUT_SECONDS`
 - Optional, Proxmox host role only (defaults match the standard host install):
   `NTFY_NOTIF_TEMPLATES_PATH` (`/etc/ntfy-notif/templates.json`),
@@ -57,6 +58,37 @@ This phase does not implement hotplug watching yet. It provides:
 9. Inspect a disk with `python -m agent.main inspect-disk --disk <serial-or-path>`
 10. Prepare a disk with `python -m agent.main prepare-disk --disk <serial-or-path> --mode preserve_existing_data`
 11. Start the HTTP API with `python -m agent.main serve`
+## Source datastore (`PBS_DATASTORE`)
+
+`PBS_DATASTORE` must be the exact name of the existing PBS datastore that
+exports copy **from** (your main datastore, whatever you named it — list them
+with `proxmox-backup-manager datastore list`). The agent never assumes a name.
+
+At startup the PBS agent checks that this datastore really exists on the PBS
+and logs an error otherwise, e.g.
+`Le datastore source X n'existe pas sur ce PBS ; datastores disponibles : …`.
+The result is exposed in `GET /health` under `source_datastore`
+(`status`: `ok`, `missing`, `not_configured`, `unavailable`, or
+`not_applicable` on the Proxmox host where PBS is not installed), so the
+orchestrator can surface the problem before a scheduled backup instead of
+failing at export time.
+
+> **If you rename or migrate your datastore**, update `PBS_DATASTORE` in the
+> agent's `.env`, then restart the agent HTTP service, e.g.
+> `systemctl restart proxmox-backup-orchestrator-pbs-agent-http.service`
+> (use the unit name you installed; see `docs/INSTALLATION.md`).
+> Update `PBS_DATASTORE` in the app VM `.env` too.
+
+### Format protection
+
+Before any destructive step (`wipefs`, `sgdisk`, `parted`, `mkfs`), the agent
+reads **all** PBS datastores (`proxmox-backup-manager datastore list`) and
+refuses to format a disk if the disk, one of its partitions or one of its
+mounts holds any of them (by path, by the device backing the datastore path,
+or by `backing-device` for PBS removable datastores). It also refuses any
+disk mounted at, under or above `/mnt/datastore`, plus `/`, `/boot`,
+`/boot/efi` and system (LVM/ZFS) disks. If PBS is installed but the datastore
+list cannot be read, formatting is refused (fail closed).
 
 ## Deployment roles
 

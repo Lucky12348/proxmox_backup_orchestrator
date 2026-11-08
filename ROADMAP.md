@@ -421,3 +421,13 @@ audit trail.
   contributors/agents.
 - `Makefile` targets `install`, `dev`, `lint`, `test` are placeholders — wire
   them as part of the CI/CD work in section 2.
+- **Web container runs `vite dev` in production** (`infra/docker/web.Dockerfile`
+  `CMD npm run dev`). Source files are served under stable, unhashed URLs
+  (`/src/styles.css`). Found 2026-10-02: the reverse proxy in front
+  (Nginx Proxy Manager / openresty, "Cache Assets" enabled) served
+  `/src/styles.css` with `Cache-Control: max-age≈21h` while `.tsx` modules
+  came back `no-cache`. After an update the new page markup loaded with the
+  old stylesheet, so the whole Notifications page looked unstyled. Workaround:
+  disable "Cache Assets" on that proxy host and hard-refresh. Proper fix: serve
+  a production build (`vite build` → static server, hashed asset names) from
+  the web container. That changes the deployment, so it needs its own task.

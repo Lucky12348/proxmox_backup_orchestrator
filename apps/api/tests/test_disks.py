@@ -27,6 +27,9 @@ from app.services.disk_identity import canonical_serial_number, serials_match
 from app.services.external_backup_agent import AgentCommandResult
 from app.services.disks import ingest_agent_disk_report, list_preferred_disks, refresh_disk_filesystem_usage_from_pbs
 
+# Arbitrary on purpose: the product must never assume a source datastore name.
+SOURCE_DATASTORE_NAME = "store8to"
+
 
 class DiskInventoryTests(TestCase):
     def setUp(self) -> None:
@@ -513,7 +516,7 @@ class DiskInventoryTests(TestCase):
             enabled=True,
             disk_serial="WD-WXD2DA1L1E7C",
             disk_label_or_model="WDC disk",
-            datastore="backup-store",
+            datastore=SOURCE_DATASTORE_NAME,
             recurrence_type=ScheduledBackupRecurrenceType.ONCE,
             recurrence_config=None,
             timezone="Europe/Paris",
@@ -673,7 +676,7 @@ def _external_run(disk_id: int, status: BackupRunStatus) -> ExternalBackupRun:
         started_at=now,
         finished_at=None,
         target_path="/mnt/pbo/WD-WXD2DA1L1E7C/pbs-datastore",
-        datastore_name="backup-store",
+        datastore_name=SOURCE_DATASTORE_NAME,
         message=None,
         stdout_log=None,
         stderr_log=None,

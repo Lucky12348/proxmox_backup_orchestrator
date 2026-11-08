@@ -41,7 +41,8 @@ const DEFAULT_FORM: EventForm = {
   enabled: true,
   disk_serial: "",
   disk_label_or_model: "",
-  datastore: "backup-store",
+  // Filled from the configured PBS_DATASTORE when opening a new event; never assumed.
+  datastore: "",
   recurrence_type: "weekly",
   recurrence_config: null,
   timezone: "Europe/Paris",
@@ -332,7 +333,7 @@ export function PlanningPage({ data, t }: PlanningPageProps) {
               }}>
                 {data.disks.filter(isUsablePlanningDisk).map((disk) => <option key={disk.serial_number} title={diskLabel(disk, false)} value={disk.serial_number}>{diskOptionLabel(disk)}</option>)}
               </select></label>
-              <label>Datastore<input value={form.datastore} onChange={(event) => setForm({ ...form, datastore: event.target.value })} /></label>
+              <label>Datastore<input required value={form.datastore} onChange={(event) => setForm({ ...form, datastore: event.target.value })} /></label>
               <label>Recurrence<select value={form.recurrence_type} onChange={(event) => setForm({ ...form, recurrence_type: event.target.value as EventForm["recurrence_type"] })}>
                 <option value="once">Une fois</option>
                 <option value="daily">Tous les jours</option>

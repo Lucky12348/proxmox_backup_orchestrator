@@ -92,7 +92,11 @@ export function IntegrationsPage({
             </div>
             <div className="summary-row">
               <span>{t.pbsDatastore}</span>
-              <strong>{data.pbsStatus.datastore}</strong>
+              {data.pbsStatus.datastore ? (
+                <strong>{data.pbsStatus.datastore}</strong>
+              ) : (
+                <strong className="danger-text">{t.pbsDatastoreNotConfigured}</strong>
+              )}
             </div>
             <div className="summary-row">
               <span>{t.pbsSsl}</span>

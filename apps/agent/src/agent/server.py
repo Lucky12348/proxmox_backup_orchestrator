@@ -1,5 +1,6 @@
 import logging
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,10 +11,12 @@ from pydantic import BaseModel, Field
 from agent.main import (
     AgentSettings,
     build_command_failure_payload,
+    check_source_datastore,
     current_timestamp,
     eject_dedicated_pbs_datastore_result,
     filesystem_usage_result,
     inspect_disk_result,
+    log_source_datastore_state,
     maintenance_check_result,
     maintenance_update_result,
     prepare_disk_result,
@@ -46,7 +49,35 @@ from agent.ntfy_notif import (
 logger = logging.getLogger("agent.server")
 SERVER_STARTED_AT = datetime.now(timezone.utc).isoformat()
 
-app = FastAPI(title="Proxmox Backup Orchestrator Agent", version="0.1.0")
+# Result of the check that PBS_DATASTORE really exists on this PBS, run at
+# startup and exposed in /health so the orchestrator can warn before a
+# scheduled backup instead of failing at export time.
+_source_datastore_state: dict[str, Any] | None = None
+
+
+def refresh_source_datastore_state(settings: AgentSettings) -> dict[str, Any]:
+    global _source_datastore_state
+    _source_datastore_state = check_source_datastore(settings)
+    log_source_datastore_state(_source_datastore_state)
+    return _source_datastore_state
+
+
+def current_source_datastore_state(settings: AgentSettings) -> dict[str, Any]:
+    # Re-check only when there is no result yet or PBS could not be queried
+    # (e.g. PBS services still starting when the agent booted). A missing
+    # datastore stays reported until PBS_DATASTORE is fixed and the agent restarted.
+    if _source_datastore_state is None or _source_datastore_state["status"] == "unavailable":
+        return refresh_source_datastore_state(settings)
+    return _source_datastore_state
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    refresh_source_datastore_state(get_settings())
+    yield
+
+
+app = FastAPI(title="Proxmox Backup Orchestrator Agent", version="0.1.0", lifespan=lifespan)
 
 # Proxmox Backup Server datastore names: safe charset only, and never allowed to
 # start with `-` so it can't be parsed as a CLI option by `proxmox-backup-manager`.
@@ -162,6 +193,7 @@ def health(_: None = Depends(require_agent_token), settings: AgentSettings = Dep
         "agent_version": settings.agent_version,
         "observed_at": current_timestamp(),
         "server_started_at": SERVER_STARTED_AT,
+        "source_datastore": current_source_datastore_state(settings),
     }
 
 

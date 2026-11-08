@@ -29,8 +29,13 @@ PROXMOX_HOST_IP=
 PBS_VM_IP=
 PBS_VM_ID=
 PVE_NODE_NAME=
-MAIN_PBS_DATASTORE=backup-store
+MAIN_PBS_DATASTORE=<your-source-datastore>
 ```
+
+`MAIN_PBS_DATASTORE` is the exact name of your existing source PBS datastore (the one
+external disks copy from), whatever you named it. List it on the PBS VM with
+`proxmox-backup-manager datastore list`. No name is assumed anywhere: you will set it as
+`PBS_DATASTORE` on the app VM and on the PBS agent.
 
 ## 2. Install the App VM
 
@@ -85,7 +90,7 @@ PBS_API_URL=https://<pbs-vm>:8007/api2/json
 PBS_TOKEN_ID=root@pam!pbo-pbs
 PBS_TOKEN_SECRET=<secret>
 PBS_VERIFY_SSL=false
-PBS_DATASTORE=backup-store
+PBS_DATASTORE=<your-source-datastore>
 
 PBS_EXECUTION_VM_ID=<pbs-vm-id>
 PBS_EXECUTION_VM_NODE=<node-name>
@@ -243,7 +248,12 @@ AGENT_SERVER_PORT=8091
 AGENT_SERVER_TOKEN=<same-value-as-PBS_AGENT_TOKEN>
 AGENT_REPO_PATH=/opt/proxmox-backup-orchestrator-pbs-agent
 AGENT_MAINTENANCE_TIMEOUT_SECONDS=120
+PBS_DATASTORE=<your-source-datastore>
 ```
+
+`PBS_DATASTORE` must match the source datastore (same value as on the app VM). At startup the
+agent checks that it exists on this PBS, logs an error listing the available datastores if it
+does not, and reports the result under `source_datastore` in `GET /health`.
 
 Protect it:
 
@@ -269,6 +279,8 @@ Health check from the app VM:
 ```bash
 curl -H "X-Agent-Token: <pbs-agent-token>" http://<pbs-vm>:8091/health
 ```
+
+The response must contain `"source_datastore": {"status": "ok", ...}`.
 
 ## 5. Firewall Rules
 
@@ -342,3 +354,7 @@ Run safe eject again from the UI. If necessary, detach the stale slot manually o
 **External datastore reuse vs first format**
 
 First preparation of a new dedicated disk can format the disk. Later runs should reuse the existing filesystem and PBS datastore unless force format is explicitly requested.
+
+**Source datastore renamed or migrated (`source_datastore.status` is `missing`)**
+
+The agent `/health` response and its log list the datastores that really exist on PBS. Update `PBS_DATASTORE` in the PBS agent `.env`, then restart the agent service (`systemctl restart proxmox-backup-orchestrator-pbs-agent-http.service`). Update `PBS_DATASTORE` in the app VM `.env` too and recreate the stack with `docker compose --env-file .env -f infra/docker/docker-compose.yml up --build -d`.
