@@ -13,7 +13,7 @@ from app.services.external_backup_agent import AgentCommandError, get_external_b
 from app.services.external_backup_execution import build_dedicated_datastore_name
 from app.services.external_backups import append_external_backup_run_log
 from app.services.host_agent import get_host_agent_client
-from app.services.notifications import notify_disk_eject_ready
+from app.services.notifications import notify_disk_eject_not_finished, notify_disk_eject_ready
 
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,14 @@ EJECT_SUCCESS_MESSAGE = "Le disque est pr\u00eat. Vous pouvez le retirer."
 PARTIAL_DETACH_FAILURE_MESSAGE = (
     "Datastore d\u00e9mont\u00e9, mais USB encore attach\u00e9 \u00e0 la VM PBS. "
     "Ne retirez pas encore le disque."
+)
+# Agent `error_code` when the write-cache flush timed out: nothing was unmounted
+# or detached, so the disk is still in use and must stay plugged in.
+EJECT_NOT_FINISHED_ERROR_CODE = "eject_not_finished"
+EJECT_NOT_FINISHED_STEP = "eject_not_finished"
+EJECT_NOT_FINISHED_MESSAGE = (
+    "Éjection non terminée : l'écriture des données sur le disque est toujours en cours. "
+    "NE PAS débrancher le disque. Réessayez l'éjection plus tard."
 )
 
 
@@ -66,7 +74,11 @@ def eject_dedicated_external_disk(db: Session, disk_id: int) -> ExternalDisk:
             serial=disk.serial_number,
             datastore_name=datastore_name,
             mount_path=mount_path,
+            run_id=run.id,
         )
+        # The agent appended flush progress to this run through its callback
+        # (another DB session); reload so those lines are not overwritten.
+        db.refresh(run)
         if not result.ok:
             raise AgentCommandError(
                 result.message,
@@ -113,6 +125,22 @@ def eject_dedicated_external_disk(db: Session, disk_id: int) -> ExternalDisk:
         notify_disk_eject_ready(disk.serial_number)
         return disk
     except AgentCommandError as exc:
+        db.refresh(run)
+        if exc.payload.get("error_code") == EJECT_NOT_FINISHED_ERROR_CODE:
+            _finish_eject_activity_failed(
+                db,
+                run,
+                EJECT_NOT_FINISHED_MESSAGE,
+                None,  # progress lines already reached the run log via callbacks
+                exc.stderr_log,
+                exc.command_summary,
+                exc.execution_cwd,
+                exc.return_code,
+                current_step=EJECT_NOT_FINISHED_STEP,
+            )
+            logger.warning("Dedicated PBS datastore eject not finished for disk %s: %s", disk.serial_number, exc)
+            notify_disk_eject_not_finished(disk.serial_number, str(exc))
+            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=EJECT_NOT_FINISHED_MESSAGE) from exc
         _finish_eject_activity_failed(db, run, str(exc), exc.stdout_log, exc.stderr_log, exc.command_summary, exc.execution_cwd, exc.return_code)
         logger.warning("Dedicated PBS datastore eject failed for disk %s: %s", disk.serial_number, exc)
         if "running" in str(exc).casefold() or "sync job" in str(exc).casefold() or "task" in str(exc).casefold():
@@ -211,6 +239,7 @@ def _finish_eject_activity_failed(
     command_summary: str | None,
     execution_cwd: str | None,
     return_code: int | None,
+    current_step: str = "failure",
 ) -> None:
     run.status = BackupRunStatus.FAILED
     run.finished_at = datetime.utcnow()
@@ -220,7 +249,7 @@ def _finish_eject_activity_failed(
     run.command_summary = command_summary
     run.execution_cwd = execution_cwd
     run.return_code = return_code
-    run.current_step = "failure"
+    run.current_step = current_step
     run.progress_message = message
     run.last_log_at = datetime.utcnow()
     db.add(run)

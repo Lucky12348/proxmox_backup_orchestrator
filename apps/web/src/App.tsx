@@ -311,6 +311,8 @@ function AuthenticatedApp() {
                 externalBackupRuns={data.externalBackupRuns}
                 language={language}
                 onCleanupOldRunsRequest={handleActivityCleanupRequest}
+                isEjecting={(diskId) => isSaving(`disk-eject-${diskId}`)}
+                onRetryEject={(diskId) => void ejectDisk(diskId, t.ejectDiskSuccess)}
                 t={t}
               />
             }

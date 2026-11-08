@@ -300,7 +300,9 @@ class _FailingBackupExecutionService:
 
 
 class _FakeEjectBridge:
-    def eject_dedicated_pbs_datastore(self, *, serial: str, datastore_name: str, mount_path: str) -> AgentCommandResult:
+    def eject_dedicated_pbs_datastore(
+        self, *, serial: str, datastore_name: str, mount_path: str, run_id: int | None = None
+    ) -> AgentCommandResult:
         return AgentCommandResult(
             ok=True,
             message="ejected",

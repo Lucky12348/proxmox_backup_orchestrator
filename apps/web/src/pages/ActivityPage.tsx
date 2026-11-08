@@ -5,6 +5,7 @@ import { DataTable } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import { EJECT_NOT_FINISHED_STEP, retryableEjectRunIds } from "../ejectRetry";
 import { formatDateTime, getBackupStatusTone } from "../utils";
 import type { ActivityEvent, ExternalBackupRun } from "../types";
 import type { ActivityPageProps } from "./shared";
@@ -25,10 +26,13 @@ export function ActivityPage({
   cleanupSaving,
   data,
   externalBackupRuns,
+  isEjecting,
   language,
   onCleanupOldRunsRequest,
+  onRetryEject,
   t,
 }: ActivityPageProps) {
+  const retryableRunIds = retryableEjectRunIds(externalBackupRuns);
   return (
     <div className="page-stack">
       <PageHeader title={t.nav.activity} description={t.activityIntro} />
@@ -82,6 +86,21 @@ export function ActivityPage({
                       <span className="muted-text">
                         {t.externalBackupLastLogAt}: {formatDateTime(run.last_log_at, language, t.notAvailable)}
                       </span>
+                      {retryableRunIds.has(run.id) ? (
+                        <>
+                          <p className="danger-text">
+                            <strong>{t.ejectNotFinishedWarning}</strong>
+                          </p>
+                          <button
+                            className="action-button"
+                            disabled={isEjecting(run.disk_id)}
+                            onClick={() => onRetryEject(run.disk_id)}
+                            type="button"
+                          >
+                            {isEjecting(run.disk_id) ? t.ejectingDisk : t.retryEjectAction}
+                          </button>
+                        </>
+                      ) : null}
                     </td>
                     <td>{run.target_path}</td>
                     <td>{formatDateTime(run.started_at, language, t.notAvailable)}</td>
@@ -212,6 +231,12 @@ function formatExternalBackupMode(run: ExternalBackupRun, t: ActivityPageProps["
 function formatExternalBackupStep(step: string | null, t: ActivityPageProps["t"]) {
   if (step === "prepare_dedicated_datastore") {
     return t.externalBackupPrepareDedicatedDatastore;
+  }
+  if (step === "eject_flush") {
+    return t.ejectFlushStep;
+  }
+  if (step === EJECT_NOT_FINISHED_STEP) {
+    return t.ejectNotFinishedStep;
   }
   return step ?? t.notAvailable;
 }

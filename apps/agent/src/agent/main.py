@@ -40,6 +40,20 @@ PBS_DATASTORE_ROOT = "/mnt/datastore"
 # Present on any machine where Proxmox Backup Server is installed.
 PBS_CONFIG_DIR = Path("/etc/proxmox-backup")
 PBS_DATASTORE_LIST_TIMEOUT_SECONDS = 60.0
+EJECT_SYNC_PROGRESS_INTERVAL_SECONDS = 15.0
+PROC_MEMINFO_PATH = Path("/proc/meminfo")
+# Stable code the API uses to recognise an eject stopped before unmounting.
+EJECT_NOT_FINISHED_ERROR_CODE = "eject_not_finished"
+
+
+class EjectNotFinishedError(RuntimeError):
+    """Eject stopped before unmount/detach: the disk must NOT be unplugged."""
+
+    error_code = EJECT_NOT_FINISHED_ERROR_CODE
+
+    def __init__(self, message: str, *, stdout_log: str | None = None) -> None:
+        super().__init__(message)
+        self.stdout_log = stdout_log
 AGENT_PROTOCOL_VERSION = "2026-05-31"
 AGENT_CAPABILITIES = {
     "version-endpoint",
@@ -89,6 +103,10 @@ class AgentSettings:
     datastore_create_timeout_seconds: float = float(
         os.getenv("AGENT_DATASTORE_CREATE_TIMEOUT_SECONDS", "14400")
     )
+    # Max wait for `sync -f <mount>` before unmounting a dedicated disk on eject.
+    # Flushing the write cache to a USB disk after a large export can take
+    # minutes; on timeout the eject stops without unmounting or detaching.
+    eject_sync_timeout_seconds: float = float(os.getenv("AGENT_EJECT_SYNC_TIMEOUT_SECONDS", "1800"))
     loop_datastore_size_gb: int = int(os.getenv("AGENT_LOOP_DATASTORE_SIZE_GB", "500"))
     server_host: str = os.getenv("AGENT_SERVER_HOST", "0.0.0.0")
     server_port: int = int(os.getenv("AGENT_SERVER_PORT", "8081"))
@@ -539,8 +557,12 @@ def eject_dedicated_pbs_datastore_result(
     datastore_name: str,
     mount_path: str,
     settings: AgentSettings | None = None,
+    callback_run_id: int | None = None,
+    callback_url: str | None = None,
+    callback_token: str | None = None,
 ) -> dict[str, Any]:
     settings = settings or AgentSettings()
+    progress = ExternalExportProgress(settings, callback_run_id, callback_url, callback_token)
     clean_serial = serial.strip()
     requested_mount = Path(mount_path)
     expected_mounts = _expected_pbo_datastore_mount_paths(clean_serial)
@@ -567,10 +589,7 @@ def eject_dedicated_pbs_datastore_result(
     if _pbo_export_sync_job_running(manager, settings, command_summaries, stdout_logs, stderr_logs):
         raise RuntimeError("A temporary PBO export sync job is currently running.")
 
-    sync_result = run_subprocess(["sync"], timeout_seconds=60)
-    record_command_result(sync_result, command_summaries, stdout_logs, stderr_logs)
-    if sync_result.returncode != 0:
-        raise RuntimeError(format_command_failure("Failed to sync filesystem buffers before eject.", sync_result))
+    _flush_mount_before_eject(resolved_mount, settings, progress, command_summaries, stdout_logs, stderr_logs)
 
     mounted_source = _find_mount_source(resolved_mount)
     if mounted_source:
@@ -606,6 +625,103 @@ def eject_dedicated_pbs_datastore_result(
         "execution_cwd": str(Path.cwd()),
         "return_code": 0,
     }
+
+
+def _flush_mount_before_eject(
+    mount_path: Path,
+    settings: AgentSettings,
+    progress: ExternalExportProgress,
+    command_summaries: list[str],
+    stdout_logs: list[str],
+    stderr_logs: list[str],
+) -> None:
+    """Flush this disk's filesystem with `sync -f`, waiting up to the eject timeout.
+
+    Logs Dirty/Writeback from /proc/meminfo every 15 s so the UI shows that
+    writing is still in progress. On timeout, raises EjectNotFinishedError so
+    the caller neither unmounts nor detaches the disk.
+    """
+    command = ["sync", "-f", str(mount_path)]
+    command_text = redact_command(command)
+    timeout_seconds = settings.eject_sync_timeout_seconds
+    command_summaries.append(command_text)
+    start_message = (
+        f"Vidage du cache d'écriture vers `{mount_path}` (délai max {int(timeout_seconds)} s). "
+        f"État initial : {_dirty_writeback_summary()}."
+    )
+    stdout_logs.append(start_message)
+    logger.info("Eject flush: %s", start_message)
+    progress.post("eject_flush", start_message, command=command_text)
+
+    started = time.monotonic()
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError("Required command `sync` was not found in PATH.") from exc
+
+    while True:
+        remaining = timeout_seconds - (time.monotonic() - started)
+        if remaining <= 0:
+            process.kill()
+            # `sync` may sit in uninterruptible I/O wait; reap it in the background.
+            threading.Thread(target=process.wait, daemon=True).start()
+            message = (
+                f"Éjection non terminée : l'écriture des données sur le disque n'est pas finie après "
+                f"{int(timeout_seconds)} s ({_dirty_writeback_summary()}). NE PAS débrancher le disque. "
+                "Le datastore est toujours monté et le disque toujours attaché à la VM PBS ; "
+                "réessayez l'éjection plus tard."
+            )
+            stderr_logs.append(message)
+            logger.error("Eject flush timed out for %s: %s", mount_path, message)
+            progress.post("eject_not_finished", message, stderr_line=message)
+            raise EjectNotFinishedError(message, stdout_log="\n".join(stdout_logs))
+        try:
+            stdout, stderr = process.communicate(timeout=min(EJECT_SYNC_PROGRESS_INTERVAL_SECONDS, remaining))
+            break
+        except subprocess.TimeoutExpired:
+            line = (
+                f"Écriture en cours vers le disque ({int(time.monotonic() - started)} s écoulées) : "
+                f"{_dirty_writeback_summary()}."
+            )
+            stdout_logs.append(line)
+            logger.info("Eject flush: %s", line)
+            progress.post("eject_flush", line, stdout_line=line)
+
+    result = SubprocessResult(command, process.returncode, (stdout or "").strip(), (stderr or "").strip())
+    record_command_result(result, [], stdout_logs, stderr_logs)
+    if result.returncode != 0:
+        raise RuntimeError(format_command_failure(f"Failed to flush `{mount_path}` before eject.", result))
+    done = f"Cache d'écriture vidé en {int(time.monotonic() - started)} s."
+    stdout_logs.append(done)
+    progress.post("eject_flush", done)
+
+
+def _dirty_writeback_summary() -> str:
+    """System-wide Dirty/Writeback from /proc/meminfo, for eject progress logs."""
+    try:
+        lines = PROC_MEMINFO_PATH.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return "Dirty/Writeback indisponibles"
+    values: dict[str, int] = {}
+    for line in lines:
+        key, _, rest = line.partition(":")
+        if key in {"Dirty", "Writeback"}:
+            try:
+                values[key] = int(rest.split()[0])
+            except (IndexError, ValueError):
+                continue
+    if not values:
+        return "Dirty/Writeback indisponibles"
+    return ", ".join(f"{key} {_format_kib(values[key])}" for key in ("Dirty", "Writeback") if key in values)
+
+
+def _format_kib(value_kib: int) -> str:
+    amount = float(value_kib)
+    for unit in ("KiB", "MiB", "GiB"):
+        if amount < 1024 or unit == "GiB":
+            return f"{amount:.0f} {unit}" if unit == "KiB" else f"{amount:.1f} {unit}"
+        amount /= 1024
+    return f"{amount:.1f} GiB"
 
 
 def qemu_usb_attach_result(vmid: int, slot: str, host: str, usb3: bool | None = None) -> dict[str, Any]:
@@ -3374,15 +3490,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def build_command_failure_payload(command_name: str, exc: Exception) -> dict[str, Any]:
-    return {
+    payload = {
         "ok": False,
         "message": str(exc),
         "command_summary": command_name,
         "execution_cwd": str(Path.cwd()),
-        "stdout_log": None,
+        "stdout_log": getattr(exc, "stdout_log", None),
         "stderr_log": str(exc),
         "return_code": _infer_error_return_code(exc),
     }
+    error_code = getattr(exc, "error_code", None)
+    if error_code:
+        payload["error_code"] = error_code
+    return payload
 
 
 def emit_command_failure(command_name: str, exc: Exception) -> None:

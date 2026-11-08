@@ -38,6 +38,7 @@ This phase does not implement hotplug watching yet. It provides:
 - `PBS_FINGERPRINT`
 - `PBS_DATASTORE` (PBS agent role) — see "Source datastore" below
 - `AGENT_EXPORT_TIMEOUT_SECONDS`
+- `AGENT_EJECT_SYNC_TIMEOUT_SECONDS` (PBS agent role, default `1800`) — see "Safe eject" below
 - Optional, Proxmox host role only (defaults match the standard host install):
   `NTFY_NOTIF_TEMPLATES_PATH` (`/etc/ntfy-notif/templates.json`),
   `NTFY_NOTIF_BACKUPS_DIR` (`/etc/ntfy-notif/backups`),
@@ -89,6 +90,25 @@ or by `backing-device` for PBS removable datastores). It also refuses any
 disk mounted at, under or above `/mnt/datastore`, plus `/`, `/boot`,
 `/boot/efi` and system (LVM/ZFS) disks. If PBS is installed but the datastore
 list cannot be read, formatting is refused (fail closed).
+
+## Safe eject (`AGENT_EJECT_SYNC_TIMEOUT_SECONDS`)
+
+Before unmounting a dedicated datastore disk, the PBS agent flushes that disk's
+filesystem with `sync -f <mount point>` and waits up to
+`AGENT_EJECT_SYNC_TIMEOUT_SECONDS` (default `1800`). After a large export,
+writing the cached data to a USB disk can take several minutes.
+
+While it waits, the agent logs `Dirty` and `Writeback` from `/proc/meminfo`
+every 15 seconds (system-wide values) and streams them to the eject run, so
+the Activity page shows that writing is still in progress.
+
+If the timeout is reached anyway, the agent does **not** unmount the
+datastore, and the orchestrator does **not** detach the disk from the PBS VM.
+The run ends with the state "Éjection non terminée … NE PAS débrancher le
+disque" (shown in the UI and sent as a high-priority ntfy alert), and a
+**Retry eject** button appears on that run in the Activity page. Keep this
+value below the app VM's `PBS_AGENT_TIMEOUT_SECONDS` (default `7200`), which
+bounds the whole eject request.
 
 ## Deployment roles
 

@@ -449,6 +449,10 @@ export const translations = {
     ejectDiskTitle: "Eject external disk",
     ejectDiskConfirmation: "The external PBS datastore will be unmounted and the disk will be detached from the PBS VM. No backup must be running.",
     ejectDiskSuccess: "The disk is ready. You can remove it.",
+    ejectFlushStep: "Writing cached data to the disk",
+    ejectNotFinishedStep: "Eject not finished",
+    ejectNotFinishedWarning: "Eject not finished: data is still being written. Do NOT unplug the disk.",
+    retryEjectAction: "Retry eject",
   },
   fr: {
     title: "Proxmox Backup Orchestrator",
@@ -898,6 +902,10 @@ export const translations = {
     ejectDiskTitle: "Éjecter le disque externe",
     ejectDiskConfirmation: "Le datastore PBS externe sera démonté et le disque sera détaché de la VM PBS. Aucun backup ne doit être en cours.",
     ejectDiskSuccess: "Le disque est prêt. Vous pouvez le retirer.",
+    ejectFlushStep: "Écriture des données en cache sur le disque",
+    ejectNotFinishedStep: "Éjection non terminée",
+    ejectNotFinishedWarning: "Éjection non terminée : écriture toujours en cours. NE PAS débrancher le disque.",
+    retryEjectAction: "Réessayer l'éjection",
   },
 } as const;
 

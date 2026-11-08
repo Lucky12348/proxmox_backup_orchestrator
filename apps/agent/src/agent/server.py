@@ -129,6 +129,9 @@ class EjectDedicatedPbsDatastoreRequest(BaseModel):
     serial: str = Field(min_length=1)
     datastore_name: str = Field(pattern=DATASTORE_NAME_PATTERN)
     mount_path: str = Field(min_length=1)
+    callback_run_id: int | None = Field(default=None, gt=0)
+    callback_url: str | None = Field(default=None, min_length=1)
+    callback_token: str | None = Field(default=None, min_length=1)
 
 
 class InspectDiskRequest(BaseModel):
@@ -281,6 +284,9 @@ def eject_dedicated_pbs_datastore(
             payload.datastore_name,
             payload.mount_path,
             settings,
+            callback_run_id=payload.callback_run_id,
+            callback_url=payload.callback_url,
+            callback_token=payload.callback_token,
         ),
     )
 

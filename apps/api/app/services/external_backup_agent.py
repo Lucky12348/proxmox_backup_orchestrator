@@ -29,6 +29,7 @@ class AgentCommandError(RuntimeError):
         command_summary: str,
         execution_cwd: str,
         return_code: int | None,
+        payload: dict[str, object] | None = None,
     ) -> None:
         super().__init__(message)
         self.stdout_log = stdout_log
@@ -36,6 +37,8 @@ class AgentCommandError(RuntimeError):
         self.command_summary = command_summary
         self.execution_cwd = execution_cwd
         self.return_code = return_code
+        # JSON body of a failed agent response (e.g. its `error_code`).
+        self.payload = payload or {}
 
 
 class AgentCompatibilityError(RuntimeError):
@@ -164,16 +167,17 @@ class ExternalBackupAgentBridge:
         serial: str,
         datastore_name: str,
         mount_path: str,
+        run_id: int | None = None,
     ) -> AgentCommandResult:
-        return self._run_command(
-            self.pbs_client,
-            "/eject-dedicated-pbs-datastore",
-            {
-                "serial": serial,
-                "datastore_name": datastore_name,
-                "mount_path": mount_path,
-            },
-        )
+        payload: dict[str, object] = {
+            "serial": serial,
+            "datastore_name": datastore_name,
+            "mount_path": mount_path,
+        }
+        if run_id is not None:
+            # Lets the agent stream write-cache flush progress into the eject run log.
+            payload.update(self._callback_payload(run_id))
+        return self._run_command(self.pbs_client, "/eject-dedicated-pbs-datastore", payload)
 
     def cleanup_legacy_external_export_objects(self) -> AgentCommandResult:
         return self._run_command(self.pbs_client, "/cleanup-legacy-external-export-objects", {})
@@ -199,6 +203,7 @@ class ExternalBackupAgentBridge:
                 command_summary=exc.command_summary or f"POST {path}",
                 execution_cwd=exc.execution_cwd or client.base_url,
                 return_code=exc.return_code,
+                payload=exc.payload,
             ) from exc
 
         return AgentCommandResult(

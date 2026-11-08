@@ -64,6 +64,8 @@ export interface ActivityPageProps extends PageCommonProps {
   externalBackupRuns: ExternalBackupRun[];
   cleanupSaving: boolean;
   onCleanupOldRunsRequest: () => void;
+  isEjecting: (diskId: number) => boolean;
+  onRetryEject: (diskId: number) => void;
 }
 
 export interface SettingsPageProps {

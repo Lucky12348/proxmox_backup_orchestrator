@@ -283,6 +283,28 @@ def notify_disk_eject_ready(serial: str) -> None:
         _log_event_error("disk_eject_ready", exc)
 
 
+def notify_disk_eject_not_finished(serial: str, detail: str | None = None) -> None:
+    # Safety warning, so it goes out if either eject or failure alerts are on.
+    event_name = "disk_eject_not_finished"
+    try:
+        settings = get_settings()
+        if not (_event_enabled("disk_eject_ready", settings) or _event_enabled("backup_failure", settings)):
+            _log_event(event_name, False, reason="disabled")
+            return
+        body = f"Ejection du disque {serial} non terminee: ecriture toujours en cours. NE PAS debrancher le disque."
+        if detail:
+            body = f"{body} {_shorten(detail)}"
+        sent = get_notification_service(settings).send(
+            "PBO: Ejection non terminee - NE PAS debrancher",
+            body,
+            priority="high",
+            tags=["warning", "eject"],
+        )
+        _log_event(event_name, sent)
+    except Exception as exc:
+        _log_event_error(event_name, exc)
+
+
 def notify_update_result(component: str, success: bool, message: str | None = None) -> None:
     try:
         settings = get_settings()

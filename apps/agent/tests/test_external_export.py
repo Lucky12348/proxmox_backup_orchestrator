@@ -347,6 +347,7 @@ class ExternalExportDatastoreCreateTests(TestCase):
                 patch("agent.main._pbo_export_sync_job_running", return_value=False),
                 patch("agent.main._find_mount_source", side_effect=["/dev/sdc1", None, None]),
                 patch("agent.main.run_subprocess", side_effect=fake_run_subprocess),
+                patch("agent.main.subprocess.Popen", side_effect=_fake_sync_popen(commands)),
             ):
                 result = eject_dedicated_pbs_datastore_result(
                     "WD-WXD2DA1L1E7C",
@@ -356,7 +357,10 @@ class ExternalExportDatastoreCreateTests(TestCase):
                 )
 
         self.assertTrue(result["ok"])
-        self.assertIn(["sync"], commands)
+        sync_index = next(i for i, command in enumerate(commands) if command[:2] == ["sync", "-f"])
+        umount_index = next(i for i, command in enumerate(commands) if command[0] == "umount")
+        self.assertLess(sync_index, umount_index)
+        self.assertTrue(commands[sync_index][2].endswith("pbs-datastore"))
         self.assertTrue(any(command[0] == "umount" and command[1].endswith("pbs-datastore") for command in commands))
 
     def test_eject_accepts_historical_mount_path_for_canonical_wd_alias(self):
@@ -374,6 +378,7 @@ class ExternalExportDatastoreCreateTests(TestCase):
             patch("agent.main._pbo_export_sync_job_running", return_value=False),
             patch("agent.main._find_mount_source", side_effect=["/dev/sdc1", None, None]),
             patch("agent.main.run_subprocess", side_effect=fake_run_subprocess),
+            patch("agent.main.subprocess.Popen", side_effect=_fake_sync_popen(commands)),
         ):
             result = eject_dedicated_pbs_datastore_result(
                 "WXD2DA1L1E7C",
@@ -453,6 +458,7 @@ class ExternalExportDatastoreCreateTests(TestCase):
                 patch("agent.main._run_fuser_verbose", return_value=fuser_result),
                 patch("agent.main.time.sleep"),
                 patch("agent.main.run_subprocess", side_effect=fake_run_subprocess),
+                patch("agent.main.subprocess.Popen", side_effect=_fake_sync_popen(commands)),
             ):
                 result = eject_dedicated_pbs_datastore_result(
                     "WD-WXD2DA1L1E7C",
@@ -512,6 +518,7 @@ class ExternalExportDatastoreCreateTests(TestCase):
                 patch("agent.main._run_fuser_verbose", return_value=fuser_result),
                 patch("agent.main.time.sleep"),
                 patch("agent.main.run_subprocess", side_effect=fake_run_subprocess),
+                patch("agent.main.subprocess.Popen", side_effect=_fake_sync_popen(commands)),
             ):
                 result = eject_dedicated_pbs_datastore_result(
                     "WD-WXD2DA1L1E7C",
@@ -956,3 +963,28 @@ def _dedicated_test_disk() -> dict[str, object]:
             }
         ],
     }
+
+
+class _FakeSyncProcess:
+    """Stands in for `subprocess.Popen(["sync", "-f", ...])`: finishes immediately."""
+
+    def __init__(self, command: list[str], returncode: int = 0) -> None:
+        self.command = command
+        self.returncode = returncode
+
+    def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+        return "", ""
+
+    def kill(self) -> None:
+        pass
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.returncode
+
+
+def _fake_sync_popen(commands: list[list[str]]):
+    def fake_popen(command: list[str], **kwargs) -> _FakeSyncProcess:
+        commands.append(command)
+        return _FakeSyncProcess(command)
+
+    return fake_popen
